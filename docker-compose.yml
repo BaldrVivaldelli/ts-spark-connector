@@ -1,0 +1,9 @@
+services:
+  spark:
+    build: ./spark-server
+    ports:
+      - "15002:15002"   # Spark Connect gRPC port
+    volumes:
+      - ./example_data:/data    # Donde estará people.tsv
+    environment:
+      - SPARK_NO_DAEMONIZE=true
