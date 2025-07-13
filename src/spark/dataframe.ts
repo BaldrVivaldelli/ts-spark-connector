@@ -28,7 +28,7 @@ export class DataFrame {
         const logicalPlan = compileToProtobuf(this.plan);
 
         const request = {
-            session_id: "00112233-4455-6677-8899-aabbccddeeff",
+            session_id: crypto.randomUUID(),
             user_context: {},
             plan: logicalPlan.plan
         };
