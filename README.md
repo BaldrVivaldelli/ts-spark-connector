@@ -1,12 +1,16 @@
 # ts-spark-connector
 
-TypeScript client for Apache Spark Connect. This project allows you to construct Spark projects in typescript.
+TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html). This project allows you to construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
 
 ## 🚀 Features
 
-- Collect data via Arrow serialization
-- Easy composability via DataFrame-like API
-- Fully written in TypeScript
+- Build Spark logical plans using a fluent, PySpark-style API in TypeScript
+- Evaluate transformations locally or stream results via Arrow
+- Tagless Final DSL design with support for multiple backends
+- Composable, immutable, and strongly typed DataFrame operations
+- Supports column expressions (`col`, `.gt`, `.alias`, `.and`, etc.)
+- Compatible with Spark Connect Protobuf and `spark-submit --class org.apache.spark.sql.connect.service.SparkConnectServer`
+
 
 ## 📦 Installation
 
@@ -65,16 +69,45 @@ const result = await df.filter(df.col("age").gt(30)).select("name", "country").c
 console.log(result);
 ```
 
+## 💡 Column Expressions
+This library supports composable column expressions using a Spark-like DSL:
+```ts
+col("age").gt(18)
+col("country").eq("AR")
+col("age").gt(18).and(col("active").eq(true)).alias("eligible")
+```
+
+## 🧠 Tagless Final DSL
+The internal architecture separates the declarative query description from its interpretation (compilation, debugging, execution, etc.), enabling:
+
+- Static analysis or testable plans
+
+- Reuse across backends (debug, Spark, SQL, etc.)
+
+- DSL reuse without tying to Spark
+
+```ts
+function userQuery<F>(dsl: DataFrameDSL<F>): F {
+    return dsl
+        .select(["name", "age"])
+        .filter("age > 18")
+        .withColumn("eligible", col("age").gt(18).and(col("country").eq("AR")))
+}
+```
+
 ## ✅ Status
 
-| Feature        | Supported |
-|----------------|-----------|
-| CSV Reading    | ✅        |
-| Filtering      | ✅        |
-| Projection     | ✅        |
-| Arrow decoding | ✅ (partial `.show()`) |
-| UDF            | ❌        |
-| Join           | ❌        |
+| Feature            | Supported                                |
+| ------------------ | ---------------------------------------- |
+| CSV Reading        | ✅                                        |
+| Filtering          | ✅                                        |
+| Projection / Alias | ✅                                        |
+| Arrow decoding     | ✅ (`.show()` prints tabular output)      |
+| Column expressions | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.) |
+| DSL abstraction    | ✅ Tagless Final                          |
+| UDF                | ❌                                        |
+| Join               | ❌                                        |
+| Aggregation        | ✅ (with `groupBy().agg({...})`)          |
 
 ## 📄 License
 

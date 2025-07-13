@@ -1,15 +1,68 @@
 # See http://help.github.com/ignore-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+.pnpm-debug.log
+*.tsbuildinfo
 
-# testing
-/coverage
+# Build output
+dist/
+build/
+out/
+coverage/
+.cache/
 
-# production
-/build
-
-# misc
-.DS_Store
+# Environment variables
 .env
-npm-debug.log
+.env.*.local
+.env.local
+
+# Spark-related temp files
+*.arrow
+*.parquet
+
+# Mac system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux/macOS swap files
+*~
+*.swp
+*.swo
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# VS Code
+.vscode/
+
+# WebStorm / JetBrains IDEs
+.idea/
+*.iml
+.idea_modules/
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/dictionaries
+.idea/httpRequests
+
+# Logs
+logs/
+*.log
+*.pid
+*.seed
+
+# Tests
+test-results/
+jest-html-reporters-*.html
+
+# Optional: if you generate compiled protobufs
+src/generated/

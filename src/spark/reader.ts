@@ -1,5 +1,6 @@
 import { DataFrame } from "./dataframe";
 import { LogicalPlan } from "../engine/logicalPlan";
+import {ChainedDataFrame} from "./ChainedDataFrame";
 
 export class DataFrameReader {
     private options: Record<string, string> = {};
@@ -8,14 +9,13 @@ export class DataFrameReader {
         this.options[key] = value;
         return this;
     }
-
-    csv(path: string): DataFrame {
+    csv(path: string): ChainedDataFrame {
         const plan: LogicalPlan = {
             type: "Relation",
             format: "csv",
             options: this.options,
-            path
+            path,
         };
-        return new DataFrame(plan);
+        return new ChainedDataFrame(new DataFrame(plan));
     }
 }

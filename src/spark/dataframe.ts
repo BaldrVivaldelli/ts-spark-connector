@@ -4,25 +4,25 @@ import { sparkGrpcClient } from "../client/sparkClient";
 import {compileToProtobuf} from "../engine/compiler";
 import {printArrowResults} from "../utils/arrowPrinter";
 
+
+export interface DataFrameDSL<F> {
+    select(columns: (string | Column)[]): F;
+    filter(condition: Column): F
+    /*join(other: F, on: string): F
+    groupBy(columns: string[]): GroupedDSL<F>*/
+    withColumn(name: string, column: Column): F
+}
+export interface GroupedDSL<F> {
+    agg(aggregations: Record<string, string>): F
+}
+
 export class DataFrame {
-    constructor(private plan: LogicalPlan) {}
+    constructor(public plan: LogicalPlan) {}
 
-    filter(condition: Column): DataFrame {
-        return new DataFrame({ type: "Filter", input: this.plan, condition: condition.expr });
-    }
-
-    select(...cols: string[]): DataFrame {
-        return new DataFrame({
-            type: "Project",
-            input: this.plan,
-            columns: cols.map(name => col(name).expr)
-        });
-    }
 
     col(name: string): Column {
         return col(name);
     }
-
 
     async collect() {
         const logicalPlan = compileToProtobuf(this.plan);
