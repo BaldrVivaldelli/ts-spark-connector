@@ -1,86 +1,79 @@
-import {col, Column} from "../engine/column";
-import {DataFrame, DataFrameDSL, GroupedDSL} from "./dataframe";
+import {col} from "../engine/column";
+import {DataFrameDSLFactory} from "./dataframe";
 import {Expression, LogicalPlan} from "../engine/logicalPlan";
+import {printArrowResults} from "../utils/arrowPrinter";
+import {compileToProtobuf} from "../engine/compiler";
+import {sparkGrpcClient} from "../client/sparkClient";
 
 
-export function dataframeInterpreter(base: DataFrame): DataFrameDSL<DataFrame> {
+export function dataframeInterpreter(plan: LogicalPlan): DataFrameDSLFactory<LogicalPlan> {
     return {
-        select: (columns: (string | Column)[]): DataFrame => {
-            const exprs = columns.map(c =>
-                typeof c === "string" ? col(c).expr : c.expr
-            );
+        select: (plan, columns)  => ({
+            type: "Project",
+            input: plan,
+            columns: columns.map(c => typeof c === "string" ? col(c).expr : c.expr),
+        }),
 
-            return new DataFrame({
+        filter: (plan, condition)  => ({
+            type: "Filter",
+            input: plan,
+            condition: condition.expr,
+        }),
+
+        withColumn: (plan, name, expr) => {
+            const cols = extractColumns(plan);
+            const updatedCols = replaceOrAppendColumn(cols, name, expr.alias(name).expr);
+            return {
                 type: "Project",
-                input: base.plan,
-                columns: exprs, // <--- esto ahora es Expression[]
-            });
-        }
-        ,
-
-        filter: (condition: Column) =>
-            new DataFrame({
-                type: "Filter",
-                input: base.plan,
-                condition: condition.expr
-            }),
-
-        /*        join: (other: DataFrame, on: string) =>
-                    new DataFrame({
-                        type: "Join",
-                        left: base.plan,
-                        right: other.plan,
-                        on,
-                    }),
-
-                groupBy: (columns: string[]): GroupedDSL<DataFrame> => ({
-                    agg: (aggregations: Record<string, string>): DataFrame => ({
-                        plan: {
-                            type: "Aggregate",
-                            input: {
-                                type: "GroupBy",
-                                input: base.plan,
-                                columns,
-                            },
-                            aggregations,
-                        },
-                    } as DataFrame),
-                }),*/
-
-        withColumn(name: string, expr: Column): DataFrame {
-            let inputPlan = base.plan;
-            let currentCols: Expression[] = [];
-
-            if (inputPlan.type === "Project") {
-                currentCols = inputPlan.columns;
-                inputPlan = inputPlan.input;
-            } else {
-                currentCols = extractColumns(inputPlan);
-            }
-
-            const cleaned = currentCols.filter((c: Expression) => {
-                if (c.type === "Alias") return c.alias !== name;
-                if (c.type === "Column") return c.name !== name;
-                return true;
-            });
-
-            return new DataFrame({
-                type: "Project",
-                input: inputPlan, // 🧠 usamos el "desenvuelto"
-                columns: [...cleaned, expr.alias(name).expr],
-            });
+                input: plan,
+                columns: updatedCols,
+            };
         },
+        async show(plan) {
+            const result = await this.collect(plan);
+            const arrowBuffers = result
+                .filter(r => r.arrow_batch?.data)
+                .map(r => r.arrow_batch.data as Buffer);
+
+            printArrowResults(arrowBuffers);
+        },
+        async collect(plan): Promise<any[]> {
+            const logicalPlan = compileToProtobuf(plan);
+
+            const request = {
+                session_id: crypto.randomUUID(),
+                user_context: {},
+                plan: logicalPlan.plan
+            };
+            return await sparkGrpcClient.executePlan(request);
+        }
     };
 }
 
-function toDebugString(e: Expression): string {
-    if (e.type === "Alias") return `Alias(${e.alias})`;
-    if (e.type === "Column") return `Column(${e.name})`;
-    return `${e.type}`;
+
+
+function replaceOrAppendColumn(
+    columns: Expression[],
+    name: string,
+    newExpr: Expression
+): Expression[] {
+    return [
+        ...columns.filter(c =>
+            c.type === "Alias" ? c.alias !== name :
+                c.type === "Column" ? c.name !== name :
+                    true
+        ),
+        newExpr
+    ];
 }
+
 function extractColumns(plan: LogicalPlan): Expression[] {
     if (plan.type === "Project") {
         return plan.columns;
+    }
+
+    if (plan.type === "Filter") {
+        return extractColumns(plan.input); // <- 🧠 seguir bajando
     }
 
     if (plan.type === "Aggregate") {
@@ -94,8 +87,8 @@ function extractColumns(plan: LogicalPlan): Expression[] {
                 type: "Alias",
                 input: {
                     type: "UnresolvedFunction",
-                    name: fnCall.split("(")[0], // solo función
-                    args: [], // opcional: parse args
+                    name: fnCall.split("(")[0],
+                    args: [], // (podés mejorar esto si parseás bien)
                 },
                 alias,
             })
@@ -105,7 +98,6 @@ function extractColumns(plan: LogicalPlan): Expression[] {
     }
 
     if (plan.type === "GroupBy") {
-
         return plan.groupBy;
     }
 

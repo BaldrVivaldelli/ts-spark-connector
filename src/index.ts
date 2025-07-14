@@ -7,15 +7,17 @@ import { col } from "./engine/column";
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    const result = await df
-        .select(
-            col("name").alias("full_name"),
-            col("age"),
-            col("country"),
-        )
-        .withColumn(
-            "net_income",
-            col("age").gt(18).and(col("country").eq("Argentina"))
-        )
+    await df
+        .select("name", "age", "country")
+        .filter(col("name").eq("Alice").or(col("country").eq("Argentina")))
+        .withColumn("is_adult", col("age").gte(18))
+        .withColumn("greeting", col("name").eq("Alice").alias("greeting")) // solo a modo demostrativo
         .show();
+
+    const rows = await df
+        .select("name", "age")
+        .withColumn("is_senior", col("age").gt(65))
+        .collect();
+
+    console.log("Collected Rows:", rows);
 })();

@@ -1,47 +1,23 @@
-import { LogicalPlan } from "../engine/logicalPlan";
-import { Column, col } from "../engine/column";
-import { sparkGrpcClient } from "../client/sparkClient";
-import {compileToProtobuf} from "../engine/compiler";
-import {printArrowResults} from "../utils/arrowPrinter";
+import { Column } from "../engine/column";
 
 
-export interface DataFrameDSL<F> {
+/*export interface DataFrameDSL<F> {
     select(columns: (string | Column)[]): F;
     filter(condition: Column): F
-    /*join(other: F, on: string): F
-    groupBy(columns: string[]): GroupedDSL<F>*/
+    /!*join(other: F, on: string): F
+    groupBy(columns: string[]): GroupedDSL<F>*!/
     withColumn(name: string, column: Column): F
-}
+    show(): void,
+    collect(): Promise<any[]>;
+    }*/
 export interface GroupedDSL<F> {
     agg(aggregations: Record<string, string>): F
 }
 
-export class DataFrame {
-    constructor(public plan: LogicalPlan) {}
-
-
-    col(name: string): Column {
-        return col(name);
-    }
-
-    async collect() {
-        const logicalPlan = compileToProtobuf(this.plan);
-
-        const request = {
-            session_id: crypto.randomUUID(),
-            user_context: {},
-            plan: logicalPlan.plan
-        };
-
-        return await sparkGrpcClient.executePlan(request);
-    }
-
-    async show() {
-        const result = await this.collect();
-        const arrowBuffers = result
-            .filter(r => r.arrow_batch?.data)
-            .map(r => r.arrow_batch.data as Buffer);
-
-        printArrowResults(arrowBuffers);
-    }
+export interface DataFrameDSLFactory<F> {
+    select(plan: F, columns: (string | Column)[]): F;
+    filter(plan: F, condition: Column): F;
+    withColumn(plan: F, name: string, column: Column): F;
+    collect(plan: F): Promise<any[]>;
+    show(plan: F): void | Promise<void>;
 }

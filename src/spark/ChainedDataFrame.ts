@@ -1,52 +1,39 @@
-import {DataFrame, DataFrameDSL} from "./dataframe";
-import {dataframeInterpreter} from "./dataFrameInterpreter";
+import { DataFrameDSLFactory} from "./dataframe";
 import {Column} from "../engine/column";
-
+import {LogicalPlan} from "../engine/logicalPlan";
+import {dataframeInterpreter} from "./dataFrameInterpreter";
 export class ChainedDataFrame {
-    constructor(private df: DataFrame) {}
+    constructor(private plan: LogicalPlan) {}
 
-    private get dsl(): DataFrameDSL<DataFrame> {
-        return dataframeInterpreter(this.df);
+    private get dsl(): DataFrameDSLFactory<LogicalPlan> {
+        return dataframeInterpreter(this.getPlan());
     }
 
+
     select(...cols: (string | Column)[]): ChainedDataFrame {
-        const df = this.dsl.select(cols);
-        return new ChainedDataFrame(df);
+        const nextPlan = this.dsl.select(this.getPlan(),cols);
+        return new ChainedDataFrame(nextPlan); // ⚠️ no pasamos DataFrame, sino el nuevo LogicalPlan
     }
 
     filter(condition: Column): ChainedDataFrame {
-        const next = this.dsl.filter(condition);
-        return new ChainedDataFrame(next);
+        const nextPlan = this.dsl.filter(this.getPlan(),condition);
+        return new ChainedDataFrame(nextPlan);
     }
-
-/*    groupBy(...columns: string[]) {
-        const base = this;
-        return {
-            agg(aggs: Record<string, string>) {
-                const grouped = base.dsl.groupBy(columns).agg(aggs);
-                return new ChainedDataFrame(grouped);
-            },
-        };
-    }*/
 
     withColumn(name: string, column: Column): ChainedDataFrame {
-        const next = this.dsl.withColumn(name, column);
-        return new ChainedDataFrame(next);
+        const nextPlan = this.dsl.withColumn(this.getPlan(),name, column);
+        return new ChainedDataFrame(nextPlan);
     }
 
-    show(){
-        return this.df.show();
+    show() {
+        this.dsl.show(this.getPlan());
     }
 
-    col(name: string): Column {
-        return this.df.col(name); // usás la función global internamente
-    }
-    collect() {
-        return this.df.collect();
+    async collect(){
+        return await this.dsl.collect(this.getPlan());
     }
 
-    // Si querés exponer lógica interna
     getPlan() {
-        return this.df["plan"];
+        return this.plan;
     }
 }

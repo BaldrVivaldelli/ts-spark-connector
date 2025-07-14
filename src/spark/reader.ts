@@ -1,4 +1,3 @@
-import { DataFrame } from "./dataframe";
 import { LogicalPlan } from "../engine/logicalPlan";
 import {ChainedDataFrame} from "./ChainedDataFrame";
 
@@ -16,6 +15,6 @@ export class DataFrameReader {
             options: this.options,
             path,
         };
-        return new ChainedDataFrame(new DataFrame(plan));
+        return new ChainedDataFrame(plan);
     }
 }
