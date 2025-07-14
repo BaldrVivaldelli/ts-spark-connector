@@ -10,6 +10,7 @@ import { Column } from "../engine/column";
     show(): void,
     collect(): Promise<any[]>;
     }*/
+
 export interface GroupedDSL<F> {
     agg(aggregations: Record<string, string>): F
 }

@@ -7,7 +7,7 @@ import { col } from "./engine/column";
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    await df
+    df
         .select("name", "age", "country")
         .filter(col("name").eq("Alice").or(col("country").eq("Argentina")))
         .withColumn("is_adult", col("age").gte(18))
