@@ -48,9 +48,17 @@ export function dataframeInterpreter(base: DataFrame): DataFrameDSL<DataFrame> {
                 }),*/
 
         withColumn(name: string, expr: Column): DataFrame {
-            const prevCols = extractColumns(base.plan);
+            let inputPlan = base.plan;
+            let currentCols: Expression[] = [];
 
-            const cleaned = prevCols.filter((c: Expression) => {
+            if (inputPlan.type === "Project") {
+                currentCols = inputPlan.columns;
+                inputPlan = inputPlan.input;
+            } else {
+                currentCols = extractColumns(inputPlan);
+            }
+
+            const cleaned = currentCols.filter((c: Expression) => {
                 if (c.type === "Alias") return c.alias !== name;
                 if (c.type === "Column") return c.name !== name;
                 return true;
@@ -58,16 +66,18 @@ export function dataframeInterpreter(base: DataFrame): DataFrameDSL<DataFrame> {
 
             return new DataFrame({
                 type: "Project",
-                input: base.plan,
-                columns: [
-                    ...cleaned,
-                    expr.alias(name).expr,
-                ],
+                input: inputPlan, // 🧠 usamos el "desenvuelto"
+                columns: [...cleaned, expr.alias(name).expr],
             });
         },
     };
 }
 
+function toDebugString(e: Expression): string {
+    if (e.type === "Alias") return `Alias(${e.alias})`;
+    if (e.type === "Column") return `Column(${e.name})`;
+    return `${e.type}`;
+}
 function extractColumns(plan: LogicalPlan): Expression[] {
     if (plan.type === "Project") {
         return plan.columns;
