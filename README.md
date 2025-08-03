@@ -1,8 +1,10 @@
 # ts-spark-connector
+🌱 **Status: Alpha – Early growth stage**
 
 TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html). This project allows you to construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
 
 ## 🚀 Features
+
 
 - Build Spark logical plans using a fluent, PySpark-style API in TypeScript
 - Evaluate transformations locally or stream results via Arrow
