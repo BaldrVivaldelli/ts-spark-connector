@@ -29,6 +29,13 @@ export function dataframeInterpreter(plan: LogicalPlan): DataFrameDSLFactory<Log
                 columns: updatedCols,
             };
         },
+        join: (left, right, on) => ({
+            type: "Join",
+            left,
+            right,
+            on: on.expr,
+            joinType: "INNER",
+        }),
         async show(plan) {
             const result = await this.collect(plan);
             const arrowBuffers = result
@@ -46,7 +53,7 @@ export function dataframeInterpreter(plan: LogicalPlan): DataFrameDSLFactory<Log
                 plan: logicalPlan.plan
             };
             return await sparkGrpcClient.executePlan(request);
-        }
+        },
     };
 }
 

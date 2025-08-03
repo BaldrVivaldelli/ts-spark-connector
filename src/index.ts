@@ -2,22 +2,21 @@ import { spark } from "./spark/session";
 import { col } from "./engine/column";
 
 (async () => {
-    const df = spark.read
+    // Leemos el people.tsv (con columna id)
+    const people = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    df
-        .select("name", "age", "country")
-        .filter(col("name").eq("Alice").or(col("country").eq("Argentina")))
-        .withColumn("is_adult", col("age").gte(18))
-        .withColumn("greeting", col("name").eq("Alice").alias("greeting")) // solo a modo demostrativo
+    // Leemos purchases.tsv (con columna user_id)
+    const purchases = spark.read
+        .option("delimiter", "\t")
+        .option("header", "true")
+        .csv("/data/purchases.tsv");
+
+    people
+        .join(purchases, col("id").eq(col("user_id")))
+        .select("name", "product", "amount")
+        .filter(col("amount").gt(100))
         .show();
-
-    const rows = await df
-        .select("name", "age")
-        .withColumn("is_senior", col("age").gt(65))
-        .collect();
-
-    console.log("Collected Rows:", rows);
 })();

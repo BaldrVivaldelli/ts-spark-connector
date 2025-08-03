@@ -15,6 +15,12 @@ export class ChainedDataFrame {
         return new ChainedDataFrame(nextPlan); // ⚠️ no pasamos DataFrame, sino el nuevo LogicalPlan
     }
 
+
+    join(right: ChainedDataFrame, condition: Column): ChainedDataFrame {
+        const joinedPlan = this.dsl.join(this.plan, right.plan, condition);
+        return new ChainedDataFrame(joinedPlan);
+    }
+
     filter(condition: Column): ChainedDataFrame {
         const nextPlan = this.dsl.filter(this.getPlan(),condition);
         return new ChainedDataFrame(nextPlan);

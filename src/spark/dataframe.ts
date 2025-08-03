@@ -21,4 +21,5 @@ export interface DataFrameDSLFactory<F> {
     withColumn(plan: F, name: string, column: Column): F;
     collect(plan: F): Promise<any[]>;
     show(plan: F): void | Promise<void>;
+    join(left: F, right: F, on: Column): F;
 }

@@ -1,4 +1,5 @@
 import {LogicalPlan, Expression} from "./logicalPlan";
+import {toProtoJoinType, JoinTypeInput, DEFAULT_JOIN_TYPE} from "./sparkConnectEnums";
 
 function parseFunction(expr: string): Expression {
     const match = expr.match(/^(\w+)\(([^)]+)\)$/);
@@ -57,10 +58,11 @@ function compileAggregate(p: LogicalPlan & { type: "Aggregate" }) {
     };
 }
 
+
 function compileJoin(p: LogicalPlan & { type: "Join" }) {
     return {
         join: {
-            join_type: "Inner",
+            join_type: toProtoJoinType(p.joinType ?? DEFAULT_JOIN_TYPE),
             left: compileRelation(p.left).relation,
             right: compileRelation(p.right).relation,
             condition: compileExpression(p.on),

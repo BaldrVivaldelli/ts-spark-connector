@@ -1,4 +1,4 @@
-name	age	country
-Alice	30	USA
-Bob	25	Canada
-Carol	40	Argentina
+id	name	age	country
+1	Alice	30	USA
+2	Bob	25	Canada
+3	Carol	40	Argentina

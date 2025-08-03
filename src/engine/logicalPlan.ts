@@ -1,3 +1,5 @@
+import {JoinTypeInput} from "./sparkConnectEnums";
+
 export type GroupBy = {
     type: "GroupBy";
     input: LogicalPlan;
@@ -9,7 +11,7 @@ export type LogicalPlan =
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
     | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, string> }
     | { type: "GroupBy"; input: LogicalPlan; groupBy: Expression[] }
-    | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression };
+    | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression;  joinType: JoinTypeInput; };
 
 export type Expression =
     | { type: "Column"; name: string }
