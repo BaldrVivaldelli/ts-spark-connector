@@ -1,18 +1,42 @@
 {
   "name": "ts-spark-connector",
-  "version": "1.0.0",
-  "main": "index.js",
+  "version": "0.1.0-alpha.0",
+  "description": "A TypeScript client for Apache Spark Connect. Build Spark logical plans entirely in TypeScript.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "start": "ts-node src/index.ts",
     "build": "tsc",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "spark",
+    "spark-connect",
+    "typescript",
+    "dataframe",
+    "bigdata",
+    "dsl",
+    "apache",
+    "grpc"
+  ],
+  "author": "Augusto Vivaldelli",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BaldrVivaldelli/ts-spark-connector"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "devDependencies": {
-    "@types/node": "^24.0.13",
+    "@types/node": "^20.11.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   },
