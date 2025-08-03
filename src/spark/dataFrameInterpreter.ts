@@ -1,6 +1,6 @@
 import {col} from "../engine/column";
 import {DataFrameDSLFactory} from "./dataframe";
-import {Expression, LogicalPlan} from "../engine/logicalPlan";
+import {Expression, GroupBy, LogicalPlan} from "../engine/logicalPlan";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {compileToProtobuf} from "../engine/compiler";
 import {sparkGrpcClient} from "../client/sparkClient";
@@ -37,6 +37,26 @@ export function dataframeInterpreter(plan: LogicalPlan, session:SparkSession): D
             on: on.expr,
             joinType: "INNER",
         }),
+
+        groupBy(plan, cols) {
+            const groupByExprs =
+                plan.type === "GroupBy" ? plan.groupBy : [];
+
+            const groupedNode: GroupBy = {
+                type: "GroupBy",
+                input: plan,
+                expressions: groupByExprs, // ✅ campo correcto
+            };
+
+            return {
+                agg: (aggregations: Record<string, string>): LogicalPlan => ({
+                    type: "Aggregate",
+                    input: groupedNode,
+                    aggregations,
+                }),
+            };
+        },
+
         async show(plan) {
             const result = await this.collect(plan);
             const arrowBuffers = result

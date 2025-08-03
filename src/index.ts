@@ -18,5 +18,10 @@ import { col } from "./engine/column";
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
         .filter(col("amount").gt(100))
+        .groupBy("name")
+        .agg({
+            total_spent: "sum(amount)",
+            items_purchased: "count(product)"
+        })
         .show();
 })();

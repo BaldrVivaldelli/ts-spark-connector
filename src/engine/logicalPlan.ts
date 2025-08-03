@@ -1,15 +1,15 @@
-import {JoinTypeInput} from "./sparkConnectEnums";
+import {GroupTypeInput, JoinTypeInput} from "./sparkConnectEnums";
 
 export type GroupBy = {
     type: "GroupBy";
     input: LogicalPlan;
-    columns: Expression[];
+    expressions: Expression[];
 };
 export type LogicalPlan =
     | { type: "Relation"; format: string; path: string; options?: Record<string, string> }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
-    | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, string> }
+    | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, string>; groupType?: GroupTypeInput; }
     | { type: "GroupBy"; input: LogicalPlan; groupBy: Expression[] }
     | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression;  joinType: JoinTypeInput; };
 

@@ -10,7 +10,8 @@ TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/lates
 - Composable, immutable, and strongly typed DataFrame operations
 - Supports column expressions (`col`, `.gt`, `.alias`, `.and`, etc.)
 - Compatible with Spark Connect Protobuf and `spark-submit --class org.apache.spark.sql.connect.service.SparkConnectServer`
-
+- Support for Spark-compatible joins with configurable join types
+- Session-aware execution without relying on global singletons
 
 ## 📦 Installation
 
@@ -57,20 +58,38 @@ The `entrypoint.sh`:
   /opt/bitnami/spark/jars/spark-connect_2.12-4.0.0.jar
 ```
 
-Make sure `example_data/people.tsv` exists.
+Make sure `example_data/people.tsv` and `purchases.tsv` exist.
 
 ## 🧪 Example Usage
 
 ```ts
-import { session } from "./src/session";
+import { createSparkSession } from "./src/spark/session";
+import { col } from "./src/engine/column";
 
-const df = session.read.csv("/data/people.tsv", { delimiter: "\t", header: "true" });
-const result = await df.filter(df.col("age").gt(30)).select("name", "country").collect();
-console.log(result);
+const spark = createSparkSession(); // Session-aware
+
+const people = spark.read
+    .option("delimiter", "\t")
+    .option("header", "true")
+    .csv("/data/people.tsv");
+
+const purchases = spark.read
+    .option("delimiter", "\t")
+    .option("header", "true")
+    .csv("/data/purchases.tsv");
+
+const result = people
+    .join(purchases, col("id").eq(col("user_id")), "left")
+    .select("name", "product", "amount")
+    .filter(col("amount").gt(100));
+
+await result.show();
 ```
 
 ## 💡 Column Expressions
+
 This library supports composable column expressions using a Spark-like DSL:
+
 ```ts
 col("age").gt(18)
 col("country").eq("AR")
@@ -78,12 +97,11 @@ col("age").gt(18).and(col("active").eq(true)).alias("eligible")
 ```
 
 ## 🧠 Tagless Final DSL
+
 The internal architecture separates the declarative query description from its interpretation (compilation, debugging, execution, etc.), enabling:
 
 - Static analysis or testable plans
-
 - Reuse across backends (debug, Spark, SQL, etc.)
-
 - DSL reuse without tying to Spark
 
 ```ts
@@ -98,7 +116,7 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 ## ✅ Status
 
 | Feature            | Supported                                |
-| ------------------ | ---------------------------------------- |
+|--------------------|-------------------------------------------|
 | CSV Reading        | ✅                                        |
 | Filtering          | ✅                                        |
 | Projection / Alias | ✅                                        |
@@ -106,9 +124,9 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | Column expressions | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.) |
 | DSL abstraction    | ✅ Tagless Final                          |
 | UDF                | ❌                                        |
-| Join               | ❌                                        |
+| Join               | ✅ Supports inner, left, right, outer     |
 | Aggregation        | ✅ (with `groupBy().agg({...})`)          |
 
 ## 📄 License
 
-APACHE or the one that is opensource. The main idea is to democracy the access of spark features to TS ecosystem
+APACHE or the one that is opensource. The main idea is to democratize access to Spark features from the TypeScript ecosystem.

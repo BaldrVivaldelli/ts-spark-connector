@@ -26,4 +26,8 @@ export class SparkSession {
 }
 
 // instancia única global
-export const spark = new SparkSession();
+export const spark = createSparkSession();
+
+export function createSparkSession(sessionId?: string): SparkSession {
+    return new SparkSession(sessionId);
+}
