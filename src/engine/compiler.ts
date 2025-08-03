@@ -1,4 +1,5 @@
 import {LogicalPlan, Expression} from "./logicalPlan";
+import {toProtoJoinType, JoinTypeInput, DEFAULT_JOIN_TYPE, toProtoGroupType} from "./sparkConnectEnums";
 
 function parseFunction(expr: string): Expression {
     const match = expr.match(/^(\w+)\(([^)]+)\)$/);
@@ -46,21 +47,23 @@ function compileAggregate(p: LogicalPlan & { type: "Aggregate" }) {
     return {
         aggregate: {
             input: compileRelation(groupBy.input).relation,
-            grouping_expressions: groupBy.columns.map(compileExpression),
+            grouping_expressions: groupBy.expressions.map(compileExpression),
+            group_type: toProtoGroupType(p.groupType ?? "groupby"),
             aggregate_expressions: Object.entries(p.aggregations).map(([alias, rawFn]) => ({
                 alias: {
                     expr: compileExpression(parseFunction(rawFn)),
-                    name: alias,
+                    name: [alias],
                 },
             })),
         },
     };
 }
 
+
 function compileJoin(p: LogicalPlan & { type: "Join" }) {
     return {
         join: {
-            join_type: "Inner",
+            join_type: toProtoJoinType(p.joinType ?? DEFAULT_JOIN_TYPE),
             left: compileRelation(p.left).relation,
             right: compileRelation(p.right).relation,
             condition: compileExpression(p.on),
@@ -131,7 +134,13 @@ export function compileExpression(expr: Expression): any {
                         name: [e.alias],
                     },
                 };
-
+            case "UnresolvedFunction":
+                return {
+                    unresolved_function: {
+                        function_name: e.name,
+                        arguments: e.args.map(visit),
+                    },
+                };
             default:
                 throw new Error(`Unsupported expression type: ${(e as any).type}`);
         }

@@ -1,12 +1,13 @@
 import {col} from "../engine/column";
 import {DataFrameDSLFactory} from "./dataframe";
-import {Expression, LogicalPlan} from "../engine/logicalPlan";
+import {Expression, GroupBy, LogicalPlan} from "../engine/logicalPlan";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {compileToProtobuf} from "../engine/compiler";
 import {sparkGrpcClient} from "../client/sparkClient";
+import {SparkSession} from "./session";
 
 
-export function dataframeInterpreter(plan: LogicalPlan): DataFrameDSLFactory<LogicalPlan> {
+export function dataframeInterpreter(plan: LogicalPlan, session:SparkSession): DataFrameDSLFactory<LogicalPlan> {
     return {
         select: (plan, columns)  => ({
             type: "Project",
@@ -29,24 +30,49 @@ export function dataframeInterpreter(plan: LogicalPlan): DataFrameDSLFactory<Log
                 columns: updatedCols,
             };
         },
+        join: (left, right, on) => ({
+            type: "Join",
+            left,
+            right,
+            on: on.expr,
+            joinType: "INNER",
+        }),
+
+        groupBy(plan, cols) {
+            const groupByExprs =
+                plan.type === "GroupBy" ? plan.groupBy : [];
+
+            const groupedNode: GroupBy = {
+                type: "GroupBy",
+                input: plan,
+                expressions: groupByExprs, // ✅ campo correcto
+            };
+
+            return {
+                agg: (aggregations: Record<string, string>): LogicalPlan => ({
+                    type: "Aggregate",
+                    input: groupedNode,
+                    aggregations,
+                }),
+            };
+        },
+
         async show(plan) {
             const result = await this.collect(plan);
             const arrowBuffers = result
                 .filter(r => r.arrow_batch?.data)
                 .map(r => r.arrow_batch.data as Buffer);
-
             printArrowResults(arrowBuffers);
         },
         async collect(plan): Promise<any[]> {
             const logicalPlan = compileToProtobuf(plan);
-
             const request = {
-                session_id: crypto.randomUUID(),
-                user_context: {},
+                session_id: session.getSessionId(),
+                user_context: session.getUserContext(),
                 plan: logicalPlan.plan
             };
             return await sparkGrpcClient.executePlan(request);
-        }
+        },
     };
 }
 
