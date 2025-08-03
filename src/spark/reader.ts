@@ -1,20 +1,25 @@
 import { LogicalPlan } from "../engine/logicalPlan";
 import {ChainedDataFrame} from "./ChainedDataFrame";
+import {SparkSession} from "./session";
 
 export class DataFrameReader {
-    private options: Record<string, string> = {};
+    constructor(private session: SparkSession) {}
 
-    option(key: string, value: string): DataFrameReader {
-        this.options[key] = value;
-        return this;
-    }
     csv(path: string): ChainedDataFrame {
         const plan: LogicalPlan = {
             type: "Relation",
             format: "csv",
-            options: this.options,
             path,
+            options: this.options,
         };
-        return new ChainedDataFrame(plan);
+
+        return new ChainedDataFrame(plan,this.session);
     }
+
+    option(key: string, value: string): this {
+        this.options[key] = value;
+        return this;
+    }
+
+    private options: Record<string, string> = {};
 }

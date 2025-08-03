@@ -6,7 +6,7 @@ export class SparkSession {
     private readonly sessionId: string;
     private userContext: Record<string, any> = {};
 
-    read = new DataFrameReader();
+    read = new DataFrameReader(this);
 
     constructor(sessionId?: string) {
         this.sessionId = sessionId ?? crypto.randomUUID();
