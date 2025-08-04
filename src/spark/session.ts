@@ -1,4 +1,3 @@
-// src/spark/session.ts
 import { DataFrameReader } from "./reader";
 import crypto from "crypto";
 
@@ -25,7 +24,6 @@ export class SparkSession {
     }
 }
 
-// instancia única global
 export const spark = createSparkSession();
 
 export function createSparkSession(sessionId?: string): SparkSession {

@@ -2,13 +2,11 @@ import { spark } from "./spark/session";
 import { col } from "./engine/column";
 
 (async () => {
-    // Leemos el people.tsv (con columna id)
     const people = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    // Leemos purchases.tsv (con columna user_id)
     const purchases = spark.read
         .option("delimiter", "\t")
         .option("header", "true")

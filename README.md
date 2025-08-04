@@ -1,3 +1,8 @@
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/BaldrVivaldelli/ts-spark-connector/assets/logo.png" alt="ts-spark-connector logo" width="300" />
+</p>
+
 # ts-spark-connector
 🌱 **Status: Alpha – Early growth stage**
 

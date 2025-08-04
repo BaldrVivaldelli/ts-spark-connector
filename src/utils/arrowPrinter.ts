@@ -21,12 +21,10 @@ export function printArrowResults(buffers: Buffer[]) {
             }))
         );
 
-        // Header
         const header = columns.map((name, i) => name.padEnd(colWidths[i])).join(" | ");
         console.log(header);
         console.log(colWidths.map(w => "-".repeat(w)).join("-+-"));
 
-        // Rows
         for (let i = 0; i < table.numRows; i++) {
             const row = colVectors.map((vec, j) => {
                 const val = vec.get(i);
@@ -34,7 +32,5 @@ export function printArrowResults(buffers: Buffer[]) {
             });
             console.log(row.join(" | "));
         }
-
-        console.log(); // Separador entre tablas
     }
 }

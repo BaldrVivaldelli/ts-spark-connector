@@ -3,7 +3,6 @@
 
 export const DEFAULT_JOIN_TYPE: JoinTypeInput = "INNER";
 
-// Enum exacto como lo espera Spark Connect
 export enum JoinType {
     JOIN_TYPE_INNER = 1,
     JOIN_TYPE_LEFT_OUTER = 2,
@@ -13,7 +12,6 @@ export enum JoinType {
     JOIN_TYPE_LEFT_ANTI = 6,
 }
 
-// Inputs válidos para el usuario (como en PySpark)
 export type JoinTypeInput =
     | "INNER"
     | "LEFT"
@@ -26,7 +24,6 @@ export type JoinTypeInput =
     | "LEFT_SEMI"
     | "LEFT_ANTI";
 
-// Mapeo de strings legibles a enums gRPC
 const joinTypeMap: Record<JoinTypeInput, JoinType> = {
     INNER: JoinType.JOIN_TYPE_INNER,
     LEFT: JoinType.JOIN_TYPE_LEFT_OUTER,
@@ -40,7 +37,6 @@ const joinTypeMap: Record<JoinTypeInput, JoinType> = {
     LEFT_ANTI: JoinType.JOIN_TYPE_LEFT_ANTI,
 };
 
-// Función para convertir el input del usuario al enum numérico
 export function toProtoJoinType(joinType: JoinTypeInput): number {
     const normalized = joinType as JoinTypeInput;
     const result = joinTypeMap[normalized];
@@ -55,7 +51,7 @@ export enum GroupType {
     GROUP_TYPE_GROUPBY = 1,
     GROUP_TYPE_ROLLUP = 2,
     GROUP_TYPE_CUBE = 3,
-    GROUP_TYPE_PIVOT = 4, // si algún día lo soportás
+    GROUP_TYPE_PIVOT = 4,
 }
 
 export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot";

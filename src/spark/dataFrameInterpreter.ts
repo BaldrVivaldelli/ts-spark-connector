@@ -45,7 +45,7 @@ export function dataframeInterpreter(plan: LogicalPlan, session:SparkSession): D
             const groupedNode: GroupBy = {
                 type: "GroupBy",
                 input: plan,
-                expressions: groupByExprs, // ✅ campo correcto
+                expressions: groupByExprs,
             };
 
             return {
@@ -99,7 +99,7 @@ function extractColumns(plan: LogicalPlan): Expression[] {
     }
 
     if (plan.type === "Filter") {
-        return extractColumns(plan.input); // <- 🧠 seguir bajando
+        return extractColumns(plan.input);
     }
 
     if (plan.type === "Aggregate") {
@@ -114,7 +114,7 @@ function extractColumns(plan: LogicalPlan): Expression[] {
                 input: {
                     type: "UnresolvedFunction",
                     name: fnCall.split("(")[0],
-                    args: [], // (podés mejorar esto si parseás bien)
+                    args: [],
                 },
                 alias,
             })

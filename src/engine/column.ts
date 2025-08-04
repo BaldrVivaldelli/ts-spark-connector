@@ -66,7 +66,6 @@ export class Column {
         });
     }
 
-    // Alias
     alias(name: string): Column {
         return new Column({
             type: "Alias",

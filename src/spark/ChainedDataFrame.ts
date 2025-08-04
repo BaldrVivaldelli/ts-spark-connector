@@ -13,7 +13,6 @@ export class ChainedDataFrame {
         return dataframeInterpreter(this.getPlan(), this.getSession());
     }
     private wrap(plan: LogicalPlan,sparkSession:SparkSession): ChainedDataFrame {
-        //console.debug("[WRAP] Plan", JSON.stringify(plan, null, 2));
         return new ChainedDataFrame(plan, sparkSession);
     }
     select(...cols: (string | Column)[]): ChainedDataFrame {
@@ -42,7 +41,7 @@ export class ChainedDataFrame {
         return {
             agg: (aggregations: Record<string, string>) => {
                 const plan = grouped.agg(aggregations);
-                return this.wrap(plan,this.getSession()); // Devuelve un nuevo ChainedDataFrame
+                return this.wrap(plan,this.getSession());
             }
         };
     }
