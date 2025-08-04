@@ -117,17 +117,27 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 
 ## ✅ Status
 
-| Feature            | Supported                                |
-|--------------------|-------------------------------------------|
-| CSV Reading        | ✅                                        |
-| Filtering          | ✅                                        |
-| Projection / Alias | ✅                                        |
-| Arrow decoding     | ✅ (`.show()` prints tabular output)      |
-| Column expressions | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.) |
-| DSL abstraction    | ✅ Tagless Final                          |
-| UDF                | ❌                                        |
-| Join               | ✅ Supports inner, left, right, outer     |
-| Aggregation        | ✅ (with `groupBy().agg({...})`)          |
+| Feature               | Supported                                          |
+|------------------------|-----------------------------------------------------|
+| CSV Reading           | ✅                                                   |
+| Filtering             | ✅                                                   |
+| Projection / Alias    | ✅                                                   |
+| Arrow decoding        | ✅ (`.show()` prints tabular output)                |
+| Column expressions    | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.)           |
+| DSL abstraction       | ✅ Tagless Final                                     |
+| Join                  | ✅ Supports inner, left, right, outer                |
+| Aggregation           | ✅ (with `groupBy().agg({...})`)                    |
+| Grouped count         | 🚧 Planned (`groupBy(...).count()`)                 |
+| Column renaming       | 🚧 Planned (`withColumnRenamed(...)`)               |
+| Sorting               | 🚧 Planned (`orderBy(...)`, `sort(...)`)            |
+| Limit & Take          | 🚧 Planned (`limit(n)`, `take(n)`)                  |
+| Distinct              | 🚧 Planned                                          |
+| Union / UnionAll      | 🚧 Planned                                          |
+| UDF                   | ❌ Not yet                                          |
+| Type declarations     | ✅ (`.d.ts` files published to NPM)                |
+| Tests (Unit + Integration) | 🚧 In progress                                 |
+| Modular compiler core | ✅ (`engine/` separated from Spark backend)         |
+| NPM Package           | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) |
 
 ## 📄 License
 
