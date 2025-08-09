@@ -1,6 +1,6 @@
 {
   "name": "ts-spark-connector",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A TypeScript client for Apache Spark Connect. Build Spark logical plans entirely in TypeScript.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
