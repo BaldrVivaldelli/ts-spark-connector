@@ -1,6 +1,6 @@
-user_id	product	amount
-1	Macbook	1200
-1	Mouse	25
-2	Monitor	300
-3	Keyboard	80
-3	Chair	200
+user_id	product	amount	year
+1	Macbook	1200	2024
+1	Mouse	25	2024
+2	Monitor	300	2025
+3	Keyboard	80	2024
+3	Chair	200	2025

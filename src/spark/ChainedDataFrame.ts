@@ -36,8 +36,8 @@ export class ChainedDataFrame {
         return this.wrap(nextPlan,this.getSession());
     }
 
-    groupBy(...cols: (string | Column)[]) {
-        const grouped = this.dsl.groupBy(this.getPlan(), cols);
+    groupBy(...columns: (string | Column)[]) {
+        const grouped = this.dsl.groupBy(this.getPlan(), columns);
         return {
             agg: (aggregations: Record<string, string>) => {
                 const plan = grouped.agg(aggregations);
@@ -45,6 +45,55 @@ export class ChainedDataFrame {
             }
         };
     }
+
+    orderBy(...columns: (string | Column)[]): ChainedDataFrame {
+        const nextPlan = this.dsl.orderBy(this.getPlan(), columns);
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+    sort(...columns: (string | Column)[]): ChainedDataFrame {
+        const nextPlan = this.dsl.sort(this.getPlan(), columns);
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+
+    union(right: ChainedDataFrame): ChainedDataFrame {
+        const nextPlan = this.dsl.union(this.getPlan(), right.getPlan());
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+    dropDuplicates(...columns: (string | Column)[]): ChainedDataFrame {
+        const nextPlan = this.dsl.dropDuplicates(this.getPlan(), columns.length ? columns : undefined);
+        return this.wrap(nextPlan, this.getSession());
+    }
+    withColumnRenamed(oldName: string, newName: string): ChainedDataFrame {
+        const nextPlan = this.dsl.withColumnRenamed(this.getPlan(), oldName, newName);
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+    withColumnsRenamed(mapping: Record<string, string>): ChainedDataFrame {
+        const nextPlan = this.dsl.withColumnsRenamed(this.getPlan(), mapping);
+        return this.wrap(nextPlan, this.getSession());
+    }
+    unionByName(right: ChainedDataFrame, allowMissingColumns = false): ChainedDataFrame {
+        const nextPlan = this.dsl.union(this.getPlan(), right.getPlan(), {
+            byName: true,
+            allowMissingColumns,
+        });
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+
+    distinct(): ChainedDataFrame {
+        const nextPlan = this.dsl.distinct(this.getPlan());
+        return this.wrap(nextPlan, this.getSession());
+    }
+
+    limit(n: number): ChainedDataFrame {
+        const nextPlan = this.dsl.limit(this.getPlan(), n);
+        return this.wrap(nextPlan, this.getSession());
+    }
+
 
     show() {
         this.dsl.show(this.getPlan());

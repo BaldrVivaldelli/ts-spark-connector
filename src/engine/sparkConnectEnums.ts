@@ -1,5 +1,7 @@
 // src/engine/sparkConnectEnums.ts
 
+export type ProtoSortDirection = "ASCENDING" | "DESCENDING";
+export type ProtoNullsOrder = "UNSPECIFIED" | "NULLS_FIRST" | "NULLS_LAST";
 
 export const DEFAULT_JOIN_TYPE: JoinTypeInput = "INNER";
 
@@ -46,7 +48,6 @@ export function toProtoJoinType(joinType: JoinTypeInput): number {
     return result;
 }
 
-
 export enum GroupType {
     GROUP_TYPE_GROUPBY = 1,
     GROUP_TYPE_ROLLUP = 2,
@@ -67,4 +68,37 @@ export function toProtoGroupType(type: GroupTypeInput = "groupby"): GroupType {
     const value = groupTypeMap[type.toLowerCase() as GroupTypeInput];
     if (!value) throw new Error(`Unsupported group type: ${type}`);
     return value;
+}
+
+// 🆕 SetOperation Types
+export enum SetOpType {
+    SET_OP_TYPE_UNSPECIFIED = 0,
+    SET_OP_TYPE_INTERSECT = 1,
+    SET_OP_TYPE_UNION = 2,
+    SET_OP_TYPE_EXCEPT = 3,
+}
+
+export type SetOpTypeInput = "union" | "intersect" | "except";
+
+const setOpTypeMap: Record<SetOpTypeInput, SetOpType> = {
+    union: SetOpType.SET_OP_TYPE_UNION,
+    intersect: SetOpType.SET_OP_TYPE_INTERSECT,
+    except: SetOpType.SET_OP_TYPE_EXCEPT,
+};
+
+export function toProtoSetOpType(kind: SetOpTypeInput = "union"): SetOpType {
+    const result = setOpTypeMap[kind];
+    if (result === undefined) {
+        throw new Error(`Unsupported SetOpType: "${kind}".`);
+    }
+    return result;
+}
+
+export function toProtoSortDirection(dir: "asc" | "desc"): ProtoSortDirection {
+    return dir === "asc" ? "ASCENDING" : "DESCENDING";
+}
+
+export function toProtoNullsOrder(n?: "nullsFirst" | "nullsLast"): ProtoNullsOrder {
+    if (!n) return "UNSPECIFIED";
+    return n === "nullsFirst" ? "NULLS_FIRST" : "NULLS_LAST";
 }

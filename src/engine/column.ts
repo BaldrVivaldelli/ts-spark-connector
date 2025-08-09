@@ -1,7 +1,8 @@
-import { Expression } from "./logicalPlan";
+import {Expression} from "./logicalPlan";
 
 export class Column {
-    constructor(public expr: Expression) {}
+    constructor(public expr: Expression) {
+    }
 
     eq(value: any): Column {
         return new Column({
@@ -73,12 +74,37 @@ export class Column {
             alias: name,
         });
     }
+
+    asc(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "asc"});
+    }
+
+    desc(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "desc"});
+    }
+
+    ascNullsFirst(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "asc", nulls: "nullsFirst"});
+    }
+
+    ascNullsLast(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "asc", nulls: "nullsLast"});
+    }
+
+    descNullsFirst(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "desc", nulls: "nullsFirst"});
+    }
+
+    descNullsLast(): Column {
+        return new Column({type: "SortKey", input: this.expr, direction: "desc", nulls: "nullsLast"});
+    }
+
 }
 
 function literal(value: any): Expression {
-    return { type: "Literal", value };
+    return {type: "Literal", value};
 }
 
 export function col(name: string): Column {
-    return new Column({ type: "Column", name });
+    return new Column({type: "Column", name});
 }
