@@ -199,67 +199,67 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 
 ## Roadmap por etapas (P0 → P6)
 
-### P0 — Paridad base inmediata
-**Objetivo:** igualar ergonomía mínima de PySpark para DataFrame/Column.  
-**Incluye:** `withColumn`, `when/otherwise`, **window functions**, `na.*`, **tests** (unit + integración).  
-**Criterios de aceptación:**
-- ✅ `withColumn` soporta nuevas columnas y reemplazo.
-- ✅ `when(...).otherwise(...)` compone expresiones condicionales en `select`/`withColumn`.
-- ✅ Ventanas: `over(partitionBy(...).orderBy(...).rowsBetween(...))` con agregaciones.
-- ✅ `na.drop/fill/replace` + `isNull/isNotNull` operativos.
-- ✅ Suite de tests corriendo en CI contra Spark Connect local.
-  **Notas:** Agregar ejemplos en README + `df.explain()` stub para depuración temprana si ayuda.
+### P0 — Immediate base parity
+**Goal:** match PySpark’s minimum ergonomics for DataFrame/Column.  
+**Includes:** `withColumn`, `when/otherwise`, **window functions**, `na.*`, **tests** (unit + integration).  
+**Acceptance criteria:**
+- ✅ `withColumn` supports adding and replacing columns.
+- ✅ `when(...).otherwise(...)` builds conditional expressions in `select`/`withColumn`.
+- ✅ Windows: `over(partitionBy(...).orderBy(...).rowsBetween(...))` with aggregations.
+- ✅ `na.drop/fill/replace` + `isNull/isNotNull` working.
+- ✅ Test suite running in CI against a local Spark Connect.
+  **Notes:** Add README examples + an `df.explain()` stub for early debugging if helpful.
 
-### P1 — I/O realista
-**Objetivo:** trabajar con formatos comunes de datos y escribir resultados.  
-**Incluye:** **Parquet/JSON reading**, **DataFrameWriter** (CSV/JSON/Parquet/ORC), `partitionBy/bucketBy/sortBy` (write).  
-**Criterios:**
-- ✅ `spark.read.parquet/json/csv(...)` con `options(...)` comunes.
+### P1 — Realistic I/O
+**Goal:** work with common data formats and write results.  
+**Includes:** **Parquet/JSON reading**, **DataFrameWriter** (CSV/JSON/Parquet/ORC), `partitionBy/bucketBy/sortBy` (write).  
+**Criteria:**
+- ✅ `spark.read.parquet/json/csv(...)` with common `options(...)`.
 - ✅ `df.write.format(...).mode("overwrite|append").save(...)`.
-- ✅ `partitionBy` en escritura y smoke tests leyendo lo escrito.
-  **Notas:** Cubrir inferencia de esquema básica y errores claros.
+- ✅ `partitionBy` on write and smoke tests that read back what was written.
+  **Notes:** Cover basic schema inference and clear error messages.
 
 ### P2 — Performance & DX
-**Objetivo:** control de particiones, caching y mejor depuración.  
-**Incluye:** `cache/persist/unpersist`, `repartition/coalesce`, **explain(formatted)**, `describe/summary`, `unionByName`, **complex types + explode**, **JSON helpers**, `SparkSession.builder.config`, **Auth/TLS**.  
-**Criterios:**
-- ✅ Cambios de partición reflejados en el plan.
-- ✅ `cache/persist` no rompe consistencia y `unpersist` limpia.
-- ✅ `explain("formatted")`/`df.explain()` muestra plan válido.
-- ✅ `from_json/to_json` + `explode` en arrays/maps/struct.
-  **Notas:** Documentar recomendaciones de tuning y ejemplos de DX.
+**Goal:** partition control, caching, and better debugging.  
+**Includes:** `cache/persist/unpersist`, `repartition/coalesce`, **explain(formatted)**, `describe/summary`, `unionByName`, **complex types + explode**, **JSON helpers**, `SparkSession.builder.config`, **Auth/TLS**.  
+**Criteria:**
+- ✅ Partition changes reflected in the plan.
+- ✅ `cache/persist` maintain consistency; `unpersist` cleans up.
+- ✅ `explain("formatted")`/`df.explain()` shows a valid plan.
+- ✅ `from_json/to_json` + `explode` for arrays/maps/structs.
+  **Notes:** Document tuning recommendations and DX examples.
 
-### P3 — SQL/Catálogo & control fino
-**Objetivo:** interop total con SQL y catálogo.  
-**Incluye:** **spark.sql(...)**, **temp views**, **catalog** (`read.table`, `saveAsTable`), **plan viz/AST dump**, **join hints**, `sample/randomSplit`.  
-**Criterios:**
-- ✅ `spark.sql("...")` produce `DataFrame` equivalente al DSL.
-- ✅ `createOrReplaceTempView` usable desde `spark.sql`.
-- ✅ `broadcast(df2)`/hints reflejados en el plan.
-  **Notas:** Opcional: comando para volcar plan lógico en JSON/Protobuf.
+### P3 — SQL/Catalog & fine-grained control
+**Goal:** full interop with SQL and catalog.  
+**Includes:** **spark.sql(...)**, **temp views**, **catalog** (`read.table`, `saveAsTable`), **plan viz/AST dump**, **join hints**, `sample/randomSplit`.  
+**Criteria:**
+- ✅ `spark.sql("...")` yields a `DataFrame` equivalent to the DSL.
+- ✅ `createOrReplaceTempView` usable from `spark.sql`.
+- ✅ `broadcast(df2)`/hints reflected in the plan.
+  **Notes:** Optional: command to dump the logical plan in JSON/Protobuf.
 
-### P4 — UDF (funciones definidas por usuario)
-**Objetivo:** extender transformaciones con lógica propia.  
-**Incluye:** **Scalar UDF**, **UDAF / vectorized UDF (Arrow)**.  
-**Criterios:**
-- ✅ Registro y uso de UDF en DSL y en `spark.sql`.
-- ✅ Vectorized UDF con Arrow en path feliz y tests de interoperabilidad.
-  **Notas:** Documentar costos/limitaciones y mejores prácticas.
+### P4 — UDF (User-Defined Functions)
+**Goal:** extend transformations with custom logic.  
+**Includes:** **Scalar UDF**, **UDAF / vectorized UDF (Arrow)**.  
+**Criteria:**
+- ✅ Register and use UDFs in the DSL and in `spark.sql`.
+- ✅ Vectorized UDF with Arrow works on the happy path and passes interoperability tests.
+  **Notes:** Document costs/limitations and best practices.
 
 ### P5 — Streaming / Lakehouse / JDBC
-**Objetivo:** habilitar pipelines de producción.  
-**Incluye:** **Structured Streaming** (`readStream`/`writeStream`, **watermark**, **trigger**, **output modes**), **Delta/Iceberg/Hudi** vía `format(...)`, **JDBC** read/write.  
-**Criterios:**
-- ✅ Ejemplo end‑to‑end de streaming (socket/Kafka → transform → sink).
-- ✅ Lectura/escritura a Delta/Iceberg/Hudi cuando el cluster tiene los jars.
-- ✅ JDBC probado contra una base popular (Postgres/MySQL).
+**Goal:** enable production pipelines.  
+**Includes:** **Structured Streaming** (`readStream`/`writeStream`, **watermark**, **trigger**, **output modes**), **Delta/Iceberg/Hudi** via `format(...)`, **JDBC** read/write.  
+**Criteria:**
+- ✅ End-to-end streaming example (socket/Kafka → transform → sink).
+- ✅ Read/write to Delta/Iceberg/Hudi when the cluster has the required JARs.
+- ✅ JDBC tested against a popular database (Postgres/MySQL).
 
 ### P6 — MLlib
-**Objetivo:** pipelines de ML sobre DataFrames desde TypeScript.  
-**Incluye:** Pipelines, Estimators/Transformers básicos (e.g., `StringIndexer`, `VectorAssembler`, `LogisticRegression`).  
-**Criterios:**
-- ✅ Entrenar, guardar y cargar modelos; `transform()` sobre DataFrame.
-- ✅ Ejemplo reproducible (dataset público) y guía de migración desde PySpark.
+**Goal:** ML pipelines on DataFrames from TypeScript.  
+**Includes:** Pipelines, basic Estimators/Transformers (e.g., `StringIndexer`, `VectorAssembler`, `LogisticRegression`).  
+**Criteria:**
+- ✅ Train, save, and load models; `transform()` on a DataFrame.
+- ✅ Reproducible example (public dataset) and migration guide from PySpark.
 
 ---
 
