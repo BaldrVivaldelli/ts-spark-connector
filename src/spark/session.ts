@@ -1,14 +1,17 @@
-import { DataFrameReader } from "./reader";
+// src/spark/session.ts
 import crypto from "crypto";
+import { DataFrameReaderTF } from "./reader";
 
 export class SparkSession {
     private readonly sessionId: string;
     private userContext: Record<string, any> = {};
 
-    read = new DataFrameReader(this);
-
     constructor(sessionId?: string) {
         this.sessionId = sessionId ?? crypto.randomUUID();
+    }
+
+    get read(): DataFrameReaderTF {
+        return new DataFrameReaderTF(this);
     }
 
     getSessionId(): string {
@@ -24,8 +27,8 @@ export class SparkSession {
     }
 }
 
-export const spark = createSparkSession();
-
 export function createSparkSession(sessionId?: string): SparkSession {
     return new SparkSession(sessionId);
 }
+
+export const spark = createSparkSession();

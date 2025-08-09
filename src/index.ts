@@ -12,7 +12,7 @@ import {col, when} from "./engine/column";
         .option("header", "true")
         .csv("/data/purchases.tsv");
 
-/*    people
+    await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
         .filter(col("amount").gt(100))
@@ -23,52 +23,50 @@ import {col, when} from "./engine/column";
         })
         .show();
 
-    purchases
+    await purchases
         .select("user_id", "amount")
         .sort("user_id", col("amount").ascNullsFirst())
         .limit(5)
         .show();
 
-    purchases
-        .groupBy("user_id")
-        .agg({total_spent: "sum(amount)"})
-        .orderBy(col("total_spent").descNullsLast())
-        .limit(10)
-        .show();
-    purchases
-        .dropDuplicates("user_id", "product")
-        .show();
+    await   purchases
+            .groupBy("user_id")
+            .agg({total_spent: "sum(amount)"})
+            .orderBy(col("total_spent").descNullsLast())
+            .limit(10)
+            .show();
+    await    purchases
+            .dropDuplicates("user_id", "product")
+            .show();
 
-    people
-        .select("country")
-        .distinct()
-        .show();
-    purchases
-        .withColumnRenamed("user_id", "customer_id")
-        .select("customer_id", "product", "amount")
-        .limit(3)
-        .show();
+    await    people
+            .select("country")
+            .distinct()
+            .show();
+    await    purchases
+            .withColumnRenamed("user_id", "customer_id")
+            .select("customer_id", "product", "amount")
+            .limit(3)
+            .show();
 
-    const p2024 = purchases.filter(col("year").eq(2024));
-    const p2025 = purchases.filter(col("year").eq(2025));
-    p2024.union(p2025).limit(5).show();
+        const p2024 = purchases.filter(col("year").eq(2024));
+        const p2025 = purchases.filter(col("year").eq(2025));
+        await p2024.union(p2025).limit(5).show();
 
-    p2024.unionByName(p2025) // mapea a set_op(UNION, is_all:false)
-        .limit(5)
-        .show();
+        await p2024.unionByName(p2025)
+            .limit(5)
+            .show();
 
-    purchases
-        .withColumn("amount_x10", col("amount").gte(10))
-        .select("user_id", "product", "amount_x10")
-        .limit(3)
-        .show();*/
-    const purchasesWithCategory = purchases.withColumn(
-        "spending_category",
-        when(col("amount").gt(1000), "VIP")
-            .when(col("amount").gt(500), "Premium")
-            .when(col("amount").gt(100), "Regular")
-            .otherwise("Low")
-    );
-
-    purchasesWithCategory.show();
+        await purchases
+            .withColumn("amount_x10", col("amount").gte(10))
+            .select("user_id", "product", "amount_x10")
+            .limit(3)
+            .show();
+        await purchases.withColumn(
+            "spending_category",
+            when(col("amount").gt(1000), "VIP")
+                .when(col("amount").gt(500), "Premium")
+                .when(col("amount").gt(100), "Regular")
+                .otherwise("Low")
+        ).show();
 })();

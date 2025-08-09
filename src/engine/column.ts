@@ -1,140 +1,96 @@
-import {Expression} from "./logicalPlan";
+// src/engine/column.ts  — Tagless Final builders (sin AST público)
 
-export class Column {
-    constructor(public expr: Expression) {
-    }
+import {ExprAlg, SortOrder} from "../spark/dataframe";
+import {NullsOrder, SortDirection} from "./logicalPlan";
 
-    eq(value: any): Column {
-        return new Column({
-            type: "Binary",
-            op: "=",
-            left: this.expr,
-            right: literal(value),
-        });
-    }
 
-    gt(value: any): Column {
-        return new Column({
-            type: "Binary",
-            op: ">",
-            left: this.expr,
-            right: literal(value),
-        });
-    }
+export type EBuilder = {
+    build<E>(EX: ExprAlg<E>): E;
 
-    gte(value: any): Column {
-        return new Column({
-            type: "Binary",
-            op: ">=",
-            left: this.expr,
-            right: literal(value),
-        });
-    }
+    // helpers encadenables tipo PySpark
+    alias(name: string): EBuilder;
+    eq(x: EBuilder | string | number | boolean): EBuilder;
+    gt(x: EBuilder | number): EBuilder;
+    gte(x: EBuilder | number): EBuilder;
+    lt(x: EBuilder | number): EBuilder;
+    lte(x: EBuilder | number): EBuilder;
+    and(x: EBuilder): EBuilder;
+    or(x: EBuilder): EBuilder;
 
-    lt(value: any): Column {
-        return new Column({
-            type: "Binary",
-            op: "<",
-            left: this.expr,
-            right: literal(value),
-        });
-    }
+    // order keys
+    asc(nulls?: NullsOrder): SortKeyBuilder;
+    desc(nulls?: NullsOrder): SortKeyBuilder;
+    ascNullsFirst(): SortKeyBuilder;
+    ascNullsLast():  SortKeyBuilder;
+    descNullsFirst():SortKeyBuilder;
+    descNullsLast(): SortKeyBuilder;
+};
 
-    lte(value: any): Column {
-        return new Column({
-            type: "Binary",
-            op: "<=",
-            left: this.expr,
-            right: literal(value),
-        });
-    }
+/** SortKeyBuilder: produce un SortOrder cuando recibe un ExprAlg */
+export type SortKeyBuilder = <E>(EX: ExprAlg<E>) => { expr: E; direction: SortDirection; nulls?: NullsOrder };
 
-    and(other: Column): Column {
-        return new Column({
-            type: "Logical",
-            op: "AND",
-            left: this.expr,
-            right: other.expr,
-        });
-    }
+// fábrica para EBuilder
+const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
+    const toE = (x: EBuilder | string | number | boolean) =>
+        <E>(EX: ExprAlg<E>) => (typeof x === "object" && "build" in x) ? x.build(EX) : EX.lit(x as any);
 
-    or(other: Column): Column {
-        return new Column({
-            type: "Logical",
-            op: "OR",
-            left: this.expr,
-            right: other.expr,
-        });
-    }
+    const self: EBuilder = {
+        build: f,
 
-    alias(name: string): Column {
-        return new Column({
-            type: "Alias",
-            input: this.expr,
-            alias: name,
-        });
-    }
+        alias: (name) => EB(EX => EX.alias(f(EX), name)),
 
-    asc(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "asc"});
-    }
+        eq:  (x) => EB(EX => EX.bin("=",  f(EX), toE(x)(EX))),
+        gt:  (x) => EB(EX => EX.bin(">",  f(EX), toE(x)(EX))),
+        gte: (x) => EB(EX => EX.bin(">=", f(EX), toE(x)(EX))),
+        lt:  (x) => EB(EX => EX.bin("<",  f(EX), toE(x)(EX))),
+        lte: (x) => EB(EX => EX.bin("<=", f(EX), toE(x)(EX))),
 
-    desc(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "desc"});
-    }
+        and: (x) => EB(EX => EX.logical("AND", f(EX), x.build(EX))),
+        or:  (x) => EB(EX => EX.logical("OR",  f(EX), x.build(EX))),
 
-    ascNullsFirst(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "asc", nulls: "nullsFirst"});
-    }
-
-    ascNullsLast(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "asc", nulls: "nullsLast"});
-    }
-
-    descNullsFirst(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "desc", nulls: "nullsFirst"});
-    }
-
-    descNullsLast(): Column {
-        return new Column({type: "SortKey", input: this.expr, direction: "desc", nulls: "nullsLast"});
-    }
-
-}
-
-function literal(value: any): Expression {
-    return {type: "Literal", value};
-}
-
-export function col(name: string): Column {
-    return new Column({type: "Column", name});
-}
-
-export function lit(value: any): Column {
-    return new Column(literal(value));
-}
-
-export function when(condition: Column, value: any) {
-    const pairs: Expression[] = [condition.expr, literal(value)];
-
-    const chain = {
-        when(cond: Column, val: any) {
-            pairs.push(cond.expr, literal(val));
-            return chain;
-        },
-        otherwise(val: any): Column {
-            let elseExpr: Expression = literal(val);
-            for (let i = pairs.length - 2; i >= 0; i -= 2) {
-                const cond = pairs[i];
-                const thenVal = pairs[i + 1];
-                elseExpr = {
-                    type: "UnresolvedFunction",
-                    name: "if",
-                    args: [cond, thenVal, elseExpr],
-                };
-            }
-            return new Column(elseExpr);
-        },
+        asc:  (nulls) => (EX) => ({ expr: f(EX), direction: "asc"  as const, nulls }),
+        desc: (nulls) => (EX) => ({ expr: f(EX), direction: "desc" as const, nulls }),
+        ascNullsFirst: (): SortKeyBuilder => (EX) => ({ expr: f(EX), direction: "asc",  nulls: "nullsFirst" }),
+        ascNullsLast:  (): SortKeyBuilder => (EX) => ({ expr: f(EX), direction: "asc",  nulls: "nullsLast"  }),
+        descNullsFirst:(): SortKeyBuilder => (EX) => ({ expr: f(EX), direction: "desc", nulls: "nullsFirst" }),
+        descNullsLast: (): SortKeyBuilder => (EX) => ({ expr: f(EX), direction: "desc", nulls: "nullsLast"  }),
     };
+    return self;
+};
 
-    return chain;
+/** Column-like helpers (no AST expuesto) */
+export const col = (name: string): EBuilder => EB(EX => EX.col(name));
+export const lit = (v: string | number | boolean): EBuilder => EB(EX => EX.lit(v));
+
+/** CASE WHEN builder encadenable */
+type CaseChain = {
+    when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain;
+    otherwise(val: EBuilder | string | number | boolean): EBuilder;
+};
+
+/** when(cond, val).when(...).otherwise(...) */
+export function when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain {
+    // acumulamos ramas en forma inmutable
+    const branches: Array<{ when: EBuilder; then: EBuilder }> = [
+        { when: cond, then: asE(val) }
+    ];
+    const make = (br: typeof branches): CaseChain => ({
+        when(nextCond, nextVal) {
+            return make([...br, { when: nextCond, then: asE(nextVal) }]);
+        },
+        otherwise(elseVal) {
+            const elseB = asE(elseVal);
+            return EB(EX => EX.caseWhen(
+                br.map(b => ({ when: b.when.build(EX), then: b.then.build(EX) })),
+                elseB.build(EX)
+            ));
+        }
+    });
+    return make(branches);
 }
+
+
+
+// util
+const asE = (x: EBuilder | string | number | boolean): EBuilder =>
+    (typeof x === "object" && "build" in x) ? x as EBuilder : lit(x as any);

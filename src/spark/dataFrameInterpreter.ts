@@ -1,202 +1,116 @@
-import {col, Column} from "../engine/column";
-import {DataFrameDSLFactory} from "./dataframe";
-import {Expression, GroupBy, LogicalPlan} from "../engine/logicalPlan";
-import {printArrowResults} from "../utils/arrowPrinter";
-import {compileToProtobuf} from "../engine/compiler";
-import {sparkGrpcClient} from "../client/sparkClient";
-import {SparkSession} from "./session";
+import { Expression, GroupBy, LogicalPlan } from "../engine/logicalPlan";
+import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./dataframe";
 
+export const SparkExprAlg: ExprAlg<Expression> = {
+    col: (name) => ({ type: "Column", name }),
+    lit: (v) => ({ type: "Literal", value: v }),
+    bin: (op, left, right) => ({ type: "Binary", op, left, right }),
+    logical: (op, left, right) => ({ type: "Logical", op, left, right }),
+    alias: (input, alias) => ({ type: "Alias", input, alias }),
+    call: (name, args) => ({ type: "UnresolvedFunction", name, args }),
+    sortKey: (input, direction, nulls) => ({ type: "SortKey", input, direction, nulls }),
+    star: () => ({ type: "UnresolvedStar" }),
+    caseWhen: (branches, elze) => ({ type: "CaseWhen", branches, else: elze }),
+    window: (func, spec: WindowSpec<Expression>) => ({
+        type: "Window",
+        func,
+        spec: {
+            partitionBy: spec.partitionBy,
+            orderBy: spec.orderBy.map(o => ({
+                type: "SortKey",
+                input: o.input,
+                direction: o.direction,
+                nulls: o.nulls
+            })),
+            frame: spec.frame && { ...spec.frame }
+        }
+    }),
+};
 
-export function dataframeInterpreter(plan: LogicalPlan, session: SparkSession): DataFrameDSLFactory<LogicalPlan> {
-    return {
-        select: (plan, columns) => ({
-            type: "Project",
-            input: plan,
-            columns: columns.map(c => typeof c === "string" ? col(c).expr : c.expr),
-        }),
+export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
+    relation: (format, path, options) => ({ type: "Relation", format, path, options }),
 
-        filter: (plan, condition) => ({
-            type: "Filter",
-            input: plan,
-            condition: condition.expr,
-        }),
+    select: (plan, columns) => ({ type: "Project", input: plan, columns }),
 
-        withColumn: (plan, name, column) => {
-            const aliased: Expression = {
-                type: "Alias",
-                input: column.expr,
-                alias: name,
-            }
-            return {
-                type: "Project",
-                input: plan,
-                columns: [{ type: "UnresolvedStar" }, aliased],
-            };;
-        },
-        join: (left, right, on) => ({
-            type: "Join",
-            left,
-            right,
-            on: on.expr,
-            joinType: "INNER",
-        }),
+    filter: (plan, condition) => ({ type: "Filter", input: plan, condition }),
 
-        groupBy(plan, columns) {
-            const groupByExprs =
-                plan.type === "GroupBy" ? plan.groupBy : [];
+    withColumn: (plan, name, column) => ({
+        type: "Project",
+        input: plan,
+        columns: [{ type: "UnresolvedStar" }, { type: "Alias", input: column, alias: name }],
+    }),
 
-            const groupedNode: GroupBy = {
-                type: "GroupBy",
-                input: plan,
-                expressions: groupByExprs,
-            };
+    join: (left, right, on, joinType = DEFAULT_JOIN_TYPE) => ({
+        type: "Join",
+        left,
+        right,
+        on,
+        joinType: (joinType.toUpperCase() as JoinTypeInput),
+    }),
 
-            return {
-                agg: (aggregations: Record<string, string>): LogicalPlan => ({
-                    type: "Aggregate",
-                    input: groupedNode,
-                    aggregations,
-                }),
-            };
-        },
-        orderBy(plan, columns) {
-            return {
-                type: "Sort",
-                input: plan,
-                orders: columns.map(c => {
-                    const e: Expression = typeof c === "string" ? col(c).expr : c.expr;
-                    if (e.type === "SortKey") {
-                        const {input, direction, nulls} = e;
-                        return {expr: input, direction, nulls};
-                    }
-                    return {expr: e, direction: "asc" as const};
-                }),
-            };
-        },
-        sort(plan, columns) {
-            return {
-                type: "Sort",
-                input: plan,
-                orders: columns.map(c => {
-                    const e: Expression = typeof c === "string" ? col(c).expr : c.expr;
-                    if (e.type === "SortKey") {
-                        const {input, direction, nulls} = e;
-                        return {expr: input, direction, nulls};
-                    }
-                    return {expr: e, direction: "asc" as const};
-                }),
-            };
-        },
+    groupBy: (plan, cols) => ({ type: "GroupBy", input: plan, expressions: cols }),
 
-        limit(plan, n) {
-            if (!Number.isInteger(n) || n < 0) throw new Error("limit(n) requiere entero >= 0");
-            return {type: "Limit", input: plan, limit: n};
-        },
-        distinct(plan) {
-            return {type: "Distinct", input: plan};
-        },
+    agg: (group, aggregations, groupType?: GroupTypeInput) => ({
+        type: "Aggregate",
+        input: group,
+        aggregations,
+        groupType
+    }),
 
-        union(left, right, opts) {
-            return {
-                type: "Union",
-                inputs: [left, right],
-                byName: !!opts?.byName,
-                allowMissingColumns: !!opts?.allowMissingColumns,
-            };
-        },
-
-        dropDuplicates(plan, columns) {
-            if (!columns || columns.length === 0) return {type: "Distinct", input: plan};
-            const exprs = columns.map(c => (typeof c === "string" ? col(c).expr : c.expr));
-            const gb: GroupBy = {type: "GroupBy", input: plan, expressions: exprs};
-            return {type: "Aggregate", input: gb, aggregations: {}};
-        },
-        withColumnRenamed(plan, oldName, newName) {
-            return {
-                type: "Project",
-                input: plan,
-                columns: [{type: "UnresolvedStar"}, {type: "Alias", input: col(oldName).expr, alias: newName}],
-            };
-        },
-
-        withColumnsRenamed(plan, mapping) {
-            const columns: Expression[] = Object.entries(mapping).map(([from, to]) => ({
-                type: "Alias",
-                input: col(from).expr,
-                alias: to,
-            }));
-            return {type: "Project", input: plan, columns};
-        },
-
-
-        async show(plan) {
-            const result = await this.collect(plan);
-            const arrowBuffers = result
-                .filter(r => r.arrow_batch?.data)
-                .map(r => r.arrow_batch.data as Buffer);
-            printArrowResults(arrowBuffers);
-        },
-        async collect(plan): Promise<any[]> {
-            const logicalPlan = compileToProtobuf(plan);
-            const request = {
-                session_id: session.getSessionId(),
-                user_context: session.getUserContext(),
-                plan: logicalPlan.plan
-            };
-            return await sparkGrpcClient.executePlan(request);
-        },
-    };
-}
-
-
-function replaceOrAppendColumn(
-    columns: Expression[],
-    name: string,
-    newExpr: Expression
-): Expression[] {
-    return [
-        ...columns.filter(c =>
-            c.type === "Alias" ? c.alias !== name :
-                c.type === "Column" ? c.name !== name :
-                    true
+    orderBy: (plan, orders: SortOrder<Expression>[]) => ({
+        type: "Sort",
+        input: plan,
+        orders: orders.map(o =>
+            o.expr.type === "SortKey"
+                ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
+                : { expr: o.expr, direction: "asc" as const }
         ),
-        newExpr
-    ];
-}
+    }),
 
-function extractColumns(plan: LogicalPlan): Expression[] {
-    if (plan.type === "Project") {
-        return plan.columns;
-    }
+    sort: (plan, orders) => ({
+        type: "Sort",
+        input: plan,
+        orders: orders.map(o =>
+            o.expr.type === "SortKey"
+                ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
+                : { expr: o.expr, direction: "asc" as const }
+        ),
+    }),
 
-    if (plan.type === "Filter") {
-        return extractColumns(plan.input);
-    }
+    limit: (plan, n) => ({ type: "Limit", input: plan, limit: n }),
 
-    if (plan.type === "Aggregate") {
-        const groupByExprs =
-            plan.input.type === "GroupBy"
-                ? (plan.input as unknown as Extract<LogicalPlan, { type: "GroupBy" }>).groupBy
-                : [];
+    distinct: (plan) => ({ type: "Distinct", input: plan }),
 
-        const aggExprs = Object.entries(plan.aggregations).map(
-            ([alias, fnCall]): Expression => ({
-                type: "Alias",
-                input: {
-                    type: "UnresolvedFunction",
-                    name: fnCall.split("(")[0],
-                    args: [],
-                },
-                alias,
-            })
-        );
+    dropDuplicates: (plan, cols) => {
+        if (!cols || cols.length === 0) return { type: "Distinct", input: plan };
+        const gb: GroupBy = { type: "GroupBy", input: plan, expressions: cols };
+        return { type: "Aggregate", input: gb, aggregations: {} };
+    },
 
-        return [...groupByExprs, ...aggExprs];
-    }
+    union: (left, right, opts) => ({
+        type: "Union",
+        inputs: [left, right],
+        byName: !!opts?.byName,
+        allowMissingColumns: !!opts?.allowMissingColumns,
+    }),
 
-    if (plan.type === "GroupBy") {
-        return plan.groupBy;
-    }
+    withColumnRenamed: (plan, oldName, newName) => ({
+        type: "Project",
+        input: plan,
+        columns: [
+            { type: "UnresolvedStar" },
+            { type: "Alias", input: { type: "Column", name: oldName }, alias: newName }
+        ],
+    }),
 
-    return [];
-}
+    withColumnsRenamed: (plan, mapping) => ({
+        type: "Project",
+        input: plan,
+        columns: Object.entries(mapping).map(([from, to]) => ({
+            type: "Alias",
+            input: { type: "Column", name: from },
+            alias: to,
+        })),
+    }),
+};

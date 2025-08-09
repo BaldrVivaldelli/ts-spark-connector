@@ -1,112 +1,187 @@
-import { DataFrameDSLFactory} from "./dataframe";
-import {Column} from "../engine/column";
+import {SparkDFAlg, SparkExprAlg} from "./dataFrameInterpreter";
 import {LogicalPlan} from "../engine/logicalPlan";
-import {dataframeInterpreter} from "./dataFrameInterpreter";
+import {programToProtobufRoot, ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compiler";
+import {sparkGrpcClient} from "../client/sparkClient";
 import {SparkSession} from "./session";
+import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortDirection, SortOrder} from "./dataframe";
+import {DEFAULT_JOIN_TYPE, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {tableFromIPC} from "apache-arrow";
+import {printArrowResults} from "../utils/arrowPrinter";
+
+type EBuilder = { build<E>(EX: ExprAlg<E>): E };
+type SortKeyInput =
+    | string
+    | EBuilder
+    | ((EX: ExprAlg<any>) => SortOrder<any>);
+export const col = (name: string): EBuilder => ({build: EX => EX.col(name)});
+export const lit = (v: string | number | boolean): EBuilder => ({build: EX => EX.lit(v)});
+export const eq = (l: EBuilder, r: EBuilder | string | number | boolean): EBuilder => ({
+    build: EX => EX.bin("=", l.build(EX), typeof r === "object" ? (r as EBuilder).build(EX) : EX.lit(r as any))
+});
+export const asc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
+    ({expr: e.build(EX), direction: "asc", nulls});
+export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
+    ({expr: e.build(EX), direction: "desc", nulls});
+
 export class ChainedDataFrame {
-    constructor(
-        private plan: LogicalPlan,
-        private session: SparkSession
-    ) {}
+    private readonly prog: DFProgram<any, any, any>;
 
-    private get dsl(): DataFrameDSLFactory<LogicalPlan> {
-        return dataframeInterpreter(this.getPlan(), this.getSession());
-    }
-    private wrap(plan: LogicalPlan,sparkSession:SparkSession): ChainedDataFrame {
-        return new ChainedDataFrame(plan, sparkSession);
-    }
-    select(...cols: (string | Column)[]): ChainedDataFrame {
-        const nextPlan = this.dsl.select(this.getPlan(),cols);
-        return this.wrap(nextPlan,this.getSession());
+    constructor(p: DFProgram<any, any, any>, private readonly session: SparkSession) {
+        this.prog = p;
     }
 
-
-    join(right: ChainedDataFrame, condition: Column): ChainedDataFrame {
-        const nextPlan = this.dsl.join(this.plan, right.plan, condition);
-        return this.wrap(nextPlan,this.getSession());
+    static fromCSV(path: string, session: SparkSession, options?: Record<string, string>) {
+        const p: DFProgram<any, any, any> = (DF) => DF.relation("csv", path, options);
+        return new ChainedDataFrame(p, session);
     }
 
-    filter(condition: Column): ChainedDataFrame {
-        const nextPlan = this.dsl.filter(this.getPlan(),condition);
-        return this.wrap(nextPlan,this.getSession());
+    private chain(step: (df: any, EX: ExprAlg<any>, DF: DFAlg<any, any, any>) => any) {
+        const next: DFProgram<any, any, any> = (DF, EX) => step(this.prog(DF, EX), EX, DF);
+        return new ChainedDataFrame(next, this.session);
     }
 
-    withColumn(name: string, column: Column): ChainedDataFrame {
-        const nextPlan = this.dsl.withColumn(this.getPlan(),name, column);
-        return this.wrap(nextPlan,this.getSession());
+    select(...cols: string[]): ChainedDataFrame;
+    select(...cols: EBuilder[]): ChainedDataFrame;
+    select(...cols: (string | EBuilder)[]): ChainedDataFrame {
+        return this.chain((df, EX, DF) =>
+            DF.select(df, cols.map(c => typeof c === "string" ? EX.col(c) : c.build(EX)))
+        );
     }
 
-    groupBy(...columns: (string | Column)[]) {
-        const grouped = this.dsl.groupBy(this.getPlan(), columns);
+
+    filter(cond: EBuilder) {
+        return this.chain((df, EX, DF) => DF.filter(df, cond.build(EX)));
+    }
+
+    withColumn(name: string, e: EBuilder) {
+        return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
+    }
+
+    join(right: ChainedDataFrame, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE ) {
+        const next: DFProgram<any, any, any> = (DF, EX) =>
+            DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
+        return new ChainedDataFrame(next, this.session);
+    }
+
+    groupBy(...by: (string | EBuilder)[]) {
+        const self = this;
+
+        const parseAgg = (s: string) => {
+            const m = s.match(/^\s*([A-Za-z_]\w*)\s*\(\s*([^)]+)\s*\)\s*$/);
+            if (!m) throw new Error(`Invalid aggregation: ${s}`);
+            return { fn: m[1], arg: m[2] };
+        };
+
         return {
-            agg: (aggregations: Record<string, string>) => {
-                const plan = grouped.agg(aggregations);
-                return this.wrap(plan,this.getSession());
+            agg(aggs: Record<string, EBuilder | string>) {
+                const next: DFProgram<any, any, any> = (DF, EX) => {
+                    // by: string|EBuilder -> E
+                    const keys = by.map(b => typeof b === "string" ? EX.col(b) : b.build(EX));
+
+                    const g = DF.groupBy(self.prog(DF, EX), keys);
+
+                    // aggs: alias -> E (si es string, parsear "fn(col)")
+                    const exprs = Object.fromEntries(
+                        Object.entries(aggs).map(([alias, v]) => {
+                            if (typeof v === "string") {
+                                const { fn, arg } = parseAgg(v);
+                                return [alias, EX.call(fn, [EX.col(arg)])];
+                            }
+                            return [alias, v.build(EX)];
+                        })
+                    );
+
+                    return DF.agg(g, exprs);
+                };
+                return new ChainedDataFrame(next, self.session);
             }
         };
     }
 
-    orderBy(...columns: (string | Column)[]): ChainedDataFrame {
-        const nextPlan = this.dsl.orderBy(this.getPlan(), columns);
-        return this.wrap(nextPlan, this.getSession());
-    }
 
-    sort(...columns: (string | Column)[]): ChainedDataFrame {
-        const nextPlan = this.dsl.sort(this.getPlan(), columns);
-        return this.wrap(nextPlan, this.getSession());
-    }
-
-
-    union(right: ChainedDataFrame): ChainedDataFrame {
-        const nextPlan = this.dsl.union(this.getPlan(), right.getPlan());
-        return this.wrap(nextPlan, this.getSession());
-    }
-
-    dropDuplicates(...columns: (string | Column)[]): ChainedDataFrame {
-        const nextPlan = this.dsl.dropDuplicates(this.getPlan(), columns.length ? columns : undefined);
-        return this.wrap(nextPlan, this.getSession());
-    }
-    withColumnRenamed(oldName: string, newName: string): ChainedDataFrame {
-        const nextPlan = this.dsl.withColumnRenamed(this.getPlan(), oldName, newName);
-        return this.wrap(nextPlan, this.getSession());
-    }
-
-    withColumnsRenamed(mapping: Record<string, string>): ChainedDataFrame {
-        const nextPlan = this.dsl.withColumnsRenamed(this.getPlan(), mapping);
-        return this.wrap(nextPlan, this.getSession());
-    }
-    unionByName(right: ChainedDataFrame, allowMissingColumns = false): ChainedDataFrame {
-        const nextPlan = this.dsl.union(this.getPlan(), right.getPlan(), {
-            byName: true,
-            allowMissingColumns,
+    orderBy(...colsOrKeys: SortKeyInput[]) {
+        return this.chain((df, EX, DF) => {
+            const orders = colsOrKeys.map(k => {
+                if (typeof k === "string")        return { expr: EX.col(k),       direction: "asc" as const };
+                if (typeof k === "function")      return k(EX); // ya devuelve SortOrder<E>
+                /* k es EBuilder */                return { expr: k.build(EX),     direction: "asc" as const };
+            });
+            return DF.orderBy(df, orders);
         });
-        return this.wrap(nextPlan, this.getSession());
+    }
+
+    sort(...colsOrKeys: SortKeyInput[]) {
+        return this.chain((df, EX, DF) => {
+            const orders = colsOrKeys.map(k => {
+                if (typeof k === "string")        return { expr: EX.col(k),       direction: "asc" as const };
+                if (typeof k === "function")      return k(EX);
+                /* k es EBuilder */                return { expr: k.build(EX),     direction: "asc" as const };
+            });
+            return DF.sort(df, orders);
+        });
+    }
+
+    limit(n: number) {
+        return this.chain((df, _EX, DF) => DF.limit(df, n));
+    }
+
+    distinct() {
+        return this.chain((df, _EX, DF) => DF.distinct(df));
     }
 
 
-    distinct(): ChainedDataFrame {
-        const nextPlan = this.dsl.distinct(this.getPlan());
-        return this.wrap(nextPlan, this.getSession());
+    dropDuplicates(...cols: string[]): ChainedDataFrame;
+    dropDuplicates(...cols: EBuilder[]): ChainedDataFrame;
+    dropDuplicates(...cols: (string | EBuilder)[]): ChainedDataFrame {
+        return this.chain((df, EX, DF) => {
+            const exprs =
+                cols.length === 0
+                    ? undefined
+                    : cols.map(c => (typeof c === "string" ? EX.col(c) : c.build(EX)));
+            return DF.dropDuplicates(df, exprs);
+        });
+    }
+    union(right: ChainedDataFrame): ChainedDataFrame {
+        const next: DFProgram<any, any, any> = (DF, EX) => {
+            const leftPlan  = this.prog(DF, EX);
+            const rightPlan = right.prog(DF, EX);
+            return DF.union(leftPlan, rightPlan);
+        };
+        return new ChainedDataFrame(next, this.session);
     }
 
-    limit(n: number): ChainedDataFrame {
-        const nextPlan = this.dsl.limit(this.getPlan(), n);
-        return this.wrap(nextPlan, this.getSession());
+    unionByName(right: ChainedDataFrame, allowMissingColumns = false) {
+        const next: DFProgram<any, any, any> = (DF, EX) =>
+            DF.union(this.prog(DF, EX), right.prog(DF, EX), {byName: true, allowMissingColumns});
+        return new ChainedDataFrame(next, this.session);
     }
 
-
-    show() {
-        this.dsl.show(this.getPlan());
+    withColumnRenamed(oldName: string, newName: string) {
+        return this.chain((df, _EX, DF) => DF.withColumnRenamed(df, oldName, newName));
     }
 
-    async collect(){
-        return await this.dsl.collect(this.getPlan());
+    withColumnsRenamed(mapping: Record<string, string>) {
+        return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
     }
 
-    getSession(){
+    private compileToSparkPlan(): LogicalPlan {
+        return this.prog(SparkDFAlg, SparkExprAlg) as LogicalPlan;
+    }
+
+    async collectRaw(): Promise<any[]> {
+        const root = this.prog(ProtoDFAlg, ProtoExprAlg);
+        return ProtoExec.collect(root, this.session);
+    }
+
+    async show(): Promise<void> {
+        const result = await this.collectRaw();
+        const arrowBuffers = result
+            .filter(r => r.arrow_batch?.data)
+            .map(r => r.arrow_batch.data as Buffer);
+        printArrowResults(arrowBuffers);
+    }
+
+    getSession() {
         return this.session;
-    }
-    getPlan() {
-        return this.plan;
     }
 }
