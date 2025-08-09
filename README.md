@@ -131,28 +131,138 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 }
 ```
 
-## ✅ Status
+## ✅ Status Features & Roadmap
 
-| Feature               | Supported                                          |
-|-----------------------|----------------------------------------------------|
-| CSV Reading           | ✅                                                  |
-| Filtering             | ✅                                                  |
-| Projection / Alias    | ✅                                                  |
-| Arrow decoding        | ✅ (`.show()` prints tabular output)               |
-| Column expressions    | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.)          |
-| DSL abstraction       | ✅ Tagless Final                                    |
-| Join                  | ✅ Supports all join types                         |
-| Aggregation           | ✅ (`groupBy().agg({...})`)                        |
-| Distinct              | ✅ (`distinct()`, `dropDuplicates(...)`)           |
-| Sorting               | ✅ (`orderBy(...)`, `sort(...)`)                   |
-| Limit & Take          | ✅ (`limit(n)`)                                    |
-| **SetOperation**      | ✅ (`UNION`, `INTERSECT`, `EXCEPT`)                 |
-| Column renaming       | ✅ (`withColumnRenamed(...)`)                       |
-| UDF                   | ❌ Not yet                                         |
-| Type declarations     | ✅ `.d.ts` published to NPM                        |
-| Tests (Unit + Integration) | 🚧 In progress                                |
-| Modular compiler core | ✅ (`engine/` separated from Spark backend)        |
-| NPM Package           | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) |
+## Legend
+- **P0** = Paridad base inmediata
+- **P1** = I/O realista
+- **P2** = Performance & DX
+- **P3** = SQL/Catálogo & control
+- **P4** = UDF (scalar / vectorizadas)
+- **P5** = Streaming / Lakehouse / JDBC
+- **P6** = MLlib
+- **—** = ya implementado
+
+## Feature Matrix
+
+| Feature | Supported | Priority |
+|---|---|---|
+| CSV Reading | ✅ | — |
+| Filtering | ✅ | — |
+| Projection / Alias | ✅ | — |
+| Arrow decoding | ✅ (`.show()` prints tabular output) | — |
+| Column expressions | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.) | — |
+| DSL abstraction | ✅ Tagless Final | — |
+| Join | ✅ Supports all join types | — |
+| Aggregation | ✅ (`groupBy().agg({...})`) | — |
+| Distinct | ✅ (`distinct()`, `dropDuplicates(...)`) | — |
+| Sorting | ✅ (`orderBy(...)`, `sort(...)`) | — |
+| Limit & Take | ✅ (`limit(n)`) | — |
+| **SetOperation** | ✅ (`UNION`, `INTERSECT`, `EXCEPT`) | — |
+| Column renaming | ✅ (`withColumnRenamed(...)`) | — |
+| Type declarations | ✅ `.d.ts` published to NPM | — |
+| Modular compiler core | ✅ (`engine/` separated from Spark backend) | — |
+| NPM Package | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) | — |
+| Tests (Unit + Integration) | 🚧 In progress | **P0** |
+| **withColumn(...)** | ❌ Not yet | **P0** |
+| **when(...).otherwise(...)** (CASE WHEN) | ❌ Not yet | **P0** |
+| **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ❌ Not yet | **P0** |
+| **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`) | ❌ Not yet | **P0** |
+| **Parquet Reading** | ❌ Not yet | **P1** |
+| **JSON Reading** | ❌ Not yet | **P1** |
+| **DataFrameWriter** (CSV/JSON/Parquet/ORC) | ❌ Not yet | **P1** |
+| Write `partitionBy`, `bucketBy`, `sortBy` | ❌ Not yet | **P1** |
+| **describe()**, `summary()` | ❌ Not yet | **P2** |
+| **unionByName(...)** | ❌ Not yet | **P2** |
+| **Complex types** (arrays/maps/struct) + `explode/posexplode` | ❌ Not yet | **P2** |
+| **JSON helpers** (`from_json`, `to_json`) | ❌ Not yet | **P2** |
+| **cache() / persist() / unpersist()** | ❌ Not yet | **P2** |
+| **repartition(...) / coalesce(...)** | ❌ Not yet | **P2** |
+| **explain(...)** (`simple/extended/formatted`) | ❌ Not yet | **P2** |
+| `SparkSession.builder.config(...)` | ❌ Not yet | **P2** |
+| Auth/TLS for Spark Connect | ❌ Not yet | **P2** |
+| **spark.sql(...)** | ❌ Not yet | **P3** |
+| Temp views (`createOrReplaceTempView`) | ❌ Not yet | **P3** |
+| Catalog (`read.table`, `saveAsTable`) | ❌ Not yet | **P3** |
+| Plan viz / AST dump | ❌ Not yet | **P3** |
+| **Join hints** (`broadcast`, `shuffle_replicate_nl`, etc.) | ❌ Not yet | **P3** |
+| **sample(...)**, `randomSplit(...)` | ❌ Not yet | **P3** |
+| UDF (scalar) | ❌ Not yet | **P4** |
+| **UDAF / Vectorized UDF (Arrow)** | ❌ Not yet | **P4** |
+| Structured Streaming (`readStream` / `writeStream`) | ❌ Not yet | **P5** |
+| Watermark / trigger / output modes | ❌ Not yet | **P5** |
+| Lakehouse: Delta/Iceberg/Hudi (`format(...)`) | ❌ Not yet | **P5** |
+| JDBC read/write (`format("jdbc")`) | ❌ Not yet | **P5** |
+| **MLlib** (Pipelines/Transformers/Estimators básicos) | ❌ Not yet | **P6** |
+
+---
+
+## Roadmap por etapas (P0 → P6)
+
+### P0 — Paridad base inmediata
+**Objetivo:** igualar ergonomía mínima de PySpark para DataFrame/Column.  
+**Incluye:** `withColumn`, `when/otherwise`, **window functions**, `na.*`, **tests** (unit + integración).  
+**Criterios de aceptación:**
+- ✅ `withColumn` soporta nuevas columnas y reemplazo.
+- ✅ `when(...).otherwise(...)` compone expresiones condicionales en `select`/`withColumn`.
+- ✅ Ventanas: `over(partitionBy(...).orderBy(...).rowsBetween(...))` con agregaciones.
+- ✅ `na.drop/fill/replace` + `isNull/isNotNull` operativos.
+- ✅ Suite de tests corriendo en CI contra Spark Connect local.
+  **Notas:** Agregar ejemplos en README + `df.explain()` stub para depuración temprana si ayuda.
+
+### P1 — I/O realista
+**Objetivo:** trabajar con formatos comunes de datos y escribir resultados.  
+**Incluye:** **Parquet/JSON reading**, **DataFrameWriter** (CSV/JSON/Parquet/ORC), `partitionBy/bucketBy/sortBy` (write).  
+**Criterios:**
+- ✅ `spark.read.parquet/json/csv(...)` con `options(...)` comunes.
+- ✅ `df.write.format(...).mode("overwrite|append").save(...)`.
+- ✅ `partitionBy` en escritura y smoke tests leyendo lo escrito.
+  **Notas:** Cubrir inferencia de esquema básica y errores claros.
+
+### P2 — Performance & DX
+**Objetivo:** control de particiones, caching y mejor depuración.  
+**Incluye:** `cache/persist/unpersist`, `repartition/coalesce`, **explain(formatted)**, `describe/summary`, `unionByName`, **complex types + explode**, **JSON helpers**, `SparkSession.builder.config`, **Auth/TLS**.  
+**Criterios:**
+- ✅ Cambios de partición reflejados en el plan.
+- ✅ `cache/persist` no rompe consistencia y `unpersist` limpia.
+- ✅ `explain("formatted")`/`df.explain()` muestra plan válido.
+- ✅ `from_json/to_json` + `explode` en arrays/maps/struct.
+  **Notas:** Documentar recomendaciones de tuning y ejemplos de DX.
+
+### P3 — SQL/Catálogo & control fino
+**Objetivo:** interop total con SQL y catálogo.  
+**Incluye:** **spark.sql(...)**, **temp views**, **catalog** (`read.table`, `saveAsTable`), **plan viz/AST dump**, **join hints**, `sample/randomSplit`.  
+**Criterios:**
+- ✅ `spark.sql("...")` produce `DataFrame` equivalente al DSL.
+- ✅ `createOrReplaceTempView` usable desde `spark.sql`.
+- ✅ `broadcast(df2)`/hints reflejados en el plan.
+  **Notas:** Opcional: comando para volcar plan lógico en JSON/Protobuf.
+
+### P4 — UDF (funciones definidas por usuario)
+**Objetivo:** extender transformaciones con lógica propia.  
+**Incluye:** **Scalar UDF**, **UDAF / vectorized UDF (Arrow)**.  
+**Criterios:**
+- ✅ Registro y uso de UDF en DSL y en `spark.sql`.
+- ✅ Vectorized UDF con Arrow en path feliz y tests de interoperabilidad.
+  **Notas:** Documentar costos/limitaciones y mejores prácticas.
+
+### P5 — Streaming / Lakehouse / JDBC
+**Objetivo:** habilitar pipelines de producción.  
+**Incluye:** **Structured Streaming** (`readStream`/`writeStream`, **watermark**, **trigger**, **output modes**), **Delta/Iceberg/Hudi** vía `format(...)`, **JDBC** read/write.  
+**Criterios:**
+- ✅ Ejemplo end‑to‑end de streaming (socket/Kafka → transform → sink).
+- ✅ Lectura/escritura a Delta/Iceberg/Hudi cuando el cluster tiene los jars.
+- ✅ JDBC probado contra una base popular (Postgres/MySQL).
+
+### P6 — MLlib
+**Objetivo:** pipelines de ML sobre DataFrames desde TypeScript.  
+**Incluye:** Pipelines, Estimators/Transformers básicos (e.g., `StringIndexer`, `VectorAssembler`, `LogisticRegression`).  
+**Criterios:**
+- ✅ Entrenar, guardar y cargar modelos; `transform()` sobre DataFrame.
+- ✅ Ejemplo reproducible (dataset público) y guía de migración desde PySpark.
+
+---
+
 
 ## 📄 License
 
