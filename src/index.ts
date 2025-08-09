@@ -1,5 +1,5 @@
 import {spark} from "./spark/session";
-import {col} from "./engine/column";
+import {col, when} from "./engine/column";
 
 (async () => {
     const people = spark.read
@@ -12,7 +12,7 @@ import {col} from "./engine/column";
         .option("header", "true")
         .csv("/data/purchases.tsv");
 
-    people
+/*    people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
         .filter(col("amount").gt(100))
@@ -56,4 +56,19 @@ import {col} from "./engine/column";
     p2024.unionByName(p2025) // mapea a set_op(UNION, is_all:false)
         .limit(5)
         .show();
+
+    purchases
+        .withColumn("amount_x10", col("amount").gte(10))
+        .select("user_id", "product", "amount_x10")
+        .limit(3)
+        .show();*/
+    const purchasesWithCategory = purchases.withColumn(
+        "spending_category",
+        when(col("amount").gt(1000), "VIP")
+            .when(col("amount").gt(500), "Premium")
+            .when(col("amount").gt(100), "Regular")
+            .otherwise("Low")
+    );
+
+    purchasesWithCategory.show();
 })();

@@ -78,7 +78,6 @@ function compileJoin(p: LogicalPlan & { type: "Join" }) {
 }
 
 
-
 function resolveSortExprAgainstAggregate(e: Expression, child: LogicalPlan): Expression {
     if (child.type !== "Aggregate" || e.type !== "Column") return e;
 
@@ -91,7 +90,7 @@ function resolveSortExprAgainstAggregate(e: Expression, child: LogicalPlan): Exp
     return {
         type: "UnresolvedFunction",
         name: m[1],                                // "sum"
-        args: [{ type: "Column", name: m[2] }],    // "amount"
+        args: [{type: "Column", name: m[2]}],    // "amount"
     };
 }
 
@@ -124,7 +123,8 @@ function compileLimit(p: LogicalPlan & { type: "Limit" }) {
     };
 }
 
-function compileDistinct(p: LogicalPlan & { type: "Distinct" }) {  const child = p.input;
+function compileDistinct(p: LogicalPlan & { type: "Distinct" }) {
+    const child = p.input;
 
     return {
         deduplicate: {
@@ -134,7 +134,12 @@ function compileDistinct(p: LogicalPlan & { type: "Distinct" }) {  const child =
     };
 }
 
-function compileUnion(p: LogicalPlan & { type: "Union"; inputs?: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean }) {
+function compileUnion(p: LogicalPlan & {
+    type: "Union";
+    inputs?: LogicalPlan[];
+    byName?: boolean;
+    allowMissingColumns?: boolean
+}) {
     const rels = (p.inputs && p.inputs.length ? p.inputs : [(p as any).left, (p as any).right])
         .filter(Boolean)
         .map(pl => compileRelation(pl).relation);
@@ -149,8 +154,8 @@ function compileUnion(p: LogicalPlan & { type: "Union"; inputs?: LogicalPlan[]; 
             right_input: rightRel,
             set_op_type: toProtoSetOpType("union"), // UNION
             is_all: true,
-            ...(p.byName !== undefined ? { by_name: p.byName } : {}),
-            ...(p.allowMissingColumns !== undefined ? { allow_missing_columns: p.allowMissingColumns } : {}),
+            ...(p.byName !== undefined ? {by_name: p.byName} : {}),
+            ...(p.allowMissingColumns !== undefined ? {allow_missing_columns: p.allowMissingColumns} : {}),
         }
     });
 
@@ -161,7 +166,7 @@ function compileUnion(p: LogicalPlan & { type: "Union"; inputs?: LogicalPlan[]; 
     return acc;
 }
 
-const handlers: Record<LogicalPlan["type"],(plan: any) => Record<"relation", any>
+const handlers: Record<LogicalPlan["type"], (plan: any) => Record<"relation", any>
 > = {
     Relation: (p) => ({relation: compileRead(p)}),
     Filter: (p) => ({relation: compileFilter(p)}),
@@ -171,10 +176,10 @@ const handlers: Record<LogicalPlan["type"],(plan: any) => Record<"relation", any
     GroupBy: () => {
         throw new Error("GroupBy should not be compiled directly");
     },
-    Sort:     (p) => ({ relation: compileSort(p) }),
-    Limit:    (p) => ({ relation: compileLimit(p) }),
-    Distinct: (p) => ({ relation: compileDistinct(p) }),
-    Union:    (p) => ({ relation: compileUnion(p) }),
+    Sort: (p) => ({relation: compileSort(p)}),
+    Limit: (p) => ({relation: compileLimit(p)}),
+    Distinct: (p) => ({relation: compileDistinct(p)}),
+    Union: (p) => ({relation: compileUnion(p)}),
 };
 
 export function compileRelation(plan: LogicalPlan): { relation: any } {
@@ -234,7 +239,21 @@ export function compileExpression(expr: Expression): any {
                     },
                 };
             case "UnresolvedStar":
-                return { unresolved_star: {} };
+                return {unresolved_star: {}};
+            case "CaseWhen": {
+                const args: any[] = [];
+                for (const b of e.branches) {
+                    args.push(compileExpression(b.when));
+                    args.push(compileExpression(b.then));
+                }
+                if (e.else) args.push(compileExpression(e.else));
+                return {
+                    unresolved_function: {
+                        function_name: "case_when",
+                        arguments: args,
+                    },
+                };
+            }
             default:
                 throw new Error(`Unsupported expression type: ${(e as any).type}`);
         }

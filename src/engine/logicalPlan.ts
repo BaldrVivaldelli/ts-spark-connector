@@ -3,7 +3,7 @@ import {GroupTypeInput, JoinTypeInput} from "./sparkConnectEnums";
 export type SortDirection = "asc" | "desc";
 export type NullsOrder = "nullsFirst" | "nullsLast";
 
-export interface SortOrder  {
+export interface SortOrder {
     expr: Expression;
     direction: SortDirection;
     nulls?: NullsOrder;
@@ -14,6 +14,26 @@ export type GroupBy = {
     input: LogicalPlan;
     expressions: Expression[];
 };
+export type FrameBoundary =
+    | { type: "UnboundedPreceding" }
+    | { type: "UnboundedFollowing" }
+    | { type: "CurrentRow" }
+    | { type: "ValuePreceding"; value: number }
+    | { type: "ValueFollowing"; value: number };
+
+export type FrameType = "rows" | "range";
+
+export interface WindowSpecExpr {
+    partitionBy: Expression[];
+    orderBy: Array<{
+        type: "SortKey";
+        input: Expression;
+        direction: "asc" | "desc";
+        nulls?: "nullsFirst" | "nullsLast"
+    }>;
+    frame?: { type: FrameType; start: FrameBoundary; end: FrameBoundary };
+}
+
 export type LogicalPlan =
     | { type: "Relation"; format: string; path: string; options?: Record<string, string> }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
@@ -34,4 +54,6 @@ export type Expression =
     | { type: "Alias"; input: Expression; alias: string }
     | { type: "UnresolvedFunction"; name: string; args: Expression[] }
     | { type: "SortKey"; input: Expression; direction: "asc" | "desc"; nulls?: "nullsFirst" | "nullsLast" }
-    | { type: "UnresolvedStar" };
+    | { type: "UnresolvedStar" }
+    | { type: "CaseWhen"; branches: Array<{ when: Expression; then: Expression }>; else?: Expression }
+    | { type: "Window"; func: Expression; spec: WindowSpecExpr };

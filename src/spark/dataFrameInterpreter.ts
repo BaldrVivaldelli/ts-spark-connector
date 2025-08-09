@@ -21,14 +21,17 @@ export function dataframeInterpreter(plan: LogicalPlan, session: SparkSession): 
             condition: condition.expr,
         }),
 
-        withColumn: (plan, name, expr) => {
-            const cols = extractColumns(plan);
-            const updatedCols = replaceOrAppendColumn(cols, name, expr.alias(name).expr);
+        withColumn: (plan, name, column) => {
+            const aliased: Expression = {
+                type: "Alias",
+                input: column.expr,
+                alias: name,
+            }
             return {
                 type: "Project",
                 input: plan,
-                columns: updatedCols,
-            };
+                columns: [{ type: "UnresolvedStar" }, aliased],
+            };;
         },
         join: (left, right, on) => ({
             type: "Join",

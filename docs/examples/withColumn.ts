@@ -1,20 +1,23 @@
-import { createSparkSession } from "../../src/spark/session";
-import { col } from "../../src/engine/column";
+import {createSparkSession, spark} from "../../src/spark/session";
+import {col, when} from "../../src/engine/column";
 
 async function main() {
     const spark = createSparkSession("example-withcolumn-session");
 
-    const people = spark.read
+    const purchases = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
-        .csv("/data/people.tsv");
+        .csv("/data/purchases.tsv");
 
-    const result = people
-        .withColumn("is_adult", col("age").gte(18))
-        .withColumn("greeting", col("name").eq("Alice").alias("greeting_flag"))
-        .select("name", "age", "is_adult", "greeting");
+    const purchasesWithCategory = purchases.withColumn(
+        "spending_category",
+        when(col("amount").gt(1000), "VIP")
+            .when(col("amount").gt(500), "Premium")
+            .when(col("amount").gt(100), "Regular")
+            .otherwise("Low")
+    );
 
-    await result.show();
+    purchasesWithCategory.show();
 }
 
 main().catch(console.error);

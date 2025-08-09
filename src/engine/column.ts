@@ -108,3 +108,33 @@ function literal(value: any): Expression {
 export function col(name: string): Column {
     return new Column({type: "Column", name});
 }
+
+export function lit(value: any): Column {
+    return new Column(literal(value));
+}
+
+export function when(condition: Column, value: any) {
+    const pairs: Expression[] = [condition.expr, literal(value)];
+
+    const chain = {
+        when(cond: Column, val: any) {
+            pairs.push(cond.expr, literal(val));
+            return chain;
+        },
+        otherwise(val: any): Column {
+            let elseExpr: Expression = literal(val);
+            for (let i = pairs.length - 2; i >= 0; i -= 2) {
+                const cond = pairs[i];
+                const thenVal = pairs[i + 1];
+                elseExpr = {
+                    type: "UnresolvedFunction",
+                    name: "if",
+                    args: [cond, thenVal, elseExpr],
+                };
+            }
+            return new Column(elseExpr);
+        },
+    };
+
+    return chain;
+}
