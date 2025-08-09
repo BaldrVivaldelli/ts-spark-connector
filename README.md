@@ -1,10 +1,10 @@
 # ts-spark-connector
 🌱 **Status: Alpha – Early growth stage**
 
-TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html). This project allows you to construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
+TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html).  
+Construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
 
 ## 🚀 Features
-
 
 - Build Spark logical plans using a fluent, PySpark-style API in TypeScript
 - Evaluate transformations locally or stream results via Arrow
@@ -12,8 +12,10 @@ TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/lates
 - Composable, immutable, and strongly typed DataFrame operations
 - Supports column expressions (`col`, `.gt`, `.alias`, `.and`, etc.)
 - Compatible with Spark Connect Protobuf and `spark-submit --class org.apache.spark.sql.connect.service.SparkConnectServer`
+- **Supports Spark SetOperations** (`UNION`, `INTERSECT`, `EXCEPT`) with `by_name`, `is_all`, and `allow_missing_columns`
 - Support for Spark-compatible joins with configurable join types
 - Session-aware execution without relying on global singletons
+- Includes **ready-to-run examples** in the `examples/` folder
 
 ## 📦 Installation
 
@@ -25,7 +27,7 @@ npm install
 
 ## 🔧 Docker Setup
 
-You need a Spark Connect server running. Here's a `docker-compose.yml` example:
+You need a Spark Connect server running. Example `docker-compose.yml`:
 
 ```yaml
 services:
@@ -39,8 +41,7 @@ services:
       - SPARK_NO_DAEMONIZE=true
 ```
 
-The `spark-server` Dockerfile should start Spark Connect:
-
+`spark-server/Dockerfile`:
 ```Dockerfile
 FROM bitnami/spark:latest
 USER root
@@ -49,26 +50,39 @@ RUN chmod +x /entrypoint.sh
 CMD ["/entrypoint.sh"]
 ```
 
-The `entrypoint.sh`:
-
+`spark-server/entrypoint.sh`:
 ```bash
 #!/bin/bash
-/opt/bitnami/spark/bin/spark-submit \
-  --class org.apache.spark.sql.connect.service.SparkConnectServer \
-  --conf spark.sql.connect.enable=true \
-  --conf spark.sql.connect.grpc.binding=0.0.0.0:15002 \
-  /opt/bitnami/spark/jars/spark-connect_2.12-4.0.0.jar
+/opt/bitnami/spark/bin/spark-submit   --class org.apache.spark.sql.connect.service.SparkConnectServer   --conf spark.sql.connect.enable=true   --conf spark.sql.connect.grpc.binding=0.0.0.0:15002   /opt/bitnami/spark/jars/spark-connect_2.12-4.0.0.jar
 ```
 
-Make sure `example_data/people.tsv` and `purchases.tsv` exist.
+Example data in `/example_data`:
+- `people.tsv`
+- `purchases.tsv`
 
-## 🧪 Example Usage
+## 📂 Examples
+
+We include a set of TypeScript scripts in the `examples/` folder:
+
+| File              | Description |
+|-------------------|-------------|
+| `join.ts`         | Inner join between two datasets |
+| `groupBy.ts`      | Aggregations with `groupBy` and `orderBy` |
+| `withColumn.ts`   | Adding and renaming columns |
+| `union.ts`        | `SetOperation` with UNION queries |
+| `distinct.ts`     | Using `distinct()` and `dropDuplicates()` |
+
+Run any example with:
+
+```bash
+npx tsx examples/join.ts
+```
+
+## 🧪 Quick Usage
 
 ```ts
-import { createSparkSession } from "./src/spark/session";
+import { spark } from "./src/spark/session";
 import { col } from "./src/engine/column";
-
-const spark = createSparkSession(); // Session-aware
 
 const people = spark.read
     .option("delimiter", "\t")
@@ -80,17 +94,25 @@ const purchases = spark.read
     .option("header", "true")
     .csv("/data/purchases.tsv");
 
-const result = people
-    .join(purchases, col("id").eq(col("user_id")), "left")
-    .select("name", "product", "amount")
-    .filter(col("amount").gt(100));
+people
+  .join(purchases, col("id").eq(col("user_id")), "left")
+  .select("name", "product", "amount")
+  .filter(col("amount").gt(100))
+  .show();
+```
 
-await result.show();
+### Example: UNION with SetOperation
+
+```ts
+const p2024 = purchases.filter(col("year").eq(2024));
+const p2025 = purchases.filter(col("year").eq(2025));
+
+p2024.union(p2025, { is_all: true, by_name: false })
+  .limit(5)
+  .show();
 ```
 
 ## 💡 Column Expressions
-
-This library supports composable column expressions using a Spark-like DSL:
 
 ```ts
 col("age").gt(18)
@@ -100,45 +122,38 @@ col("age").gt(18).and(col("active").eq(true)).alias("eligible")
 
 ## 🧠 Tagless Final DSL
 
-The internal architecture separates the declarative query description from its interpretation (compilation, debugging, execution, etc.), enabling:
-
-- Static analysis or testable plans
-- Reuse across backends (debug, Spark, SQL, etc.)
-- DSL reuse without tying to Spark
-
 ```ts
 function userQuery<F>(dsl: DataFrameDSL<F>): F {
-    return dsl
-        .select(["name", "age"])
-        .filter("age > 18")
-        .withColumn("eligible", col("age").gt(18).and(col("country").eq("AR")))
+  return dsl
+    .select(["name", "age"])
+    .filter("age > 18")
+    .withColumn("eligible", col("age").gt(18).and(col("country").eq("AR")));
 }
 ```
 
 ## ✅ Status
 
 | Feature               | Supported                                          |
-|------------------------|-----------------------------------------------------|
-| CSV Reading           | ✅                                                   |
-| Filtering             | ✅                                                   |
-| Projection / Alias    | ✅                                                   |
-| Arrow decoding        | ✅ (`.show()` prints tabular output)                |
-| Column expressions    | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.)           |
-| DSL abstraction       | ✅ Tagless Final                                     |
-| Join                  | ✅ Supports inner, left, right, outer                |
-| Aggregation           | ✅ (with `groupBy().agg({...})`)                    |
-| Grouped count         | 🚧 Planned (`groupBy(...).count()`)                 |
-| Column renaming       | 🚧 Planned (`withColumnRenamed(...)`)               |
-| Sorting               | 🚧 Planned (`orderBy(...)`, `sort(...)`)            |
-| Limit & Take          | 🚧 Planned (`limit(n)`, `take(n)`)                  |
-| Distinct              | 🚧 Planned                                          |
-| Union / UnionAll      | 🚧 Planned                                          |
-| UDF                   | ❌ Not yet                                          |
-| Type declarations     | ✅ (`.d.ts` files published to NPM)                |
-| Tests (Unit + Integration) | 🚧 In progress                                 |
-| Modular compiler core | ✅ (`engine/` separated from Spark backend)         |
+|-----------------------|----------------------------------------------------|
+| CSV Reading           | ✅                                                  |
+| Filtering             | ✅                                                  |
+| Projection / Alias    | ✅                                                  |
+| Arrow decoding        | ✅ (`.show()` prints tabular output)               |
+| Column expressions    | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.)          |
+| DSL abstraction       | ✅ Tagless Final                                    |
+| Join                  | ✅ Supports all join types                         |
+| Aggregation           | ✅ (`groupBy().agg({...})`)                        |
+| Distinct              | ✅ (`distinct()`, `dropDuplicates(...)`)           |
+| Sorting               | ✅ (`orderBy(...)`, `sort(...)`)                   |
+| Limit & Take          | ✅ (`limit(n)`)                                    |
+| **SetOperation**      | ✅ (`UNION`, `INTERSECT`, `EXCEPT`)                 |
+| Column renaming       | ✅ (`withColumnRenamed(...)`)                       |
+| UDF                   | ❌ Not yet                                         |
+| Type declarations     | ✅ `.d.ts` published to NPM                        |
+| Tests (Unit + Integration) | 🚧 In progress                                |
+| Modular compiler core | ✅ (`engine/` separated from Spark backend)        |
 | NPM Package           | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) |
 
 ## 📄 License
 
-APACHE or the one that is opensource. The main idea is to democratize access to Spark features from the TypeScript ecosystem.
+Apache-2.0 — This project aims to democratize access to Spark features from the TypeScript ecosystem.
