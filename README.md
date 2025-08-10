@@ -173,8 +173,8 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | Tests (Unit + Integration)                                             | 🚧 In progress                                                  | —        |
 | **withColumn(...)**                                                    | ✅                                                               | —        |
 | **when(...).otherwise(...)** (CASE WHEN)                               | ✅                                                               | —        |
-| **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ❌ Not yet                                                       | **P0**   |
-| **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ❌ Not yet                                                       | **P0**   |
+| **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ✅                                                               | —        |
+| **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ✅                                                               | —        |
 | **Parquet Reading**                                                    | ❌ Not yet                                                       | **P1**   |
 | **JSON Reading**                                                       | ❌ Not yet                                                       | **P1**   |
 | **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ❌ Not yet                                                       | **P1**   |

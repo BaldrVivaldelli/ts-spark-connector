@@ -61,16 +61,35 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
         }
         return acc;
     },
-    window: (func, _spec: WindowSpec<ProtoExpr>) => ({
-        window: {func},
-    })
+    win: (func, _spec: WindowSpec<ProtoExpr>) => ({
+        win: {func},
+    }),
+    isNull: (input) => ({
+        unresolved_function: {
+            function_name: "isnull",
+            arguments: [input],
+        },
+    }),
+
+    isNotNull: (input) => ({
+        unresolved_function: {
+            function_name: "isnotnull",
+            arguments: [input],
+        },
+    }),
+
+    coalesce: (args) => ({
+        unresolved_function: {
+            function_name: "coalesce",
+            arguments: args,
+        },
+    }),
 };
 
 // ========================= DATAFRAME (R = ProtoRel) =========================
 
 type ProtoRel = any;
 
-// Pequeña “repr” para group (no AST, sólo guarda input + keys + tipo)
 type ProtoGroup = { __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: any } };
 
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {

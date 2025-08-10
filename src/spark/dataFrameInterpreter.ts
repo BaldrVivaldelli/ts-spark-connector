@@ -3,16 +3,16 @@ import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinTypeInput} from "../engine/sparkC
 import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./dataframe";
 
 export const SparkExprAlg: ExprAlg<Expression> = {
-    col: (name) => ({ type: "Column", name }),
-    lit: (v) => ({ type: "Literal", value: v }),
-    bin: (op, left, right) => ({ type: "Binary", op, left, right }),
-    logical: (op, left, right) => ({ type: "Logical", op, left, right }),
-    alias: (input, alias) => ({ type: "Alias", input, alias }),
-    call: (name, args) => ({ type: "UnresolvedFunction", name, args }),
-    sortKey: (input, direction, nulls) => ({ type: "SortKey", input, direction, nulls }),
-    star: () => ({ type: "UnresolvedStar" }),
-    caseWhen: (branches, elze) => ({ type: "CaseWhen", branches, else: elze }),
-    window: (func, spec: WindowSpec<Expression>) => ({
+    col: (name) => ({type: "Column", name}),
+    lit: (v) => ({type: "Literal", value: v}),
+    bin: (op, left, right) => ({type: "Binary", op, left, right}),
+    logical: (op, left, right) => ({type: "Logical", op, left, right}),
+    alias: (input, alias) => ({type: "Alias", input, alias}),
+    call: (name, args) => ({type: "UnresolvedFunction", name, args}),
+    sortKey: (input, direction, nulls) => ({type: "SortKey", input, direction, nulls}),
+    star: () => ({type: "UnresolvedStar"}),
+    caseWhen: (branches, elze) => ({type: "CaseWhen", branches, else: elze}),
+    win: (func, spec: WindowSpec<Expression>) => ({
         type: "Window",
         func,
         spec: {
@@ -23,9 +23,26 @@ export const SparkExprAlg: ExprAlg<Expression> = {
                 direction: o.direction,
                 nulls: o.nulls
             })),
-            frame: spec.frame && { ...spec.frame }
+            frame: spec.frame && {...spec.frame}
         }
     }),
+    isNull: (input) => ({
+        type: "UnresolvedFunction",
+        name: "isnull",
+        args: [input]
+    }),
+
+    isNotNull: (input) => ({
+        type: "UnresolvedFunction",
+        name: "isnotnull",
+        args: [input]
+    }),
+
+    coalesce: (args) => ({
+        type: "UnresolvedFunction",
+        name: "coalesce",
+        args
+    })
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {

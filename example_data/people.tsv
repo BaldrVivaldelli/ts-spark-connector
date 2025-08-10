@@ -2,3 +2,4 @@ id	name	age	country	year
 1	Alice	30	USA	2024
 2	Bob	25	Canada	2024
 3	Carol	40	Argentina	2025
+3	Carol		Argentina	2025

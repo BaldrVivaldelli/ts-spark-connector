@@ -45,7 +45,12 @@ export interface ExprAlg<E> {
 
     caseWhen(branches: Array<{ when: E; then: E }>, elze?: E): E;
 
-    window(func: E, spec: WindowSpec<E>): E;
+    win(func: E, spec: WindowSpec<E>): E;
+
+    isNull(input: E): E;
+    isNotNull(input: E): E;
+    coalesce(args: E[]): E;
+    sortKey(input: E, direction: "asc"|"desc", nulls?: "nullsFirst"|"nullsLast"): E;
 }
 
 export interface DFAlg<R, E, G = unknown> {

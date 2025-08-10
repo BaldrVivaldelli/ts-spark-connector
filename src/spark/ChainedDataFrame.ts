@@ -57,7 +57,7 @@ export class ChainedDataFrame {
         return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
     }
 
-    join(right: ChainedDataFrame, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE ) {
+    join(right: ChainedDataFrame, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
         return new ChainedDataFrame(next, this.session);
@@ -69,7 +69,7 @@ export class ChainedDataFrame {
         const parseAgg = (s: string) => {
             const m = s.match(/^\s*([A-Za-z_]\w*)\s*\(\s*([^)]+)\s*\)\s*$/);
             if (!m) throw new Error(`Invalid aggregation: ${s}`);
-            return { fn: m[1], arg: m[2] };
+            return {fn: m[1], arg: m[2]};
         };
 
         return {
@@ -84,7 +84,7 @@ export class ChainedDataFrame {
                     const exprs = Object.fromEntries(
                         Object.entries(aggs).map(([alias, v]) => {
                             if (typeof v === "string") {
-                                const { fn, arg } = parseAgg(v);
+                                const {fn, arg} = parseAgg(v);
                                 return [alias, EX.call(fn, [EX.col(arg)])];
                             }
                             return [alias, v.build(EX)];
@@ -102,9 +102,10 @@ export class ChainedDataFrame {
     orderBy(...colsOrKeys: SortKeyInput[]) {
         return this.chain((df, EX, DF) => {
             const orders = colsOrKeys.map(k => {
-                if (typeof k === "string")        return { expr: EX.col(k),       direction: "asc" as const };
-                if (typeof k === "function")      return k(EX); // ya devuelve SortOrder<E>
-                /* k es EBuilder */                return { expr: k.build(EX),     direction: "asc" as const };
+                if (typeof k === "string") return {expr: EX.col(k), direction: "asc" as const};
+                if (typeof k === "function") return k(EX); // ya devuelve SortOrder<E>
+                /* k es EBuilder */
+                return {expr: k.build(EX), direction: "asc" as const};
             });
             return DF.orderBy(df, orders);
         });
@@ -113,9 +114,9 @@ export class ChainedDataFrame {
     sort(...colsOrKeys: SortKeyInput[]) {
         return this.chain((df, EX, DF) => {
             const orders = colsOrKeys.map(k => {
-                if (typeof k === "string")        return { expr: EX.col(k),       direction: "asc" as const };
-                if (typeof k === "function")      return k(EX);
-                /* k es EBuilder */                return { expr: k.build(EX),     direction: "asc" as const };
+                if (typeof k === "string") return {expr: EX.col(k), direction: "asc" as const};
+                if (typeof k === "function") return k(EX);
+                return {expr: k.build(EX), direction: "asc" as const};
             });
             return DF.sort(df, orders);
         });
@@ -141,9 +142,10 @@ export class ChainedDataFrame {
             return DF.dropDuplicates(df, exprs);
         });
     }
+
     union(right: ChainedDataFrame): ChainedDataFrame {
         const next: DFProgram<any, any, any> = (DF, EX) => {
-            const leftPlan  = this.prog(DF, EX);
+            const leftPlan = this.prog(DF, EX);
             const rightPlan = right.prog(DF, EX);
             return DF.union(leftPlan, rightPlan);
         };
@@ -162,6 +164,20 @@ export class ChainedDataFrame {
 
     withColumnsRenamed(mapping: Record<string, string>) {
         return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
+    }
+
+    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ChainedDataFrame {
+        return this.chain((df, EX, DF) => {
+            const toE = (x: string | EBuilder | number | boolean) =>
+                typeof x === "string"
+                    ? EX.col(x)
+                    : typeof x === "object" && x !== null && "build" in x
+                        ? (x as EBuilder).build(EX)
+                        : EX.lit(x as any);
+
+            const coalesced = EX.coalesce(exprs.map(toE));
+            return DF.withColumn(df, name, coalesced);
+        });
     }
 
     private compileToSparkPlan(): LogicalPlan {
