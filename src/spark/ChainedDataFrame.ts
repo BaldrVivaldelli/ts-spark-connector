@@ -1,11 +1,9 @@
 import {SparkDFAlg, SparkExprAlg} from "./dataFrameInterpreter";
 import {LogicalPlan} from "../engine/logicalPlan";
-import {programToProtobufRoot, ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compiler";
-import {sparkGrpcClient} from "../client/sparkClient";
+import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compiler";
 import {SparkSession} from "./session";
-import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortDirection, SortOrder} from "./dataframe";
+import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./dataframe";
 import {DEFAULT_JOIN_TYPE, JoinTypeInput} from "../engine/sparkConnectEnums";
-import {tableFromIPC} from "apache-arrow";
 import {printArrowResults} from "../utils/arrowPrinter";
 
 type EBuilder = { build<E>(EX: ExprAlg<E>): E };
@@ -26,7 +24,7 @@ export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): Sor
 export class ChainedDataFrame<R,E,G> {
     private readonly prog: DFProgram<any, any, any>;
 
-    constructor(p: DFProgram<any, any, any>, private readonly session: SparkSession) {
+    constructor(p: DFProgram<R,E,G>, private readonly session: SparkSession) {
         this.prog = p;
     }
 
