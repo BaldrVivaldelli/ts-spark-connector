@@ -37,7 +37,7 @@ export type GroupBy = {
 };
 
 export type LogicalPlan =
-    | { type: "Relation"; format: string; path: string; options?: Record<string, string> }
+    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string> }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
     | {

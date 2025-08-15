@@ -23,16 +23,20 @@ export const asc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): Sort
 export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
     ({expr: e.build(EX), direction: "desc", nulls});
 
-export class ChainedDataFrame {
+export class ChainedDataFrame<R,E,G> {
     private readonly prog: DFProgram<any, any, any>;
 
     constructor(p: DFProgram<any, any, any>, private readonly session: SparkSession) {
         this.prog = p;
     }
 
-    static fromCSV(path: string, session: SparkSession, options?: Record<string, string>) {
-        const p: DFProgram<any, any, any> = (DF) => DF.relation("csv", path, options);
-        return new ChainedDataFrame(p, session);
+    static fromCSV<R,E,G>(
+        path: string | string[],
+        session: SparkSession,
+        options?: Record<string, string>
+    ) {
+        const p: DFProgram<R,E,G> = (DF) => DF.relation("csv", path, options);
+        return new ChainedDataFrame<R,E,G>(p, session);
     }
 
     private chain(step: (df: any, EX: ExprAlg<any>, DF: DFAlg<any, any, any>) => any) {
@@ -40,9 +44,9 @@ export class ChainedDataFrame {
         return new ChainedDataFrame(next, this.session);
     }
 
-    select(...cols: string[]): ChainedDataFrame;
-    select(...cols: EBuilder[]): ChainedDataFrame;
-    select(...cols: (string | EBuilder)[]): ChainedDataFrame {
+    select(...cols: string[]): ChainedDataFrame<R,E,G>;
+    select(...cols: EBuilder[]): ChainedDataFrame<R,E,G>;
+    select(...cols: (string | EBuilder)[]): ChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) =>
             DF.select(df, cols.map(c => typeof c === "string" ? EX.col(c) : c.build(EX)))
         );
@@ -57,7 +61,7 @@ export class ChainedDataFrame {
         return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
     }
 
-    join(right: ChainedDataFrame, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
+    join(right: ChainedDataFrame<R,E,G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
         return new ChainedDataFrame(next, this.session);
@@ -131,9 +135,9 @@ export class ChainedDataFrame {
     }
 
 
-    dropDuplicates(...cols: string[]): ChainedDataFrame;
-    dropDuplicates(...cols: EBuilder[]): ChainedDataFrame;
-    dropDuplicates(...cols: (string | EBuilder)[]): ChainedDataFrame {
+    dropDuplicates(...cols: string[]): ChainedDataFrame<R,E,G>;
+    dropDuplicates(...cols: EBuilder[]): ChainedDataFrame<R,E,G>;
+    dropDuplicates(...cols: (string | EBuilder)[]): ChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => {
             const exprs =
                 cols.length === 0
@@ -143,7 +147,7 @@ export class ChainedDataFrame {
         });
     }
 
-    union(right: ChainedDataFrame): ChainedDataFrame {
+    union(right: ChainedDataFrame<R,E,G>): ChainedDataFrame<R,E,G> {
         const next: DFProgram<any, any, any> = (DF, EX) => {
             const leftPlan = this.prog(DF, EX);
             const rightPlan = right.prog(DF, EX);
@@ -152,7 +156,7 @@ export class ChainedDataFrame {
         return new ChainedDataFrame(next, this.session);
     }
 
-    unionByName(right: ChainedDataFrame, allowMissingColumns = false) {
+    unionByName(right: ChainedDataFrame<R,E,G>, allowMissingColumns = false) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.union(this.prog(DF, EX), right.prog(DF, EX), {byName: true, allowMissingColumns});
         return new ChainedDataFrame(next, this.session);
@@ -166,7 +170,7 @@ export class ChainedDataFrame {
         return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
     }
 
-    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ChainedDataFrame {
+    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => {
             const toE = (x: string | EBuilder | number | boolean) =>
                 typeof x === "string"
