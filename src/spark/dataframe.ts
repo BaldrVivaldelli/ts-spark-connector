@@ -54,7 +54,7 @@ export interface ExprAlg<E> {
 }
 
 export interface DFAlg<R, E, G = unknown> {
-    relation(format: string, path: string, options?: Record<string, string>): R;
+    relation(format: string, path: string | string[], options?: Record<string, string>): R;
 
     select(plan: R, columns: E[]): R;
 

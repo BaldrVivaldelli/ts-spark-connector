@@ -1,10 +1,12 @@
+// DataFrameReaderTF.ts
 import { ChainedDataFrame } from "./ChainedDataFrame";
 import { SparkSession } from "./session";
-import {DFProgram} from "./dataframe";
+import { DFProgram } from "./dataframe";
 
 type Opts = Record<string, string>;
 
-export class DataFrameReaderTF {
+
+export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
     private readonly fmt?: string;
     private readonly opts: Opts;
 
@@ -13,49 +15,41 @@ export class DataFrameReaderTF {
         this.opts = opts;
     }
 
-    /** Igual que PySpark: setea el formato y devuelve un reader nuevo (inmutable). */
-    format(fmt: string): DataFrameReaderTF {
-        return new DataFrameReaderTF(this.session, fmt, this.opts);
+    format(fmt: string): DataFrameReaderTF<R,E,G> {
+        return new DataFrameReaderTF<R,E,G>(this.session, fmt, this.opts);
     }
 
-    /** Opción individual (inmutable). */
-    option(key: string, value: string): DataFrameReaderTF {
-        return new DataFrameReaderTF(this.session, this.fmt, { ...this.opts, [key]: value });
+    option(key: string, value: string): DataFrameReaderTF<R,E,G> {
+        return new DataFrameReaderTF<R,E,G>(this.session, this.fmt, { ...this.opts, [key]: value });
     }
 
-    /** Varias opciones (inmutable). */
-    options(kv: Opts): DataFrameReaderTF {
-        return new DataFrameReaderTF(this.session, this.fmt, { ...this.opts, ...kv });
+    options(kv: Opts): DataFrameReaderTF<R,E,G> {
+        return new DataFrameReaderTF<R,E,G>(this.session, this.fmt, { ...this.opts, ...kv });
     }
 
-    /** Atajo: csv(path) */
-    csv(path: string): ChainedDataFrame {
-        return this.make("csv", path);
+    // Atajos con multipath
+    csv(...paths: string[]): ChainedDataFrame<R,E,G> {
+        return this.make("csv", paths.length <= 1 ? paths[0] : paths);
     }
-    /** Atajo: json(path) */
-    json(path: string): ChainedDataFrame {
-        return this.make("json", path);
+    json(...paths: string[]): ChainedDataFrame<R,E,G> {
+        return this.make("json", paths.length <= 1 ? paths[0] : paths);
     }
-    /** Atajo: parquet(path) */
-    parquet(path: string): ChainedDataFrame {
-        return this.make("parquet", path);
+    parquet(...paths: string[]): ChainedDataFrame<R,E,G> {
+        return this.make("parquet", paths.length <= 1 ? paths[0] : paths);
     }
 
-    /** Carga genérica respetando `format()` y `options()` previos. */
-    load(path: string): ChainedDataFrame {
-        const fmt = this.fmt ?? "parquet"; // decisión por defecto (ajusta si querés otro default)
-        return this.make(fmt, path);
+    load(...paths: string[]): ChainedDataFrame<R,E,G> {
+        const fmt = this.fmt ?? "parquet";
+        return this.make(fmt, paths.length <= 1 ? paths[0] : paths);
     }
 
-    /** Leer tabla por nombre (si tu backend lo soporta como "format: table"). */
-    table(name: string): ChainedDataFrame {
+    table(name: string): ChainedDataFrame<R,E,G> {
         return this.make("table", name);
     }
 
     // ---------- interno ----------
-    private make(format: string, path: string): ChainedDataFrame {
-        // 👇 ESTA es la clave: devolvemos un PROGRAMA TF, no un LogicalPlan.
-        const prog: DFProgram<any, any, any> = (DF /*, EX */) => DF.relation(format, path, this.opts);
-        return new ChainedDataFrame(prog, this.session);
+    private make(format: string, path: string | string[]): ChainedDataFrame<R,E,G> {
+        const prog: DFProgram<R,E,G> = (DF) => DF.relation(format, path, this.opts);
+        return new ChainedDataFrame<R,E,G>(prog, this.session);
     }
 }
