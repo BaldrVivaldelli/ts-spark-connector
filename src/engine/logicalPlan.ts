@@ -1,22 +1,6 @@
 import { GroupTypeInput, JoinTypeInput } from "./sparkConnectEnums";
-
-export type SortDirection = "asc" | "desc";
-export type NullsOrder = "nullsFirst" | "nullsLast";
-
-export interface SortOrder {
-    expr: Expression;
-    direction: SortDirection;
-    nulls?: NullsOrder;
-}
-
-export type FrameBoundary =
-    | { type: "UnboundedPreceding" }
-    | { type: "UnboundedFollowing" }
-    | { type: "CurrentRow" }
-    | { type: "ValuePreceding"; value: number }
-    | { type: "ValueFollowing"; value: number };
-
-export type FrameType = "rows" | "range";
+import {FrameBoundary} from "./column";
+import {FrameType, SortOrder} from "../spark/dataframe";
 
 export interface WindowSpecExpr {
     partitionBy: Expression[];
@@ -49,7 +33,7 @@ export type LogicalPlan =
 }
     | { type: "GroupBy"; input: LogicalPlan; expressions: Expression[] }
     | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression; joinType: JoinTypeInput }
-    | { type: "Sort"; input: LogicalPlan; orders: SortOrder[] }
+    | { type: "Sort"; input: LogicalPlan; orders: SortOrder<any>[] }
     | { type: "Limit"; input: LogicalPlan; limit: number }
     | { type: "Distinct"; input: LogicalPlan }
     | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean };
