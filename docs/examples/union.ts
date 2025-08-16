@@ -1,4 +1,4 @@
-import {spark} from "../../src/spark/session";
+import {spark} from "../../src/client/session";
 import {col} from "../../src/engine/column";
 
 (async () => {

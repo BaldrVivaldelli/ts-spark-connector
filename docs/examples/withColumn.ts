@@ -1,4 +1,4 @@
-import {createSparkSession, spark} from "../../src/spark/session";
+import {createSparkSession, spark} from "../../src/client/session";
 import {col, when} from "../../src/engine/column";
 
 async function main() {

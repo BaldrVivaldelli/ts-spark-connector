@@ -37,18 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Support for `Join` in `LogicalPlan` with configurable join types: `"inner"`, `"left"`, `"right"`, `"outer"`, etc.
 - New `JoinTypeInput` and `toProtoJoinType(...)` helper to map user-friendly strings to Spark Connect enums
-- `join()` method in the DSL (`ChainedDataFrame`) supporting both condition and join type
+- `join()` method in the DSL (`ReadChainedDataFrame`) supporting both condition and join type
 - `sparkConnectEnums.ts` module to centralize Spark Connect enum constants
 
 ### Changed
-- `ChainedDataFrame` now carries its `SparkSession` context internally across transformations
+- `ReadChainedDataFrame` now carries its `SparkSession` context internally across transformations
 - `dataframeInterpreter()` refactored to be session-aware instead of relying on global singleton
-- `DataFrameReader` constructs session-bound `ChainedDataFrame` instances at creation time
+- `DataFrameReader` constructs session-bound `ReadChainedDataFrame` instances at creation time
 
 ### Developer Experience
 - Cleaner DX: no need to pass or manage sessions explicitly across transformations
 - Default join type set to `"inner"` if not specified
-- Added `.wrap()` helper to simplify ChainedDataFrame instantiation
+- Added `.wrap()` helper to simplify ReadChainedDataFrame instantiation
 - Improved debug logging potential via centralized wrap function
 
 ### Fixed

@@ -1,8 +1,9 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import path from "node:path";
 
 const packageDefinition = protoLoader.loadSync(
-    ["C:\\Users\\aatv1\\projects\\ts-spark-connector\\proto\\spark\\connect\\base.proto"],
+    [path.resolve(__dirname, "../../proto/spark/connect/base.proto")],
     {
         includeDirs: ["proto"],
         keepCase: true,

@@ -1,5 +1,5 @@
 import {col} from "../../src/engine/column";
-import {spark} from "../../src/spark/session";
+import {spark} from "../../src/client/session";
 
 (async () => {
     const purchases = spark.read

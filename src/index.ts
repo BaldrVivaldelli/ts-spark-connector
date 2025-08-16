@@ -1,4 +1,4 @@
-import {spark} from "./spark/session";
+import {spark} from "./client/session";
 import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
 
 
@@ -12,7 +12,6 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
-
     await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
@@ -99,5 +98,46 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .limit(5)
         .show();
 
+    await purchases
+        .select("user_id", "product", "amount")
+        .write
+        .mode("overwrite")
+        .save("/data/dest/purchases_summary");
 
+    await purchases.write.parquet().save("/data/dest/purchases_parquet");
+    await purchases.write
+        .csv()
+        .option("header", true)
+        .save("/data/dest/purchases_csv");
+    await purchases.write.json().save("/data/dest/purchases_json");
+    await purchases.write.mode("overwrite").saveAsTable("purchases_tbl");
+    await purchases.write
+        .partitionBy("year")
+        .parquet()
+        .mode("overwrite")
+        .save("/data/dest/purchases_by_year");
+    await purchases.write
+        .bucketBy(2, "user_id")
+        .sortBy("product")
+        .parquet()
+        .mode("overwrite")
+        .saveAsTable ("purchases_bucketed");
+    const topSpenders = purchases
+        .groupBy("user_id")
+        .agg({ total_spent: "sum(amount)" })
+        .orderBy(col("total_spent").descNullsLast());
+
+    await topSpenders.write
+        .parquet()
+        .mode("overwrite")
+        .save("/data/dest/top_spenders");
+    await purchases.write
+        .orc()
+        .mode("overwrite")
+        .save("/data/dest/purchases_orc");
+    await purchases.write
+        .avro()
+        .option("compression", "snappy")  // ejemplo de opción específica
+        .mode("append")
+        .save("/data/dest/purchases_avro");
 })();

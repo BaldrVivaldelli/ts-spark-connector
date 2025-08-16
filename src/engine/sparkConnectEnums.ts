@@ -1,5 +1,7 @@
 // src/engine/sparkConnectEnums.ts
 
+import {SaveMode} from "../write/writeDataFrame";
+
 export type ProtoSortDirection = "ASCENDING" | "DESCENDING";
 export type ProtoNullsOrder = "UNSPECIFIED" | "NULLS_FIRST" | "NULLS_LAST";
 
@@ -101,4 +103,23 @@ export function toProtoSortDirection(dir: "asc" | "desc"): ProtoSortDirection {
 export function toProtoNullsOrder(n?: "nullsFirst" | "nullsLast"): ProtoNullsOrder {
     if (!n) return "UNSPECIFIED";
     return n === "nullsFirst" ? "NULLS_FIRST" : "NULLS_LAST";
+}
+
+
+export function toProtoSaveMode(mode: SaveMode | undefined): number {
+    if (!mode) return 0; // SAVE_MODE_UNSPECIFIED
+
+    switch (mode) {
+        case "append":
+            return 1; // SAVE_MODE_APPEND
+        case "overwrite":
+            return 2; // SAVE_MODE_OVERWRITE
+        case "error":
+        case "errorifexists":
+            return 3; // SAVE_MODE_ERROR_IF_EXISTS
+        case "ignore":
+            return 4; // SAVE_MODE_IGNORE
+        default:
+            throw new Error(`Unsupported save mode: ${mode}`);
+    }
 }
