@@ -3,7 +3,9 @@ services:
     build: ./spark-server
     ports:
       - "15002:15002"   # Spark Connect gRPC port
+      - "4040:4040"     # Spark UI (opcional)
     volumes:
+      - ./ivy2:/home/spark/.ivy2
       - ./example_data:/data    # Donde estará people.tsv
     environment:
       - SPARK_NO_DAEMONIZE=true

@@ -12,8 +12,6 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
-
-/*
     await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
@@ -105,7 +103,6 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .write
         .mode("overwrite")
         .save("/data/dest/purchases_summary");
-*/
 
     await purchases.write.parquet().save("/data/dest/purchases_parquet");
     await purchases.write
@@ -134,5 +131,13 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .parquet()
         .mode("overwrite")
         .save("/data/dest/top_spenders");
-
+    await purchases.write
+        .orc()
+        .mode("overwrite")
+        .save("/data/dest/purchases_orc");
+    await purchases.write
+        .avro()
+        .option("compression", "snappy")  // ejemplo de opción específica
+        .mode("append")
+        .save("/data/dest/purchases_avro");
 })();

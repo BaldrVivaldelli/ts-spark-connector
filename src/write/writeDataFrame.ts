@@ -3,7 +3,13 @@ import type { SparkSession } from "../client/session";
 import {DFAlg, ExprAlg} from "../read/readDataframe";
 
 export type SaveMode = "append" | "overwrite" | "ignore" | "error" | "errorifexists";
-export type WriterFormat = "parquet" | "csv" | "json" | "orc" | string;
+export type WriterFormat =
+    | "parquet"
+    | "csv"
+    | "json"
+    | "orc"
+    | "avro";
+
 
 export interface WriterSpec {
     format?: WriterFormat;
@@ -27,6 +33,7 @@ export interface DFWritingAlg<R, W> {
     sortBy(w: W, col: string, ...cols: string[]): W;
     targetPath(w: W, path: string): W;
     targetTable(w: W, table: string): W;
+
 }
 
 export interface DFWritingExec<W> {

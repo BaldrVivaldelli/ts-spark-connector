@@ -121,6 +121,8 @@ export class DataFrameWriterTF<R = DefaultR, E = unknown, G = unknown, W = Defau
     parquet() { return this.format("parquet"); }
     csv()     { return this.format("csv"); }
     json()    { return this.format("json"); }
+    orc()     { return this.format("orc"); }
+    avro()    { return this.format("avro"); }
 
     private defaults(): Impl<R,E,G,W> {
         return {
