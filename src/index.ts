@@ -13,6 +13,7 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .option("header", "true")
         .csv("/data/purchases.tsv");
 
+/*
     await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
@@ -104,5 +105,34 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .write
         .mode("overwrite")
         .save("/data/dest/purchases_summary");
+*/
+
+    await purchases.write.parquet().save("/data/dest/purchases_parquet");
+    await purchases.write
+        .csv()
+        .option("header", true)
+        .save("/data/dest/purchases_csv");
+    await purchases.write.json().save("/data/dest/purchases_json");
+    await purchases.write.mode("overwrite").saveAsTable("purchases_tbl");
+    await purchases.write
+        .partitionBy("year")
+        .parquet()
+        .mode("overwrite")
+        .save("/data/dest/purchases_by_year");
+    await purchases.write
+        .bucketBy(2, "user_id")
+        .sortBy("product")
+        .parquet()
+        .mode("overwrite")
+        .saveAsTable ("purchases_bucketed");
+    const topSpenders = purchases
+        .groupBy("user_id")
+        .agg({ total_spent: "sum(amount)" })
+        .orderBy(col("total_spent").descNullsLast());
+
+    await topSpenders.write
+        .parquet()
+        .mode("overwrite")
+        .save("/data/dest/top_spenders");
 
 })();
