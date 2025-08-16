@@ -1,6 +1,6 @@
 import { Expression, GroupBy, LogicalPlan } from "../engine/logicalPlan";
 import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
-import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./dataframe";
+import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./readDataframe";
 
 export const SparkExprAlg: ExprAlg<Expression> = {
     col: (name) => ({type: "Column", name}),

@@ -24,7 +24,7 @@ Construct Spark logical plans entirely in TypeScript and run them against a Spar
 
 ```bash
 git clone https://github.com/your-org/ts-spark-connector
-cd ts-spark-connector
+cd ts-read-connector
 npm install
 ```
 
@@ -35,7 +35,7 @@ You need a Spark Connect server running. Example `docker-compose.yml`:
 ```yaml
 services:
   spark:
-    build: ./spark-server
+    build: ./read-server
     ports:
       - "15002:15002"
     volumes:
@@ -58,7 +58,7 @@ CMD ["/entrypoint.sh"]
 
 ```bash
 #!/bin/bash
-/opt/bitnami/spark/bin/spark-submit   --class org.apache.spark.sql.connect.service.SparkConnectServer   --conf spark.sql.connect.enable=true   --conf spark.sql.connect.grpc.binding=0.0.0.0:15002   /opt/bitnami/spark/jars/spark-connect_2.12-4.0.0.jar
+/opt/bitnami/read/bin/read-submit   --class org.apache.read.sql.connect.service.SparkConnectServer   --conf read.sql.connect.enable=true   --conf read.sql.connect.grpc.binding=0.0.0.0:15002   /opt/bitnami/read/jars/read-connect_2.12-4.0.0.jar
 ```
 
 Example data in `/example_data`:
@@ -87,7 +87,7 @@ npx tsx examples/join.ts
 ## 🧪 Quick Usage
 
 ```ts
-import {spark} from "./src/spark/session";
+import {spark} from "./src/read/session";
 import {col} from "./src/engine/column";
 
 const people = spark.read

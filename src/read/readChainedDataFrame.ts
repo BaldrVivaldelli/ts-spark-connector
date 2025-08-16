@@ -1,10 +1,11 @@
-import {SparkDFAlg, SparkExprAlg} from "./dataFrameInterpreter";
+import {SparkDFAlg, SparkExprAlg} from "./readDataFrameInterpreter";
 import {LogicalPlan} from "../engine/logicalPlan";
-import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compiler";
-import {SparkSession} from "./session";
-import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./dataframe";
+import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
+import {SparkSession} from "../client/session";
+import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
 import {DEFAULT_JOIN_TYPE, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {printArrowResults} from "../utils/arrowPrinter";
+import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 
 type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 type SortKeyInput =
@@ -21,7 +22,7 @@ export const asc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): Sort
 export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
     ({expr: e.build(EX), direction: "desc", nulls});
 
-export class ChainedDataFrame<R,E,G> {
+export class ReadChainedDataFrame<R,E,G> {
     private readonly prog: DFProgram<any, any, any>;
 
     constructor(p: DFProgram<R,E,G>, private readonly session: SparkSession) {
@@ -34,17 +35,17 @@ export class ChainedDataFrame<R,E,G> {
         options?: Record<string, string>
     ) {
         const p: DFProgram<R,E,G> = (DF) => DF.relation("csv", path, options);
-        return new ChainedDataFrame<R,E,G>(p, session);
+        return new ReadChainedDataFrame<R,E,G>(p, session);
     }
 
     private chain(step: (df: any, EX: ExprAlg<any>, DF: DFAlg<any, any, any>) => any) {
         const next: DFProgram<any, any, any> = (DF, EX) => step(this.prog(DF, EX), EX, DF);
-        return new ChainedDataFrame(next, this.session);
+        return new ReadChainedDataFrame(next, this.session);
     }
 
-    select(...cols: string[]): ChainedDataFrame<R,E,G>;
-    select(...cols: EBuilder[]): ChainedDataFrame<R,E,G>;
-    select(...cols: (string | EBuilder)[]): ChainedDataFrame<R,E,G> {
+    select(...cols: string[]): ReadChainedDataFrame<R,E,G>;
+    select(...cols: EBuilder[]): ReadChainedDataFrame<R,E,G>;
+    select(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) =>
             DF.select(df, cols.map(c => typeof c === "string" ? EX.col(c) : c.build(EX)))
         );
@@ -59,10 +60,10 @@ export class ChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
     }
 
-    join(right: ChainedDataFrame<R,E,G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
+    join(right: ReadChainedDataFrame<R,E,G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
-        return new ChainedDataFrame(next, this.session);
+        return new ReadChainedDataFrame(next, this.session);
     }
 
     groupBy(...by: (string | EBuilder)[]) {
@@ -95,7 +96,7 @@ export class ChainedDataFrame<R,E,G> {
 
                     return DF.agg(g, exprs);
                 };
-                return new ChainedDataFrame(next, self.session);
+                return new ReadChainedDataFrame(next, self.session);
             }
         };
     }
@@ -133,9 +134,9 @@ export class ChainedDataFrame<R,E,G> {
     }
 
 
-    dropDuplicates(...cols: string[]): ChainedDataFrame<R,E,G>;
-    dropDuplicates(...cols: EBuilder[]): ChainedDataFrame<R,E,G>;
-    dropDuplicates(...cols: (string | EBuilder)[]): ChainedDataFrame<R,E,G> {
+    dropDuplicates(...cols: string[]): ReadChainedDataFrame<R,E,G>;
+    dropDuplicates(...cols: EBuilder[]): ReadChainedDataFrame<R,E,G>;
+    dropDuplicates(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => {
             const exprs =
                 cols.length === 0
@@ -145,19 +146,19 @@ export class ChainedDataFrame<R,E,G> {
         });
     }
 
-    union(right: ChainedDataFrame<R,E,G>): ChainedDataFrame<R,E,G> {
+    union(right: ReadChainedDataFrame<R,E,G>): ReadChainedDataFrame<R,E,G> {
         const next: DFProgram<any, any, any> = (DF, EX) => {
             const leftPlan = this.prog(DF, EX);
             const rightPlan = right.prog(DF, EX);
             return DF.union(leftPlan, rightPlan);
         };
-        return new ChainedDataFrame(next, this.session);
+        return new ReadChainedDataFrame(next, this.session);
     }
 
-    unionByName(right: ChainedDataFrame<R,E,G>, allowMissingColumns = false) {
+    unionByName(right: ReadChainedDataFrame<R,E,G>, allowMissingColumns = false) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.union(this.prog(DF, EX), right.prog(DF, EX), {byName: true, allowMissingColumns});
-        return new ChainedDataFrame(next, this.session);
+        return new ReadChainedDataFrame(next, this.session);
     }
 
     withColumnRenamed(oldName: string, newName: string) {
@@ -168,7 +169,7 @@ export class ChainedDataFrame<R,E,G> {
         return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
     }
 
-    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ChainedDataFrame<R,E,G> {
+    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ReadChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => {
             const toE = (x: string | EBuilder | number | boolean) =>
                 typeof x === "string"
@@ -199,7 +200,10 @@ export class ChainedDataFrame<R,E,G> {
         printArrowResults(arrowBuffers);
     }
 
-    getSession() {
-        return this.session;
+    getSession(): SparkSession { return this.session; }
+    getProgram(): DFProgram<R,E,G> { return this.prog; }
+
+    get write() {
+        return DataFrameWriterTF.fromDF<R,E,G, any>(this);
     }
 }

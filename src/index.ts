@@ -1,4 +1,4 @@
-import {spark} from "./spark/session";
+import {spark} from "./client/session";
 import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
 
 
@@ -99,5 +99,10 @@ import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
         .limit(5)
         .show();
 
+    await purchases
+        .select("user_id", "product", "amount")
+        .write
+        .mode("overwrite")
+        .save("/data/dest/purchases_summary");
 
 })();

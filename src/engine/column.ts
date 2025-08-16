@@ -1,7 +1,6 @@
 // src/engine/column.ts  — Tagless Final builders (sin AST público)
 
-import {ExprAlg, WindowSpec} from "../spark/dataframe";
-import {NullsOrder, SortDirection} from "./logicalPlan";
+import {ExprAlg, NullsOrder, SortDirection, WindowSpec} from "../read/readDataframe";
 
 
 export type FrameBoundary =
