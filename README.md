@@ -175,8 +175,8 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | **when(...).otherwise(...)** (CASE WHEN)                               | ✅                                                               | —        |
 | **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ✅                                                               | —        |
 | **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ✅                                                               | —        |
-| **Parquet Reading**                                                    | ✅                                                               | **P1**   |
-| **JSON Reading**                                                       | ✅                                                               | **P1**   |
+| **Parquet Reading**                                                    | ✅                                                               | —        |
+| **JSON Reading**                                                       | ✅                                                               | —        |
 | **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ✅                                                               | —        |
 | Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅                                                               | —        |
 | **describe()**, `summary()`                                            | ❌ Not yet                                                       | **P2**   |
