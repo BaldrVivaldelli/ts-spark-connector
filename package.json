@@ -1,6 +1,6 @@
 {
   "name": "ts-spark-connector",
-  "version": "1.0.0",
+  "version": "0.0.0-semantically-released",
   "description": "A TypeScript client for Apache Spark Connect. Build Spark logical plans entirely in TypeScript.",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -8,15 +8,12 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
       "default": "./dist/index.js"
     }
   },
   "sideEffects": false,
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
     "start": "ts-node src/index.ts",
     "clean": "rimraf dist",
@@ -29,32 +26,17 @@
     "prepare": "npm run build",
     "release": "semantic-release"
   },
-  "keywords": [
-    "spark",
-    "spark-connect",
-    "typescript",
-    "dataframe",
-    "bigdata",
-    "dsl",
-    "apache",
-    "grpc"
-  ],
+  "keywords": ["spark","spark-connect","typescript","dataframe","bigdata","dsl","apache","grpc"],
   "author": "Augusto Vivaldelli",
   "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/BaldrVivaldelli/ts-spark-connector"
-  },
-  "bugs": {
-    "url": "https://github.com/BaldrVivaldelli/ts-spark-connector/issues"
-  },
+  "repository": { "type": "git", "url": "https://github.com/BaldrVivaldelli/ts-spark-connector" },
+  "bugs": { "url": "https://github.com/BaldrVivaldelli/ts-spark-connector/issues" },
   "homepage": "https://github.com/BaldrVivaldelli/ts-spark-connector#readme",
   "publishConfig": {
     "access": "public"
+    // "registry": "https://registry.npmjs.org"
   },
-  "engines": {
-    "node": ">=18"
-  },
+  "engines": { "node": ">=18" },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.0",
@@ -78,40 +60,17 @@
     "apache-arrow": "^21.0.0"
   },
   "release": {
-    "branches": [
-      "main"
-    ],
+    "branches": ["main"],
     "plugins": [
       "@semantic-release/commit-analyzer",
       "@semantic-release/release-notes-generator",
-      [
-        "@semantic-release/changelog",
-        {
-          "changelogFile": "CHANGELOG.md"
-        }
-      ],
-      [
-        "@semantic-release/npm",
-        {
-          "npmPublish": true
-        }
-      ],
-      [
-        "@semantic-release/github",
-        {
-          "assets": []
-        }
-      ],
-      [
-        "@semantic-release/git",
-        {
-          "assets": [
-            "CHANGELOG.md",
-            "package.json"
-          ],
-          "message": "chore(release): ${nextRelease.version} [skip ci]"
-        }
-      ]
+      ["@semantic-release/changelog", { "changelogFile": "CHANGELOG.md" }],
+      ["@semantic-release/npm", { "npmPublish": true }],
+      ["@semantic-release/github", { "assets": [] }],
+      ["@semantic-release/git", {
+        "assets": ["CHANGELOG.md","package.json"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]"
+      }]
     ]
   }
 }
