@@ -1,4 +1,4 @@
-import {createSparkSession, spark} from "../../src/client/session";
+import {createSparkSession} from "../../src/client/session";
 import {col, when} from "../../src/engine/column";
 
 async function main() {
@@ -17,7 +17,7 @@ async function main() {
             .otherwise("Low")
     );
 
-    purchasesWithCategory.show();
+    await purchasesWithCategory.show();
 }
 
-main().catch(console.error);
+console.log(main())

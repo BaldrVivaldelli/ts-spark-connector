@@ -1,7 +1,6 @@
 // src/engine/compiler-writer.ts
 
 import {DFWritingAlg, WriterSpec} from "./writeDataFrame";
-import {toProtoSaveMode} from "../engine/sparkConnectEnums";
 
 type ProtoRel = any;
 
@@ -40,14 +39,14 @@ function toSaveModeV1(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists")
     }
 }
 
-function toModeV2(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists") {
+/*function toModeV2(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists") {
     switch (m) {
         case "append":    return 4; // MODE_APPEND
         case "overwrite": return 2; // MODE_OVERWRITE
         // el resto no tiene mapping directo; elegí política o expone nuevos modos
         default:          return 0; // MODE_UNSPECIFIED
     }
-}
+}*/
 
 export function protoWriteRootToPlan(root: ProtoWriteRoot) {
     const s = root.spec;

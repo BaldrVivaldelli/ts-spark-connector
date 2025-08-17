@@ -19,7 +19,6 @@ async function main() {
         .select("name", "product", "amount")
         .filter(col("amount").gt(100));
 
-    result.show();
+    await result.show();
 }
-
-main().catch(console.error);
+console.log(main())
