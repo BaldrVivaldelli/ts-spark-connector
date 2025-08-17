@@ -1,3 +1,12 @@
+# [1.1.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.0.0...v1.1.0) (2025-08-17)
+
+
+### Features
+
+* **fix:** update readme ([7e78808](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/7e7880827b8b83ebe930c7fb0e25f3df9d2bd8b2))
+* **refactor:** format package json ([ccd35c8](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/ccd35c8db2db86d5efcae6596dda62796b92578a))
+* **refactor:** format package json ([9c13b5e](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/9c13b5e94c85b5c1b7c8a11644a028cd5e502a4e))
+
 # 1.0.0 (2025-08-17)
 
 
