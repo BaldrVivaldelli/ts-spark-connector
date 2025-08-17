@@ -33,8 +33,8 @@
   "bugs": { "url": "https://github.com/BaldrVivaldelli/ts-spark-connector/issues" },
   "homepage": "https://github.com/BaldrVivaldelli/ts-spark-connector#readme",
   "publishConfig": {
-    "access": "public"
-    // "registry": "https://registry.npmjs.org"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "engines": { "node": ">=18" },
   "devDependencies": {
