@@ -12,7 +12,7 @@ import {col, isNotNull, isNull, when} from "./engine/column";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
-    await people
+/*    await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
         .filter(col("amount").gt(100))
@@ -139,5 +139,11 @@ import {col, isNotNull, isNull, when} from "./engine/column";
         .avro()
         .option("compression", "snappy")  // ejemplo de opción específica
         .mode("append")
-        .save("/data/dest/purchases_avro");
+        .save("/data/dest/purchases_avro");*/
+/*    await people
+        .describe(["id","name","age","country","year"])
+        .show();
+    await people
+        .summary(["count", "min", "50%", "75%", "max"], ["age"])
+        .show();*/
 })();

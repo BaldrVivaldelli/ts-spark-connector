@@ -155,18 +155,17 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             input,
             order: orders.map(o => {
                 // “desenvolvé” sortKey si vino de EX.sortKey(...)
-                const expr =
-                    o.expr && o.expr.sort_key_marker ? o.expr.sort_key_marker.input : o.expr;
+                const expr = o.expr && o.expr.sort_key_marker ? o.expr.sort_key_marker.input : o.expr;
                 return {
                     child: expr,
                     direction: toProtoSortDirection(o.direction), // "ASCENDING" | "DESCENDING"
+
                     // En tu compiler usabas boolean nulls_first; mantenemos ese contrato:
-                    nulls_first:
-                        o.nulls === "nullsFirst"
-                            ? true
-                            : o.nulls === "nullsLast"
-                                ? false
-                                : undefined,
+                    nulls_first: o.nulls === "nullsFirst"
+                        ? true
+                        : o.nulls === "nullsLast"
+                            ? false
+                            : undefined,
                 };
             }),
         },
@@ -241,6 +240,21 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
                 },
             })),
         },
+    }),
+    describe: (plan, columns) => ({
+        project: {
+            plan,
+            expressions: columns,
+        },
+    }),
+    summary: (plan, metrics, columns) => ({
+        extension: {
+            value: {
+                input: plan,
+                metrics,
+                columns,
+            },
+        }
     }),
 };
 

@@ -46,16 +46,16 @@ export const SparkExprAlg: ExprAlg<Expression> = {
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
-    relation: (format, path, options) => ({ type: "Relation", format, path, options }),
+    relation: (format, path, options) => ({type: "Relation", format, path, options}),
 
-    select: (plan, columns) => ({ type: "Project", input: plan, columns }),
+    select: (plan, columns) => ({type: "Project", input: plan, columns}),
 
-    filter: (plan, condition) => ({ type: "Filter", input: plan, condition }),
+    filter: (plan, condition) => ({type: "Filter", input: plan, condition}),
 
     withColumn: (plan, name, column) => ({
         type: "Project",
         input: plan,
-        columns: [{ type: "UnresolvedStar" }, { type: "Alias", input: column, alias: name }],
+        columns: [{type: "UnresolvedStar"}, {type: "Alias", input: column, alias: name}],
     }),
 
     join: (left, right, on, joinType = DEFAULT_JOIN_TYPE) => ({
@@ -66,7 +66,7 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         joinType: (joinType.toUpperCase() as JoinTypeInput),
     }),
 
-    groupBy: (plan, cols) => ({ type: "GroupBy", input: plan, expressions: cols }),
+    groupBy: (plan, cols) => ({type: "GroupBy", input: plan, expressions: cols}),
 
     agg: (group, aggregations, groupType?: GroupTypeInput) => ({
         type: "Aggregate",
@@ -78,31 +78,29 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
     orderBy: (plan, orders: SortOrder<Expression>[]) => ({
         type: "Sort",
         input: plan,
-        orders: orders.map(o =>
-            o.expr.type === "SortKey"
-                ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
-                : { expr: o.expr, direction: "asc" as const }
+        orders: orders.map(o => o.expr.type === "SortKey"
+            ? {expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls}
+            : {expr: o.expr, direction: "asc" as const}
         ),
     }),
 
     sort: (plan, orders) => ({
         type: "Sort",
         input: plan,
-        orders: orders.map(o =>
-            o.expr.type === "SortKey"
-                ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
-                : { expr: o.expr, direction: "asc" as const }
+        orders: orders.map(o => o.expr.type === "SortKey"
+            ? {expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls}
+            : {expr: o.expr, direction: "asc" as const}
         ),
     }),
 
-    limit: (plan, n) => ({ type: "Limit", input: plan, limit: n }),
+    limit: (plan, n) => ({type: "Limit", input: plan, limit: n}),
 
-    distinct: (plan) => ({ type: "Distinct", input: plan }),
+    distinct: (plan) => ({type: "Distinct", input: plan}),
 
     dropDuplicates: (plan, cols) => {
-        if (!cols || cols.length === 0) return { type: "Distinct", input: plan };
-        const gb: GroupBy = { type: "GroupBy", input: plan, expressions: cols };
-        return { type: "Aggregate", input: gb, aggregations: {} };
+        if (!cols || cols.length === 0) return {type: "Distinct", input: plan};
+        const gb: GroupBy = {type: "GroupBy", input: plan, expressions: cols};
+        return {type: "Aggregate", input: gb, aggregations: {}};
     },
 
     union: (left, right, opts) => ({
@@ -116,8 +114,8 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         type: "Project",
         input: plan,
         columns: [
-            { type: "UnresolvedStar" },
-            { type: "Alias", input: { type: "Column", name: oldName }, alias: newName }
+            {type: "UnresolvedStar"},
+            {type: "Alias", input: {type: "Column", name: oldName}, alias: newName}
         ],
     }),
 
@@ -126,8 +124,21 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         input: plan,
         columns: Object.entries(mapping).map(([from, to]) => ({
             type: "Alias",
-            input: { type: "Column", name: from },
+            input: {type: "Column", name: from},
             alias: to,
         })),
+    }),
+
+    describe: (plan, columns) => ({
+        type: "Describe",
+        input: plan,
+        columns,
+    }),
+
+    summary: (plan, metrics, columns) => ({
+        type: "Summary",
+        input: plan,
+        metrics,
+        columns,
     }),
 };
