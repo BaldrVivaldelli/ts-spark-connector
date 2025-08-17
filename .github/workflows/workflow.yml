@@ -20,7 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
-      - run: npm test -- --passWithNoTests
+      - run: npm test
 
   e2e:
     needs: unit
