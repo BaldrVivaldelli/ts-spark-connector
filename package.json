@@ -23,7 +23,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
-    "test": "vitest run --reporter=verbose",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest --passWithNoTests",
     "prepack": "npm run build",
     "prepare": "npm run build",
     "release": "semantic-release"
