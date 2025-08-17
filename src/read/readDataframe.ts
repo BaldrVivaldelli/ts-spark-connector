@@ -82,6 +82,10 @@ export interface DFAlg<R, E, G = unknown> {
     withColumnRenamed(plan: R, oldName: string, newName: string): R;
 
     withColumnsRenamed(plan: R, mapping: Record<string, string>): R;
+
+    describe(plan: R, columns: E[]): R;
+
+    summary(plan: R, metrics: E[], columns: E[]): R;
 }
 
 export interface DFExec<R> {

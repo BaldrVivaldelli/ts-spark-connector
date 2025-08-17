@@ -182,6 +182,150 @@ export class ReadChainedDataFrame<R,E,G> {
             return DF.withColumn(df, name, coalesced);
         });
     }
+    describe(colNames: string[])  {
+        return this.chain((df, EX, DF) => {
+            const toString = (e:any) => EX.call("concat", [EX.lit(""), e]);
+            const stats = ["count", "mean", "stddev", "min", "max"] as const;
+            const fn = (s: typeof stats[number]) =>
+                s === "mean" ? "avg" : s === "stddev" ? "stddev_samp" : s;
+
+            // NULL(double) sin cast: nullif(1.0,1.0)
+            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]);
+
+            // rlike sobre stringificado (soporta cols string o numéricas)
+            const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
+            const toDoubleIfNumeric = (name: string) =>
+                EX.caseWhen(
+                    [{
+                        when: EX.call("rlike", [
+                            EX.call("concat", [EX.lit(""), EX.col(name)]),
+                            EX.lit(NUMERIC_RX),
+                        ]),
+                        then: EX.bin("*", EX.lit(1.0), EX.col(name)), // 1.0 * col -> DOUBLE
+                    }],
+                    NULL_D
+                );
+
+            // (1) Pushdown de proyección (si la fuente lo soporta, ahorra IO)
+            const pruned = DF.select(df, colNames.map(n => EX.col(n)));
+
+            // (2) UN SOLO AGG con TODAS las medidas
+            const numExpr: Record<string, any> = Object.fromEntries(
+                colNames.map(n => [n, toDoubleIfNumeric(n)])
+            );
+
+            const measures = Object.fromEntries(
+                colNames.flatMap(n => ([
+                    [`__${n}_count`,  EX.call("count",        [EX.col(n)])],
+                    [`__${n}_mean`,   EX.call("avg",          [numExpr[n]])],
+                    [`__${n}_stddev`, EX.call("stddev_samp",  [numExpr[n]])],
+                    [`__${n}_min`,    EX.call("min",          [EX.col(n)])],
+                    [`__${n}_max`,    EX.call("max",          [EX.col(n)])],
+                ]))
+            );
+
+            const aggregated = DF.agg(DF.groupBy(pruned, [] as any[]), measures);
+
+            // (3) 5 Projects sobre el mismo 'aggregated' y UNION ALL por nombre
+            const projectFor = (stat: typeof stats[number]) =>
+                DF.select(aggregated, [
+                    EX.alias(EX.lit(stat), "summary"),
+                    ...colNames.map(n =>
+                        EX.alias(toString(EX.col(`__${n}_${stat}`)), n)
+                    ),
+                ]);
+
+            return stats.slice(1).reduce(
+                (acc, s) => DF.union(acc, projectFor(s), { byName: true }),
+                projectFor(stats[0])
+            );
+        });
+    }
+
+    summary(metrics: string[] | undefined, colNames: string[]) {
+        return this.chain((df, EX, DF) => {
+            const DEFAULTS = ["count","mean","stddev","min","25%","50%","75%","max"] as const;
+            const req = (metrics?.length ? metrics : DEFAULTS).map(m => m.toLowerCase());
+
+            type Parsed =
+                | { kind: "builtin"; name: "count"|"mean"|"stddev"|"min"|"max"; label: string; suffix: string }
+                | { kind: "pct"; p: number; label: string; suffix: string };
+
+            const norm = (m: string): Parsed => {
+                if (m === "median") m = "50%";
+                if (/%$/.test(m)) {
+                    const p = parseFloat(m)/100;
+                    if (!(p >= 0 && p <= 1)) throw new Error(`summary(): percentil inválido '${m}'`);
+                    const pct = Math.round(p*100);
+                    return { kind: "pct", p, label: `${pct}%`, suffix: `p${pct}` };
+                }
+                if (m === "std") m = "stddev";
+                const ok = ["count","mean","stddev","min","max"] as const;
+                if ((ok as readonly string[]).includes(m)) {
+                    return { kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m) };
+                }
+                throw new Error(`summary(): métrica no soportada '${m}'`);
+            };
+            const parsed: Parsed[] = req.map(norm);
+
+            // 1) Helpers (mismos que en describe optimizado)
+            const toString = (e:any) => EX.call("concat", [EX.lit(""), e]);
+            const NULL_D  = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]); // NULL DOUBLE
+            const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
+            const toDoubleIfNumeric = (name: string) =>
+                EX.caseWhen(
+                    [{
+                        when: EX.call("rlike", [
+                            EX.call("concat", [EX.lit(""), EX.col(name)]), // stringify para rlike
+                            EX.lit(NUMERIC_RX),
+                        ]),
+                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),   // fuerza DOUBLE sin cast
+                    }],
+                    NULL_D
+                );
+
+            // 2) Pushdown de columnas
+            const pruned = DF.select(df, colNames.map(n => EX.col(n)));
+
+            // 3) Un solo AGG con todas las medidas solicitadas
+            const pairs: [string, any][] = [];
+            for (const n of colNames) {
+                const numArg = toDoubleIfNumeric(n);
+                for (const m of parsed) {
+                    if (m.kind === "builtin") {
+                        if (m.name === "count")   pairs.push([`__${n}_count`,  EX.call("count",       [EX.col(n)])]);
+                        if (m.name === "mean")    pairs.push([`__${n}_mean`,   EX.call("avg",         [numArg])]);
+                        if (m.name === "stddev")  pairs.push([`__${n}_stddev`, EX.call("stddev_samp", [numArg])]);
+                        if (m.name === "min")     pairs.push([`__${n}_min`,    EX.call("min",         [EX.col(n)])]);
+                        if (m.name === "max")     pairs.push([`__${n}_max`,    EX.call("max",         [EX.col(n)])]);
+                    } else {
+                        // percentiles (uno por alias; simple y robusto)
+                        pairs.push([`__${n}_${m.suffix}`, EX.call("percentile_approx", [numArg, EX.lit(m.p)])]);
+                        // (si querés menos funciones, podés usar array de percentiles y luego element_at)
+                    }
+                }
+            }
+            const measures = Object.fromEntries(pairs);
+            const aggregated = DF.agg(DF.groupBy(pruned, [] as any[]), measures);
+
+            // 4) Un Project por métrica y UNION ALL por nombre
+            const projectFor = (m: Parsed) =>
+                DF.select(aggregated, [
+                    EX.alias(EX.lit(m.label), "summary"),
+                    ...colNames.map(n =>
+                        EX.alias(toString(EX.col(`__${n}_${m.suffix}`)), n)
+                    ),
+                ]);
+
+            const rows = parsed.map(projectFor);
+            return rows.slice(1).reduce(
+                (acc, r) => DF.union(acc, r, { byName: true }),
+                rows[0]
+            );
+        });
+    }
+
+
 
     private compileToSparkPlan(): LogicalPlan {
         return this.prog(SparkDFAlg, SparkExprAlg) as LogicalPlan;
