@@ -56,16 +56,22 @@ jobs:
           npm ci
           npm run build
 
-      - name: Boot Spark stack
+      - name: Boot Spark
         run: docker compose -f docker-compose.yml up -d spark
 
-      - name: Wait for Spark to be ready
+      - name: Wait for Spark
         run: |
-          docker compose -f docker-compose.yml wait spark || {
-            echo "Spark did not become ready" >&2
-            docker compose -f docker-compose.yml logs spark
-            exit 1
-          }
+          for i in {1..60}; do
+            if nc -z 127.0.0.1 15002; then
+              echo "✅ Spark is up!"
+              exit 0
+            fi
+            echo "⏳ Waiting for Spark... ($i/60)"
+            sleep 2
+          done
+          echo "❌ Spark did not start in time"
+          docker compose -f docker-compose.yml logs spark
+          exit 1
 
       - name: Run E2E tests
         env:
