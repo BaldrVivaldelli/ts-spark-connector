@@ -22,7 +22,7 @@ jobs:
         run: |
           docker compose -f docker-compose.yml wait spark || {
           echo "Spark not ready"; docker compose -f docker-compose.yml logs spark; exit 1;
-        }
+      }
 
       - run: npm ci
       - run: npm run typecheck --if-present
