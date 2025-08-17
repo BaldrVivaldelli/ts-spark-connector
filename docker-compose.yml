@@ -6,6 +6,12 @@ services:
       - "4040:4040"     # Spark UI (opcional)
     volumes:
       - ./ivy2:/home/spark/.ivy2
-      - ./example_data:/data    # Donde estará people.tsv
+      - ./example_data:/data
     environment:
       - SPARK_NO_DAEMONIZE=true
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "15002"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s

@@ -1,4 +1,4 @@
-name: workflow.yml
+name: CI
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
-      - run: npm test  # vitest con --passWithNoTests
+      - run: npm test -- --passWithNoTests
 
   e2e:
     needs: unit
@@ -34,47 +34,32 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install deps & build lib
+      - name: Install deps & build
         run: |
           npm ci
           npm run build
 
-      # Si tu compose define "spark-server" (ajustá el nombre al de tu yml)
       - name: Boot Spark stack
-        run: |
-          docker compose -f docker-compose.yml up -d spark-server
-          docker ps
+        run: docker compose -f docker-compose.yml up -d spark-server
 
-      # Espera a que el servicio esté healthy (ajustá puerto/endpoint si hace falta)
-      - name: Wait for Spark Connect to be ready
+      - name: Wait for Spark to be ready
         run: |
-          # ejemplo: si expone puerto 15002 o 15001; ajustá según tu compose
-          for i in {1..60}; do
-            # reemplazá por un check real: port open o healthcheck via logs
-            nc -z 127.0.0.1 15002 && echo "Spark is up" && exit 0
-            sleep 2
-          done
-          echo "Spark did not become ready" >&2
-          docker compose logs spark-server
-          exit 1
+          # Si tu docker-compose.yml define un healthcheck en spark-server:
+          docker compose -f docker-compose.yml wait spark-server || {
+            echo "Spark did not become ready" >&2
+            docker compose -f docker-compose.yml logs spark-server
+            exit 1
+          }
 
-      # Corre solo los tests marcados e2e (usa patrón o un comando dedicado)
       - name: Run E2E tests
         env:
-          # pasa la URL de Spark Connect a tus tests (ajustá var que uses)
           SPARK_CONNECT_URL: "sc://localhost:15002"
-        run: |
-          # si separaste por patrón:
-          npx vitest run "tests/**.e2e.test.ts" --reporter=default
-          # o si tenés script:
-          # npm run test:e2e
+        run: npx vitest run "tests/**/*.e2e.test.ts" --reporter=default
 
-      # Subí logs si falla (muy útil para debug)
       - name: Dump logs (always)
         if: always()
-        run: |
-          docker compose logs spark-server || true
+        run: docker compose -f docker-compose.yml logs spark-server || true
 
       - name: Shutdown stack (always)
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml down -v
