@@ -17,12 +17,16 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: docker compose -f docker-compose.yml up -d spark
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up -d spark
+
       - name: Wait for Spark
         run: |
           docker compose -f docker-compose.yml wait spark || {
-          echo "Spark not ready"; docker compose -f docker-compose.yml logs spark; exit 1;
-      }
+            echo "Spark not ready"
+            docker compose -f docker-compose.yml logs spark
+            exit 1
+          }
 
       - run: npm ci
       - run: npm run typecheck --if-present
@@ -47,14 +51,13 @@ jobs:
           npm run build
 
       - name: Boot Spark stack
-        run: docker compose -f docker-compose.yml up -d spark-server
+        run: docker compose -f docker-compose.yml up -d spark
 
       - name: Wait for Spark to be ready
         run: |
-          # Si tu docker-compose.yml define un healthcheck en spark-server:
-          docker compose -f docker-compose.yml wait spark-server || {
+          docker compose -f docker-compose.yml wait spark || {
             echo "Spark did not become ready" >&2
-            docker compose -f docker-compose.yml logs spark-server
+            docker compose -f docker-compose.yml logs spark
             exit 1
           }
 
@@ -65,7 +68,7 @@ jobs:
 
       - name: Dump logs (always)
         if: always()
-        run: docker compose -f docker-compose.yml logs spark-server || true
+        run: docker compose -f docker-compose.yml logs spark || true
 
       - name: Shutdown stack (always)
         if: always()
