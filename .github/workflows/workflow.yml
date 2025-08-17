@@ -22,11 +22,17 @@ jobs:
 
       - name: Wait for Spark
         run: |
-          docker compose -f docker-compose.yml wait spark || {
-            echo "Spark not ready"
-            docker compose -f docker-compose.yml logs spark
-            exit 1
-          }
+          for i in {1..60}; do
+            if nc -z 127.0.0.1 15002; then
+              echo "✅ Spark is up!"
+              exit 0
+            fi
+            echo "⏳ Waiting for Spark... ($i/60)"
+            sleep 2
+          done
+          echo "❌ Spark did not start in time"
+          docker compose -f docker-compose.yml logs spark
+          exit 1
 
       - run: npm ci
       - run: npm run typecheck --if-present
