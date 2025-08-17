@@ -170,7 +170,7 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | Type declarations                                                      | ✅ `.d.ts` published to NPM                                      | —        |
 | Modular compiler core                                                  | ✅ (`engine/` separated from Spark backend)                      | —        |
 | NPM Package                                                            | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) | —        |
-| Tests (Unit + Integration)                                             | 🚧 In progress                                                  | —        |
+| Tests (Unit + Integration)                                             | ✅                                                               | —        |
 | **withColumn(...)**                                                    | ✅                                                               | —        |
 | **when(...).otherwise(...)** (CASE WHEN)                               | ✅                                                               | —        |
 | **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ✅                                                               | —        |
