@@ -1,3 +1,9 @@
+## [1.2.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.1.0...v1.2.0) (2025-08-17)
+
+### Features
+
+* **fix:** add release rules ([d7ea363](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/d7ea363c339faa249508c4c6a5517525416c58b1))
+
 # [1.1.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.0.0...v1.1.0) (2025-08-17)
 
 
