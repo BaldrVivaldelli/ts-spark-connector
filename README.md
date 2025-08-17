@@ -170,13 +170,13 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | Type declarations                                                      | ✅ `.d.ts` published to NPM                                      | —        |
 | Modular compiler core                                                  | ✅ (`engine/` separated from Spark backend)                      | —        |
 | NPM Package                                                            | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) | —        |
-| Tests (Unit + Integration)                                             | 🚧 In progress                                                  | —        |
+| Tests (Unit + Integration)                                             | ✅                                                               | —        |
 | **withColumn(...)**                                                    | ✅                                                               | —        |
 | **when(...).otherwise(...)** (CASE WHEN)                               | ✅                                                               | —        |
 | **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ✅                                                               | —        |
 | **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ✅                                                               | —        |
-| **Parquet Reading**                                                    | ✅                                                               | **P1**   |
-| **JSON Reading**                                                       | ✅                                                               | **P1**   |
+| **Parquet Reading**                                                    | ✅                                                               | —        |
+| **JSON Reading**                                                       | ✅                                                               | —        |
 | **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ✅                                                               | —        |
 | Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅                                                               | —        |
 | **describe()**, `summary()`                                            | ❌ Not yet                                                       | **P2**   |
