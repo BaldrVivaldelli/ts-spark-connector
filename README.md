@@ -177,8 +177,8 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ✅                                                               | —        |
 | **Parquet Reading**                                                    | ✅                                                               | **P1**   |
 | **JSON Reading**                                                       | ✅                                                               | **P1**   |
-| **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ✅                                                               |          | **P1**   |
-| Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅                                                               |          | **P1**   |
+| **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ✅                                                               | —        |
+| Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅                                                               | —        |
 | **describe()**, `summary()`                                            | ❌ Not yet                                                       | **P2**   |
 | **unionByName(...)**                                                   | ❌ Not yet                                                       | **P2**   |
 | **Complex types** (arrays/maps/struct) + `explode/posexplode`          | ❌ Not yet                                                       | **P2**   |
