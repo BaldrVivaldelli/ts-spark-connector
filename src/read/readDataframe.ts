@@ -1,6 +1,4 @@
 import {JoinTypeInput} from "../engine/sparkConnectEnums";
-import {sparkGrpcClient} from "../client/sparkClient";
-import {programToProtobufRoot, ProtoDFAlg} from "../engine/compilerRead";
 import {SparkSession} from "../client/session";
 
 export type SortDirection = "asc" | "desc";

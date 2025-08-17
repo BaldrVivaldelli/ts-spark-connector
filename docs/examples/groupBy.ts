@@ -1,5 +1,4 @@
 import { createSparkSession } from "../../src/client/session";
-import { col } from "../../src/engine/column";
 
 async function main() {
     const spark = createSparkSession("example-groupby-session");
@@ -16,7 +15,7 @@ async function main() {
             purchases_count: "count(product)"
         });
 
-    result.show();
+    await result.show();
 }
 
-main().catch(console.error);
+console.log(main())

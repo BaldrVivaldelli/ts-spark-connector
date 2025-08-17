@@ -17,4 +17,4 @@ async function main() {
     await result.show();
 }
 
-main().catch(console.error);
+console.log(main())

@@ -1,5 +1,5 @@
 import {spark} from "./client/session";
-import {coalesce, col, isNotNull, isNull, when} from "./engine/column";
+import {col, isNotNull, isNull, when} from "./engine/column";
 
 
 (async () => {
