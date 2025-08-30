@@ -1,3 +1,14 @@
+## [1.4.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.3.0...v1.4.0) (2025-08-30)
+
+### Features
+
+* add from_json & to_json ([8e3786e](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/8e3786e68f7f19a248e0505d10e5e4c87cc71f58))
+* finish part 2 ([4fc466f](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/4fc466f210332b48c872f79d3201177bd1440555))
+
+### Bug Fixes
+
+* add explain ([f154843](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/f154843a3952e36e22fd01a11dc6a4a5149120c8))
+
 ## [1.3.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.2.0...v1.3.0) (2025-08-30)
 
 ### Features
