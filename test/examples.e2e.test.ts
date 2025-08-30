@@ -221,5 +221,24 @@ describe('examples (E2E)', () => {
 
     }, 90_000);
 
+    it('repartition and coalescePartitions (logical)', async () => {
+        await purchases()
+            .coalescePartitions(3)        // <-- 🧊 reduce particiones sin shuffle
+            .select("tags", "product") // <-- 🧹 selecciona columnas deseadas
+            .limit(5)
+            .show();
+    }, 90_000);
 
+    it('repartition test', async () => {
+        await purchases()
+            .repartition(4) // cambia el número de particiones a 4 (con shuffle)
+            .select("tags", "product")
+            .limit(5)
+            .show();
+    }, 90_000);
+    it("should default to 'simple' mode when no argument is given", async () => {
+        const df = purchases().select("user_id", "product");
+        await df.explain();
+
+    });
 });

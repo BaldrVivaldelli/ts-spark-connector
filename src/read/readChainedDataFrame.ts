@@ -3,7 +3,7 @@ import {LogicalPlan} from "../engine/logicalPlan";
 import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
 import {SparkSession} from "../client/session";
 import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 
@@ -326,6 +326,32 @@ export class ReadChainedDataFrame<R, E, G> {
         });
     }
 
+    repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => {
+            console.log("df antes de repartir:", JSON.stringify(df, null, 2));
+            const result = DF.repartition(df, numPartitions, shuffle);
+            console.log("df después de repartir:", JSON.stringify(result, null, 2));
+            return result;
+        });
+
+    }
+
+    coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.coalesce(df, numPartitions));
+    }
+
+
+    cache(): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.cache(df));
+    }
+
+    persist(level?: string): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.persist(df, level ?? "MEMORY_AND_DISK"));
+    }
+
+    unpersist(blocking?: boolean): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.unpersist(df, blocking));
+    }
 
 
     private compileToSparkPlan(): LogicalPlan {
@@ -349,6 +375,10 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.session;
     }
 
+    explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
+        const root = this.prog(ProtoDFAlg, ProtoExprAlg);
+        return ProtoExec.explain(root, this.session);
+    }
     getProgram(): DFProgram<R, E, G> {
         return this.prog;
     }

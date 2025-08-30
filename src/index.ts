@@ -157,9 +157,19 @@ import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_js
         .summary(["count", "min", "50%", "75%", "max"], ["age"])
         .show();
     await purchases
-        .withColumn("jsonified", to_json(struct(col("product"))))
-        .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>"))
+        .withColumn("jsonified", to_json(struct(col("product")))) //TODO: en una version futura voy a hacerlo sintacticamente mejor
+        .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>")) //TODO: en una version futura voy a hacerlo sintacticamente mejor
         .select("user_id", "product", "jsonified", "parsed")
+        .limit(5)
+        .show();
+    await purchases
+        .coalescePartitions(3)        // <-- 🧊 reduce particiones sin shuffle
+        .select("tags", "product") // <-- 🧹 selecciona columnas deseadas
+        .limit(5)
+        .show();
+    await purchases
+        .repartition(4) // cambia el número de particiones a 4 (con shuffle)
+        .select("tags", "product")
         .limit(5)
         .show();
 })();

@@ -183,9 +183,9 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | **unionByName(...)**                                                   | ✅                                                               | —        |
 | **Complex types** (arrays/maps/struct) + `explode/posexplode`          | ✅                                                               | —        |
 | **JSON helpers** (`from_json`, `to_json`)                              | ✅                                                               | **P2**   |
-| **cache() / persist() / unpersist()**                                  | ❌ Not yet                                                       | **P2**   |
-| **repartition(...) / coalesce(...)**                                   | ❌ Not yet                                                       | **P2**   |
-| **explain(...)** (`simple/extended/formatted`)                         | ❌ Not yet                                                       | **P2**   |
+| **cache() / persist() / unpersist()**                                  | 🔒 Not supported by spark connect                               | **P2**   |
+| **repartition(...) / coalesce(...)**                                   | ✅                                                               | **P2**   |
+| **explain(...)** (`simple/extended/formatted`)                         | ✅                                                               | **P2**   |
 | `SparkSession.builder.config(...)`                                     | ❌ Not yet                                                       | **P2**   |
 | Auth/TLS for Spark Connect                                             | ❌ Not yet                                                       | **P2**   |
 | **spark.sql(...)**                                                     | ❌ Not yet                                                       | **P3**   |

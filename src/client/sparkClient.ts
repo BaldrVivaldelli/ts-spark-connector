@@ -36,5 +36,20 @@ export const sparkGrpcClient = {
             call.on("end", () => resolve(results));
             call.on("error", (err: any) => reject(err));
         });
+    },
+    explain(request: any): Promise<string> {
+        console.log("[DEBUG] Request gRPC:", JSON.stringify(request, null, 2));
+        return new Promise((resolve, reject) => {
+            client.explain(request, (err: any, response: any) => {
+                if (err) return reject(err);
+
+                if (typeof response?.explain_string === "string") {
+                    resolve(response.explain_string);
+                } else {
+                    reject(new Error("Invalid response: expected explain_string"));
+                }
+            });
+        });
     }
+    ,
 };
