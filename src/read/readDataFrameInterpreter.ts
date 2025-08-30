@@ -42,7 +42,67 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         type: "UnresolvedFunction",
         name: "coalesce",
         args
-    })
+    }),
+    explode: (input) => ({
+        type: "UnresolvedFunction",
+        name: "explode",
+        args: [input]
+    }),
+    posexplode: (input) => ({
+        type: "UnresolvedFunction",
+        name: "posexplode",
+        args: [input]
+    }),
+    getField: (input, field) => ({
+        type: "UnresolvedFunction",
+        name: "getfield",
+        args: [
+            input,
+            {type: "Literal", value: field}
+        ]
+    }),
+
+    map_keys: (input) => ({
+        type: "UnresolvedFunction",
+        name: "map_keys",
+        args: [input]
+    }),
+
+    map_values: (input) => ({
+        type: "UnresolvedFunction",
+        name: "map_values",
+        args: [input]
+    }),
+
+    elementAt: (map, key) => ({
+        type: "UnresolvedFunction",
+        name: "element_at",
+        args: [map, key]
+    }),
+
+    getItem: (collectionExpr, key) => ({
+        type: "UnresolvedFunction",
+        name: "element_at",
+        args: [
+            collectionExpr,
+            typeof key === "object"
+                ? key
+                : typeof key === "number"
+                    ? {type: "Literal", value: key}
+                    : {type: "Literal", value: String(key)}
+        ]
+    }),
+
+    split: (input, delimiter) => ({
+        type: "UnresolvedFunction",
+        name: "split",
+        args: [
+            input,
+            typeof delimiter === "object"
+                ? delimiter
+                : {type: "Literal", value: delimiter}
+        ]
+    }),
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {

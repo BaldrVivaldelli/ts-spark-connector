@@ -84,6 +84,70 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: args,
         },
     }),
+    explode: (input) => ({
+        unresolved_function: {
+            function_name: "explode",
+            arguments: [input],
+        }
+    }),
+
+    posexplode: (input) => ({
+        unresolved_function: {
+            function_name: "posexplode",
+            arguments: [input],
+        }
+    }),
+    getField: (structExpr, fieldName) => ({
+        unresolved_function: {
+            function_name: "getfield",
+            arguments: [
+                structExpr,
+                {literal: {string: fieldName}}
+            ]
+        }
+    }),
+    map_keys: (mapExpr: any) => ({
+        unresolved_function: {
+            function_name: "map_keys",
+            arguments: [mapExpr]
+        }
+    }),
+    map_values: (mapExpr: any) => ({
+        unresolved_function: {
+            function_name: "map_values",
+            arguments: [mapExpr]
+        }
+    }),
+    elementAt: (mapExpr, key) => ({
+        unresolved_function: {
+            function_name: "element_at",
+            arguments: [mapExpr, typeof key === "object" ? key : {literal: {string: String(key)}}]
+        }
+    }),
+    getItem: (collectionExpr, key) => ({
+        unresolved_function: {
+            function_name: "element_at",
+            arguments: [
+                collectionExpr,
+                typeof key === "object"
+                    ? key
+                    : typeof key === "number"
+                        ? {literal: {integer: key}}
+                        : {literal: {string: String(key)}}
+            ]
+        }
+    }),
+    split: (input, delimiter) => ({
+        unresolved_function: {
+            function_name: "split",
+            arguments: [
+                input,
+                typeof delimiter === "object"
+                    ? delimiter
+                    : { literal: { string: String(delimiter) } }
+            ]
+        }
+    }),
 };
 
 // ========================= DATAFRAME (R = ProtoRel) =========================

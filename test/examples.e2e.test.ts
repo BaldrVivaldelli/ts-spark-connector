@@ -1,5 +1,6 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
+import {explode, lit, posexplode, split} from "../src/engine/column";
 
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
@@ -190,4 +191,30 @@ describe('examples (E2E)', () => {
                 .show();
             expect(true).toBe(true);
     }, 90_000);
+
+
+    it('explode sin alias funciona (1 columna)', async () => {
+        await purchases()
+            .withColumn("tags_arr", split(col("tags"), lit(",")))  // dividir en array
+            .select(
+                col("user_id"),
+                posexplode(col("tags_arr"))
+            )
+            .show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+    it('explode sin alias funciona (1 columna)', async () => {
+        await purchases()
+            .withColumn("tags_arr", split(col("tags"), lit(",")))
+            .select(
+                col("user_id"),
+                explode(col("tags_arr"))
+            )
+            .limit(5)
+            .show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+
 });
