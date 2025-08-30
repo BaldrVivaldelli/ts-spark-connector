@@ -1,6 +1,7 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
 import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
+import {SparkSession} from "../src/client/session";
 
 
 let spark: any;
@@ -14,12 +15,22 @@ beforeAll(async () => {
     ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
 });
 
+const session = SparkSession.builder()
+    .withAuth({ type: "token", token: "my-token" }) // opcional
+    .enableTLS({
+        keyStorePath: "./spark-server/certs/keystore.p12",
+        keyStorePassword: "password",
+        trustStorePath: "./spark-server/certs/cert.crt",
+        trustStorePassword: "password"
+    })
+    .getOrCreate();
 // helpers para obtener DF frescos en cada test
 const people = () =>
-    spark.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
+
+    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
 
 const purchases = () =>
-    spark.read.option('delimiter', '\t').option('header', 'true').csv('/data/purchases.tsv');
+    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/purchases.tsv');
 
 describe('examples (E2E)', () => {
     it('join + select + filter + groupBy + agg + show', async () => {

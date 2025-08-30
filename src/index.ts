@@ -1,14 +1,24 @@
-import {spark} from "./client/session";
 import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_json, when} from "./engine/column";
+import {SparkSession} from "./client/session";
 
 
 (async () => {
-    const people = spark.read
+    const session = SparkSession.builder()
+        .withAuth({ type: "token", token: "my-token" }) // opcional
+        .enableTLS({
+            keyStorePath: "./spark-server/certs/keystore.p12",
+            keyStorePassword: "password",
+            trustStorePath: "./spark-server/certs/cert.crt",
+            trustStorePassword: "password"
+        })
+        .getOrCreate();
+
+    const people = session.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    const purchases = spark.read
+    const purchases = session.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");

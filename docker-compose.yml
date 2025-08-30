@@ -7,6 +7,7 @@ services:
     volumes:
       - ./ivy2:/home/spark/.ivy2
       - ./example_data:/data
+      - ./spark-server/certs:/opt/certs
     environment:
       - SPARK_NO_DAEMONIZE=true
     healthcheck:

@@ -13,6 +13,9 @@ RUN groupadd -g 1001 spark 2>/dev/null || true && \
     mkdir -p /opt/bitnami/spark/{.ivy2,.m2,tmp} && \
     chown -R 1001:1001 /opt/bitnami/spark
 
+
+COPY ./conf/spark-defaults.conf /opt/bitnami/spark/conf/spark-defaults.conf
+
 # Variables que ayudan a Hadoop/JVM
 ENV HOME=/home/spark
 ENV HADOOP_USER_NAME=spark
