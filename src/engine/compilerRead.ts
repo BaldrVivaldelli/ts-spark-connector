@@ -144,10 +144,27 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
                 input,
                 typeof delimiter === "object"
                     ? delimiter
-                    : { literal: { string: String(delimiter) } }
+                    : {literal: {string: String(delimiter)}}
             ]
         }
     }),
+    from_json: (jsonExpr, schema) => ({
+        unresolved_function: {
+            function_name: "from_json",
+            arguments: [
+                jsonExpr,
+                {literal: {string: schema}},
+            ],
+        },
+    }),
+
+    to_json: (expr) => ({
+        unresolved_function: {
+            function_name: "to_json",
+            arguments: [expr],
+        },
+    }),
+
 };
 
 // ========================= DATAFRAME (R = ProtoRel) =========================

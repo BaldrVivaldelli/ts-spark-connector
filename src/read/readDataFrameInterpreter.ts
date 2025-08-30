@@ -103,6 +103,20 @@ export const SparkExprAlg: ExprAlg<Expression> = {
                 : {type: "Literal", value: delimiter}
         ]
     }),
+    from_json: (jsonExpr, schema) => ({
+        type: "UnresolvedFunction",
+        name: "from_json",
+        args: [
+            jsonExpr,
+            {type: "Literal", value: schema}
+        ],
+    }),
+
+    to_json: (expr) => ({
+        type: "UnresolvedFunction",
+        name: "to_json",
+        args: [expr],
+    }),
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {

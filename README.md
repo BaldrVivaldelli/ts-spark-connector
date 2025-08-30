@@ -1,4 +1,3 @@
-
 # ts-spark-connector
 
 🌱 **Status: Alpha – Early growth stage**
@@ -183,7 +182,7 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | **describe()**, `summary()`                                            | ✅                                                               | —        |
 | **unionByName(...)**                                                   | ✅                                                               | —        |
 | **Complex types** (arrays/maps/struct) + `explode/posexplode`          | ✅                                                               | —        |
-| **JSON helpers** (`from_json`, `to_json`)                              | ❌ Not yet                                                       | **P2**   |
+| **JSON helpers** (`from_json`, `to_json`)                              | ✅                                                               | **P2**   |
 | **cache() / persist() / unpersist()**                                  | ❌ Not yet                                                       | **P2**   |
 | **repartition(...) / coalesce(...)**                                   | ❌ Not yet                                                       | **P2**   |
 | **explain(...)** (`simple/extended/formatted`)                         | ❌ Not yet                                                       | **P2**   |

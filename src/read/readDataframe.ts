@@ -57,7 +57,8 @@ export interface ExprAlg<E> {
     elementAt(map: E, key: E): E;
     getItem(collectionExpr: E, key: E | string | number): E;
     split(input: E, delimiter: E | string): E;
-
+    from_json(jsonExpr: E, schema: string): E;
+    to_json(expr: E): E;
 }
 
 export interface DFAlg<R, E, G = unknown> {

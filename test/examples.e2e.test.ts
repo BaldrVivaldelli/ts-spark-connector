@@ -1,6 +1,7 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
-import {explode, lit, posexplode, split} from "../src/engine/column";
+import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
+
 
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
@@ -9,13 +10,8 @@ beforeAll(async () => {
     // si no viene del entorno, usa el local
     process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
 
-    try {
-        ({spark} = await import('../src/client/session'));
-        ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
-    } catch {
-        ({spark} = await import('../dist/client/session.js'));
-        ({col, isNull, isNotNull, when} = await import('../dist/engine/column.js'));
-    }
+    ({spark} = await import('../src/client/session'));
+    ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
 });
 
 // helpers para obtener DF frescos en cada test
@@ -185,11 +181,11 @@ describe('examples (E2E)', () => {
         expect(true).toBe(true);
     }, 90_000);
     it('summary: count/min/50%/75%/max sobre age', async () => {
-            const df = people();
-            await df
-                .summary(["count", "min", "50%", "75%", "max"], ["age"])
-                .show();
-            expect(true).toBe(true);
+        const df = people();
+        await df
+            .summary(["count", "min", "50%", "75%", "max"], ["age"])
+            .show();
+        expect(true).toBe(true);
     }, 90_000);
 
 
@@ -214,6 +210,15 @@ describe('examples (E2E)', () => {
             .limit(5)
             .show();
         expect(true).toBe(true);
+    }, 90_000);
+    it('from_json + to_json roundtrip (logical)', async () => {
+        await purchases()
+            .withColumn("jsonified", to_json(struct(col("product"))))
+            .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>"))
+            .select("user_id", "product", "jsonified", "parsed")
+            .limit(5)
+            .show();
+
     }, 90_000);
 
 

@@ -1,5 +1,5 @@
 import {spark} from "./client/session";
-import {col, isNotNull, isNull, lit, posexplode, split, when} from "./engine/column";
+import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_json, when} from "./engine/column";
 
 
 (async () => {
@@ -155,5 +155,11 @@ import {col, isNotNull, isNull, lit, posexplode, split, when} from "./engine/col
         .show();
     await people
         .summary(["count", "min", "50%", "75%", "max"], ["age"])
+        .show();
+    await purchases
+        .withColumn("jsonified", to_json(struct(col("product"))))
+        .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>"))
+        .select("user_id", "product", "jsonified", "parsed")
+        .limit(5)
         .show();
 })();
