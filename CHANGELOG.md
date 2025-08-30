@@ -1,3 +1,10 @@
+## [1.3.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.2.0...v1.3.0) (2025-08-30)
+
+### Features
+
+* add complex types, unionByName ([cf576a5](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/cf576a5ea45a3559bef8ae06f6f5a32dd2190c4c))
+* **read:** implementa describe() y summary() en ReadChainedDataFrame. Se agregan combinadores tagless-final sobre Spark Connect sin extensiones. Un solo Aggregate global + Projects y UNION ALL. Guard numérico con WHEN/ELSE para evitar CAST_INVALID_INPUT. Soporte de percentiles en summary. Proyección temprana de columnas. Ejemplos y tests e2e añadidos. ([64a6184](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/64a6184452dab14732a6c03506ae3d1516b80c36))
+
 ## [1.2.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.1.0...v1.2.0) (2025-08-17)
 
 ### Features
