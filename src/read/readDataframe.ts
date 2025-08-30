@@ -33,7 +33,7 @@ export interface ExprAlg<E> {
 
     logical(op: "AND" | "OR", left: E, right: E): E;
 
-    alias(input: E, name: string): E;
+    alias(input: E, ...names: string[]): E;
 
     call(name: string, args: E[]): E;
 
@@ -49,6 +49,15 @@ export interface ExprAlg<E> {
     isNotNull(input: E): E;
     coalesce(args: E[]): E;
     sortKey(input: E, direction: "asc"|"desc", nulls?: "nullsFirst"|"nullsLast"): E;
+    explode(input: E): E;
+    posexplode(input: E): E;
+    getField(input: E, field: string): E;
+    map_keys(input: E): E;
+    map_values(input: E): E;
+    elementAt(map: E, key: E): E;
+    getItem(collectionExpr: E, key: E | string | number): E;
+    split(input: E, delimiter: E | string): E;
+
 }
 
 export interface DFAlg<R, E, G = unknown> {
@@ -82,6 +91,10 @@ export interface DFAlg<R, E, G = unknown> {
     withColumnRenamed(plan: R, oldName: string, newName: string): R;
 
     withColumnsRenamed(plan: R, mapping: Record<string, string>): R;
+
+    describe(plan: R, columns: E[]): R;
+
+    summary(plan: R, metrics: E[], columns: E[]): R;
 }
 
 export interface DFExec<R> {

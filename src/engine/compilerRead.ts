@@ -84,6 +84,70 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: args,
         },
     }),
+    explode: (input) => ({
+        unresolved_function: {
+            function_name: "explode",
+            arguments: [input],
+        }
+    }),
+
+    posexplode: (input) => ({
+        unresolved_function: {
+            function_name: "posexplode",
+            arguments: [input],
+        }
+    }),
+    getField: (structExpr, fieldName) => ({
+        unresolved_function: {
+            function_name: "getfield",
+            arguments: [
+                structExpr,
+                {literal: {string: fieldName}}
+            ]
+        }
+    }),
+    map_keys: (mapExpr: any) => ({
+        unresolved_function: {
+            function_name: "map_keys",
+            arguments: [mapExpr]
+        }
+    }),
+    map_values: (mapExpr: any) => ({
+        unresolved_function: {
+            function_name: "map_values",
+            arguments: [mapExpr]
+        }
+    }),
+    elementAt: (mapExpr, key) => ({
+        unresolved_function: {
+            function_name: "element_at",
+            arguments: [mapExpr, typeof key === "object" ? key : {literal: {string: String(key)}}]
+        }
+    }),
+    getItem: (collectionExpr, key) => ({
+        unresolved_function: {
+            function_name: "element_at",
+            arguments: [
+                collectionExpr,
+                typeof key === "object"
+                    ? key
+                    : typeof key === "number"
+                        ? {literal: {integer: key}}
+                        : {literal: {string: String(key)}}
+            ]
+        }
+    }),
+    split: (input, delimiter) => ({
+        unresolved_function: {
+            function_name: "split",
+            arguments: [
+                input,
+                typeof delimiter === "object"
+                    ? delimiter
+                    : { literal: { string: String(delimiter) } }
+            ]
+        }
+    }),
 };
 
 // ========================= DATAFRAME (R = ProtoRel) =========================
@@ -155,18 +219,17 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             input,
             order: orders.map(o => {
                 // “desenvolvé” sortKey si vino de EX.sortKey(...)
-                const expr =
-                    o.expr && o.expr.sort_key_marker ? o.expr.sort_key_marker.input : o.expr;
+                const expr = o.expr && o.expr.sort_key_marker ? o.expr.sort_key_marker.input : o.expr;
                 return {
                     child: expr,
                     direction: toProtoSortDirection(o.direction), // "ASCENDING" | "DESCENDING"
+
                     // En tu compiler usabas boolean nulls_first; mantenemos ese contrato:
-                    nulls_first:
-                        o.nulls === "nullsFirst"
-                            ? true
-                            : o.nulls === "nullsLast"
-                                ? false
-                                : undefined,
+                    nulls_first: o.nulls === "nullsFirst"
+                        ? true
+                        : o.nulls === "nullsLast"
+                            ? false
+                            : undefined,
                 };
             }),
         },
@@ -241,6 +304,21 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
                 },
             })),
         },
+    }),
+    describe: (plan, columns) => ({
+        project: {
+            plan,
+            expressions: columns,
+        },
+    }),
+    summary: (plan, metrics, columns) => ({
+        extension: {
+            value: {
+                input: plan,
+                metrics,
+                columns,
+            },
+        }
     }),
 };
 

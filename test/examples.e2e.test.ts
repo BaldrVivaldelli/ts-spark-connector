@@ -1,5 +1,6 @@
 // test/examples.e2e.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import {describe, it, expect, beforeAll} from 'vitest';
+import {explode, lit, posexplode, split} from "../src/engine/column";
 
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
@@ -9,11 +10,11 @@ beforeAll(async () => {
     process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
 
     try {
-        ({ spark } = await import('../src/client/session'));
-        ({ col, isNull, isNotNull, when } = await import('../src/engine/column'));
+        ({spark} = await import('../src/client/session'));
+        ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
     } catch {
-        ({ spark } = await import('../dist/client/session.js'));
-        ({ col, isNull, isNotNull, when } = await import('../dist/engine/column.js'));
+        ({spark} = await import('../dist/client/session.js'));
+        ({col, isNull, isNotNull, when} = await import('../dist/engine/column.js'));
     }
 });
 
@@ -33,7 +34,7 @@ describe('examples (E2E)', () => {
             .select('name', 'product', 'amount')
             .filter(col('amount').gt(100))
             .groupBy('name')
-            .agg({ total_spent: 'sum(amount)', items_purchased: 'count(product)' })
+            .agg({total_spent: 'sum(amount)', items_purchased: 'count(product)'})
             .show();
         expect(true).toBe(true);
     }, 90_000);
@@ -49,7 +50,7 @@ describe('examples (E2E)', () => {
     it('groupBy + agg + orderBy + limit', async () => {
         await purchases()
             .groupBy('user_id')
-            .agg({ total_spent: 'sum(amount)' })
+            .agg({total_spent: 'sum(amount)'})
             .orderBy(col('total_spent').descNullsLast())
             .limit(10)
             .show();
@@ -162,7 +163,7 @@ describe('examples (E2E)', () => {
         const pu = purchases();
         const topSpenders = pu
             .groupBy('user_id')
-            .agg({ total_spent: 'sum(amount)' })
+            .agg({total_spent: 'sum(amount)'})
             .orderBy(col('total_spent').descNullsLast());
 
         await topSpenders.write.parquet().mode('overwrite').save('/data/dest/top_spenders');
@@ -176,4 +177,44 @@ describe('examples (E2E)', () => {
             .save('/data/dest/purchases_avro');
         expect(true).toBe(true);
     }, 90_000);
+    it('describe: id,name,age,country,year', async () => {
+        const df = people();
+        await df
+            .describe(["id", "name", "age", "country", "year"])
+            .show();
+        expect(true).toBe(true);
+    }, 90_000);
+    it('summary: count/min/50%/75%/max sobre age', async () => {
+            const df = people();
+            await df
+                .summary(["count", "min", "50%", "75%", "max"], ["age"])
+                .show();
+            expect(true).toBe(true);
+    }, 90_000);
+
+
+    it('explode sin alias funciona (1 columna)', async () => {
+        await purchases()
+            .withColumn("tags_arr", split(col("tags"), lit(",")))  // dividir en array
+            .select(
+                col("user_id"),
+                posexplode(col("tags_arr"))
+            )
+            .show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+    it('explode sin alias funciona (1 columna)', async () => {
+        await purchases()
+            .withColumn("tags_arr", split(col("tags"), lit(",")))
+            .select(
+                col("user_id"),
+                explode(col("tags_arr"))
+            )
+            .limit(5)
+            .show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+
 });

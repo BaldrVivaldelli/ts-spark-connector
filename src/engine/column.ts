@@ -79,6 +79,44 @@ const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
     };
 };
 
+export function call(name: string, args: (EBuilder | string | number | boolean)[]): EBuilder {
+    return EB(EX => EX.call(name, args.map(arg => toE(arg)(EX))));
+}
+
+export const map_keys = (mapCol: EBuilder): EBuilder =>
+    call("map_keys", [mapCol]);
+
+export const map_values = (mapCol: EBuilder): EBuilder =>
+    call("map_values", [mapCol]);
+
+export const elementAt = (mapCol: EBuilder, key: EBuilder | string | number): EBuilder =>
+    call("element_at", [mapCol, key]);
+export function split(input: EBuilder, delimiter: string | EBuilder): EBuilder {
+    return call("split", [input, delimiter]);
+}
+
+export function getField(structCol: EBuilder, field: string): EBuilder {
+    return EB(EX => EX.getField(structCol.build(EX), field));
+}
+
+export function getItem(collection: EBuilder, key: EBuilder | string | number): EBuilder {
+    return EB(EX =>
+        EX.getItem(
+            collection.build(EX),
+            typeof key === "object" && "build" in key
+                ? key.build(EX)
+                : EX.lit(key as any)
+        )
+    );
+}
+
+export function explode(col: EBuilder | string): EBuilder {
+    return EB(EX => EX.explode(toE(col)(EX)));
+}
+
+export function posexplode(col: EBuilder | string): EBuilder {
+    return EB(EX => EX.posexplode(toE(col)(EX)));
+}
 
 export function isNull(x: EBuilder | string): EBuilder {
     return EB(EX => EX.isNull(toE(x)(EX)));

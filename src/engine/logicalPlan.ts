@@ -1,4 +1,4 @@
-import { GroupTypeInput, JoinTypeInput } from "./sparkConnectEnums";
+import {GroupTypeInput, JoinTypeInput} from "./sparkConnectEnums";
 import {FrameBoundary} from "./column";
 import {FrameType, SortOrder} from "../read/readDataframe";
 
@@ -24,19 +24,15 @@ export type LogicalPlan =
     | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string> }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
-    | {
-    type: "Aggregate";
-    input: GroupBy;
-    // ⬇⬇⬇ AQUÍ el cambio clave
-    aggregations: Record<string, Expression>;
-    groupType?: GroupTypeInput;
-}
+    | { type: "Aggregate";input: GroupBy;aggregations: Record<string, Expression>;groupType?: GroupTypeInput;}
     | { type: "GroupBy"; input: LogicalPlan; expressions: Expression[] }
     | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression; joinType: JoinTypeInput }
     | { type: "Sort"; input: LogicalPlan; orders: SortOrder<any>[] }
     | { type: "Limit"; input: LogicalPlan; limit: number }
     | { type: "Distinct"; input: LogicalPlan }
-    | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean };
+    | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean }
+    | { type: "Describe"; input: LogicalPlan; columns: Expression[] }
+    | { type: "Summary"; input: LogicalPlan; metrics: Expression[]; columns: Expression[] };
 
 export type Expression =
     | { type: "Column"; name: string }

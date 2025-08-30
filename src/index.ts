@@ -1,5 +1,5 @@
 import {spark} from "./client/session";
-import {col, isNotNull, isNull, when} from "./engine/column";
+import {col, isNotNull, isNull, lit, posexplode, split, when} from "./engine/column";
 
 
 (async () => {
@@ -12,6 +12,16 @@ import {col, isNotNull, isNull, when} from "./engine/column";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
+
+    await purchases
+        .withColumn("tags_arr", split(col("tags"), lit(",")))  // dividir en array
+        .select(
+            col("user_id"),
+            posexplode(col("tags_arr"))
+        )
+        .show();
+
+
     await people
         .join(purchases, col("id").eq(col("user_id")))
         .select("name", "product", "amount")
@@ -121,10 +131,10 @@ import {col, isNotNull, isNull, when} from "./engine/column";
         .sortBy("product")
         .parquet()
         .mode("overwrite")
-        .saveAsTable ("purchases_bucketed");
+        .saveAsTable("purchases_bucketed");
     const topSpenders = purchases
         .groupBy("user_id")
-        .agg({ total_spent: "sum(amount)" })
+        .agg({total_spent: "sum(amount)"})
         .orderBy(col("total_spent").descNullsLast());
 
     await topSpenders.write
@@ -140,4 +150,10 @@ import {col, isNotNull, isNull, when} from "./engine/column";
         .option("compression", "snappy")  // ejemplo de opción específica
         .mode("append")
         .save("/data/dest/purchases_avro");
+    await people
+        .describe(["id", "name", "age", "country", "year"])
+        .show();
+    await people
+        .summary(["count", "min", "50%", "75%", "max"], ["age"])
+        .show();
 })();
