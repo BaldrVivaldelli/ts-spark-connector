@@ -1,6 +1,8 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
-import {explode, lit, posexplode, split} from "../src/engine/column";
+import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
+import {SparkSession} from "../src/client/session";
+
 
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
@@ -9,21 +11,26 @@ beforeAll(async () => {
     // si no viene del entorno, usa el local
     process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
 
-    try {
-        ({spark} = await import('../src/client/session'));
-        ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
-    } catch {
-        ({spark} = await import('../dist/client/session.js'));
-        ({col, isNull, isNotNull, when} = await import('../dist/engine/column.js'));
-    }
+    ({spark} = await import('../src/client/session'));
+    ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
 });
 
+const session = SparkSession.builder()
+    .withAuth({ type: "token", token: "my-token" }) // opcional
+    .enableTLS({
+        keyStorePath: "./spark-server/certs/keystore.p12",
+        keyStorePassword: "password",
+        trustStorePath: "./spark-server/certs/cert.crt",
+        trustStorePassword: "password"
+    })
+    .getOrCreate();
 // helpers para obtener DF frescos en cada test
 const people = () =>
-    spark.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
+
+    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
 
 const purchases = () =>
-    spark.read.option('delimiter', '\t').option('header', 'true').csv('/data/purchases.tsv');
+    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/purchases.tsv');
 
 describe('examples (E2E)', () => {
     it('join + select + filter + groupBy + agg + show', async () => {
@@ -185,11 +192,11 @@ describe('examples (E2E)', () => {
         expect(true).toBe(true);
     }, 90_000);
     it('summary: count/min/50%/75%/max sobre age', async () => {
-            const df = people();
-            await df
-                .summary(["count", "min", "50%", "75%", "max"], ["age"])
-                .show();
-            expect(true).toBe(true);
+        const df = people();
+        await df
+            .summary(["count", "min", "50%", "75%", "max"], ["age"])
+            .show();
+        expect(true).toBe(true);
     }, 90_000);
 
 
@@ -215,6 +222,34 @@ describe('examples (E2E)', () => {
             .show();
         expect(true).toBe(true);
     }, 90_000);
+    it('from_json + to_json roundtrip (logical)', async () => {
+        await purchases()
+            .withColumn("jsonified", to_json(struct(col("product"))))
+            .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>"))
+            .select("user_id", "product", "jsonified", "parsed")
+            .limit(5)
+            .show();
 
+    }, 90_000);
 
+    it('repartition and coalescePartitions (logical)', async () => {
+        await purchases()
+            .coalescePartitions(3)        // <-- 🧊 reduce particiones sin shuffle
+            .select("tags", "product") // <-- 🧹 selecciona columnas deseadas
+            .limit(5)
+            .show();
+    }, 90_000);
+
+    it('repartition test', async () => {
+        await purchases()
+            .repartition(4) // cambia el número de particiones a 4 (con shuffle)
+            .select("tags", "product")
+            .limit(5)
+            .show();
+    }, 90_000);
+    it("should default to 'simple' mode when no argument is given", async () => {
+        const df = purchases().select("user_id", "product");
+        await df.explain();
+
+    });
 });

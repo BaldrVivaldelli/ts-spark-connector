@@ -57,7 +57,8 @@ export interface ExprAlg<E> {
     elementAt(map: E, key: E): E;
     getItem(collectionExpr: E, key: E | string | number): E;
     split(input: E, delimiter: E | string): E;
-
+    from_json(jsonExpr: E, schema: string): E;
+    to_json(expr: E): E;
 }
 
 export interface DFAlg<R, E, G = unknown> {
@@ -95,10 +96,23 @@ export interface DFAlg<R, E, G = unknown> {
     describe(plan: R, columns: E[]): R;
 
     summary(plan: R, metrics: E[], columns: E[]): R;
+
+    cache(plan: R): R;
+
+    persist(plan: R, level?: string): R;
+
+    unpersist(plan: R, blocking?: boolean): R;
+
+    repartition(plan: R, numPartitions: number, shuffle: boolean): R;
+
+    coalesce(plan: R, numPartitions: number): R;
+
 }
 
 export interface DFExec<R> {
     collect(root: R, session: SparkSession): Promise<any[]>;
+    explain(root: R, session: SparkSession, ): Promise<any[]>;
+
 }
 export type DFProgram<R, E, G = unknown> =
     (DF: DFAlg<R, E, G>, EX: ExprAlg<E>) => R;

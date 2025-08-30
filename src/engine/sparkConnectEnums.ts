@@ -123,3 +123,37 @@ export function toProtoSaveMode(mode: SaveMode | undefined): number {
             throw new Error(`Unsupported save mode: ${mode}`);
     }
 }
+
+export enum StorageLevel {
+    NONE = "NONE",
+    DISK_ONLY = "DISK_ONLY",
+    MEMORY_ONLY = "MEMORY_ONLY",
+    MEMORY_AND_DISK = "MEMORY_AND_DISK",
+    MEMORY_ONLY_SER = "MEMORY_ONLY_SER",
+    MEMORY_AND_DISK_SER = "MEMORY_AND_DISK_SER",
+    OFF_HEAP = "OFF_HEAP",
+}
+
+export enum ExplainMode {
+    EXPLAIN_MODE_SIMPLE = 1,
+    EXPLAIN_MODE_EXTENDED = 2,
+    EXPLAIN_MODE_CODEGEN = 3,
+    EXPLAIN_MODE_COST = 4,
+    EXPLAIN_MODE_FORMATTED = 5,
+}
+
+export type ExplainModeInput = "simple" | "extended" | "codegen" | "cost" | "formatted";
+
+const explainModeMap: Record<ExplainModeInput, ExplainMode> = {
+    simple: ExplainMode.EXPLAIN_MODE_SIMPLE,
+    extended: ExplainMode.EXPLAIN_MODE_EXTENDED,
+    codegen: ExplainMode.EXPLAIN_MODE_CODEGEN,
+    cost: ExplainMode.EXPLAIN_MODE_COST,
+    formatted: ExplainMode.EXPLAIN_MODE_FORMATTED,
+};
+
+export function toProtoExplainMode(mode: ExplainModeInput): ExplainMode {
+    const m = explainModeMap[mode];
+    if (!m) throw new Error(`Unsupported explain mode: ${mode}`);
+    return m;
+}

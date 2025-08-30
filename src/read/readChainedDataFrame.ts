@@ -3,7 +3,7 @@ import {LogicalPlan} from "../engine/logicalPlan";
 import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
 import {SparkSession} from "../client/session";
 import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 
@@ -22,20 +22,20 @@ export const asc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): Sort
 export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
     ({expr: e.build(EX), direction: "desc", nulls});
 
-export class ReadChainedDataFrame<R,E,G> {
+export class ReadChainedDataFrame<R, E, G> {
     private readonly prog: DFProgram<any, any, any>;
 
-    constructor(p: DFProgram<R,E,G>, private readonly session: SparkSession) {
+    constructor(p: DFProgram<R, E, G>, private readonly session: SparkSession) {
         this.prog = p;
     }
 
-    static fromCSV<R,E,G>(
+    static fromCSV<R, E, G>(
         path: string | string[],
         session: SparkSession,
         options?: Record<string, string>
     ) {
-        const p: DFProgram<R,E,G> = (DF) => DF.relation("csv", path, options);
-        return new ReadChainedDataFrame<R,E,G>(p, session);
+        const p: DFProgram<R, E, G> = (DF) => DF.relation("csv", path, options);
+        return new ReadChainedDataFrame<R, E, G>(p, session);
     }
 
     private chain(step: (df: any, EX: ExprAlg<any>, DF: DFAlg<any, any, any>) => any) {
@@ -43,9 +43,9 @@ export class ReadChainedDataFrame<R,E,G> {
         return new ReadChainedDataFrame(next, this.session);
     }
 
-    select(...cols: string[]): ReadChainedDataFrame<R,E,G>;
-    select(...cols: EBuilder[]): ReadChainedDataFrame<R,E,G>;
-    select(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R,E,G> {
+    select(...cols: string[]): ReadChainedDataFrame<R, E, G>;
+    select(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G>;
+    select(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, EX, DF) =>
             DF.select(df, cols.map(c => typeof c === "string" ? EX.col(c) : c.build(EX)))
         );
@@ -60,7 +60,7 @@ export class ReadChainedDataFrame<R,E,G> {
         return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
     }
 
-    join(right: ReadChainedDataFrame<R,E,G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
+    join(right: ReadChainedDataFrame<R, E, G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
         return new ReadChainedDataFrame(next, this.session);
@@ -134,9 +134,9 @@ export class ReadChainedDataFrame<R,E,G> {
     }
 
 
-    dropDuplicates(...cols: string[]): ReadChainedDataFrame<R,E,G>;
-    dropDuplicates(...cols: EBuilder[]): ReadChainedDataFrame<R,E,G>;
-    dropDuplicates(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R,E,G> {
+    dropDuplicates(...cols: string[]): ReadChainedDataFrame<R, E, G>;
+    dropDuplicates(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G>;
+    dropDuplicates(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, EX, DF) => {
             const exprs =
                 cols.length === 0
@@ -146,7 +146,7 @@ export class ReadChainedDataFrame<R,E,G> {
         });
     }
 
-    union(right: ReadChainedDataFrame<R,E,G>): ReadChainedDataFrame<R,E,G> {
+    union(right: ReadChainedDataFrame<R, E, G>): ReadChainedDataFrame<R, E, G> {
         const next: DFProgram<any, any, any> = (DF, EX) => {
             const leftPlan = this.prog(DF, EX);
             const rightPlan = right.prog(DF, EX);
@@ -155,7 +155,7 @@ export class ReadChainedDataFrame<R,E,G> {
         return new ReadChainedDataFrame(next, this.session);
     }
 
-    unionByName(right: ReadChainedDataFrame<R,E,G>, allowMissingColumns = false) {
+    unionByName(right: ReadChainedDataFrame<R, E, G>, allowMissingColumns = false) {
         const next: DFProgram<any, any, any> = (DF, EX) =>
             DF.union(this.prog(DF, EX), right.prog(DF, EX), {byName: true, allowMissingColumns});
         return new ReadChainedDataFrame(next, this.session);
@@ -169,7 +169,7 @@ export class ReadChainedDataFrame<R,E,G> {
         return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
     }
 
-    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ReadChainedDataFrame<R,E,G> {
+    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, EX, DF) => {
             const toE = (x: string | EBuilder | number | boolean) =>
                 typeof x === "string"
@@ -182,9 +182,10 @@ export class ReadChainedDataFrame<R,E,G> {
             return DF.withColumn(df, name, coalesced);
         });
     }
-    describe(colNames: string[])  {
+
+    describe(colNames: string[]) {
         return this.chain((df, EX, DF) => {
-            const toString = (e:any) => EX.call("concat", [EX.lit(""), e]);
+            const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
             const stats = ["count", "mean", "stddev", "min", "max"] as const;
             const fn = (s: typeof stats[number]) =>
                 s === "mean" ? "avg" : s === "stddev" ? "stddev_samp" : s;
@@ -216,11 +217,11 @@ export class ReadChainedDataFrame<R,E,G> {
 
             const measures = Object.fromEntries(
                 colNames.flatMap(n => ([
-                    [`__${n}_count`,  EX.call("count",        [EX.col(n)])],
-                    [`__${n}_mean`,   EX.call("avg",          [numExpr[n]])],
-                    [`__${n}_stddev`, EX.call("stddev_samp",  [numExpr[n]])],
-                    [`__${n}_min`,    EX.call("min",          [EX.col(n)])],
-                    [`__${n}_max`,    EX.call("max",          [EX.col(n)])],
+                    [`__${n}_count`, EX.call("count", [EX.col(n)])],
+                    [`__${n}_mean`, EX.call("avg", [numExpr[n]])],
+                    [`__${n}_stddev`, EX.call("stddev_samp", [numExpr[n]])],
+                    [`__${n}_min`, EX.call("min", [EX.col(n)])],
+                    [`__${n}_max`, EX.call("max", [EX.col(n)])],
                 ]))
             );
 
@@ -236,7 +237,7 @@ export class ReadChainedDataFrame<R,E,G> {
                 ]);
 
             return stats.slice(1).reduce(
-                (acc, s) => DF.union(acc, projectFor(s), { byName: true }),
+                (acc, s) => DF.union(acc, projectFor(s), {byName: true}),
                 projectFor(stats[0])
             );
         });
@@ -244,33 +245,33 @@ export class ReadChainedDataFrame<R,E,G> {
 
     summary(metrics: string[] | undefined, colNames: string[]) {
         return this.chain((df, EX, DF) => {
-            const DEFAULTS = ["count","mean","stddev","min","25%","50%","75%","max"] as const;
+            const DEFAULTS = ["count", "mean", "stddev", "min", "25%", "50%", "75%", "max"] as const;
             const req = (metrics?.length ? metrics : DEFAULTS).map(m => m.toLowerCase());
 
             type Parsed =
-                | { kind: "builtin"; name: "count"|"mean"|"stddev"|"min"|"max"; label: string; suffix: string }
+                | { kind: "builtin"; name: "count" | "mean" | "stddev" | "min" | "max"; label: string; suffix: string }
                 | { kind: "pct"; p: number; label: string; suffix: string };
 
             const norm = (m: string): Parsed => {
                 if (m === "median") m = "50%";
                 if (/%$/.test(m)) {
-                    const p = parseFloat(m)/100;
+                    const p = parseFloat(m) / 100;
                     if (!(p >= 0 && p <= 1)) throw new Error(`summary(): percentil inválido '${m}'`);
-                    const pct = Math.round(p*100);
-                    return { kind: "pct", p, label: `${pct}%`, suffix: `p${pct}` };
+                    const pct = Math.round(p * 100);
+                    return {kind: "pct", p, label: `${pct}%`, suffix: `p${pct}`};
                 }
                 if (m === "std") m = "stddev";
-                const ok = ["count","mean","stddev","min","max"] as const;
+                const ok = ["count", "mean", "stddev", "min", "max"] as const;
                 if ((ok as readonly string[]).includes(m)) {
-                    return { kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m) };
+                    return {kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m)};
                 }
                 throw new Error(`summary(): métrica no soportada '${m}'`);
             };
             const parsed: Parsed[] = req.map(norm);
 
             // 1) Helpers (mismos que en describe optimizado)
-            const toString = (e:any) => EX.call("concat", [EX.lit(""), e]);
-            const NULL_D  = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]); // NULL DOUBLE
+            const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
+            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]); // NULL DOUBLE
             const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
             const toDoubleIfNumeric = (name: string) =>
                 EX.caseWhen(
@@ -293,11 +294,11 @@ export class ReadChainedDataFrame<R,E,G> {
                 const numArg = toDoubleIfNumeric(n);
                 for (const m of parsed) {
                     if (m.kind === "builtin") {
-                        if (m.name === "count")   pairs.push([`__${n}_count`,  EX.call("count",       [EX.col(n)])]);
-                        if (m.name === "mean")    pairs.push([`__${n}_mean`,   EX.call("avg",         [numArg])]);
-                        if (m.name === "stddev")  pairs.push([`__${n}_stddev`, EX.call("stddev_samp", [numArg])]);
-                        if (m.name === "min")     pairs.push([`__${n}_min`,    EX.call("min",         [EX.col(n)])]);
-                        if (m.name === "max")     pairs.push([`__${n}_max`,    EX.call("max",         [EX.col(n)])]);
+                        if (m.name === "count") pairs.push([`__${n}_count`, EX.call("count", [EX.col(n)])]);
+                        if (m.name === "mean") pairs.push([`__${n}_mean`, EX.call("avg", [numArg])]);
+                        if (m.name === "stddev") pairs.push([`__${n}_stddev`, EX.call("stddev_samp", [numArg])]);
+                        if (m.name === "min") pairs.push([`__${n}_min`, EX.call("min", [EX.col(n)])]);
+                        if (m.name === "max") pairs.push([`__${n}_max`, EX.call("max", [EX.col(n)])]);
                     } else {
                         // percentiles (uno por alias; simple y robusto)
                         pairs.push([`__${n}_${m.suffix}`, EX.call("percentile_approx", [numArg, EX.lit(m.p)])]);
@@ -319,12 +320,38 @@ export class ReadChainedDataFrame<R,E,G> {
 
             const rows = parsed.map(projectFor);
             return rows.slice(1).reduce(
-                (acc, r) => DF.union(acc, r, { byName: true }),
+                (acc, r) => DF.union(acc, r, {byName: true}),
                 rows[0]
             );
         });
     }
 
+    repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => {
+            console.log("df antes de repartir:", JSON.stringify(df, null, 2));
+            const result = DF.repartition(df, numPartitions, shuffle);
+            console.log("df después de repartir:", JSON.stringify(result, null, 2));
+            return result;
+        });
+
+    }
+
+    coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.coalesce(df, numPartitions));
+    }
+
+
+    cache(): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.cache(df));
+    }
+
+    persist(level?: string): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.persist(df, level ?? "MEMORY_AND_DISK"));
+    }
+
+    unpersist(blocking?: boolean): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.unpersist(df, blocking));
+    }
 
 
     private compileToSparkPlan(): LogicalPlan {
@@ -344,10 +371,19 @@ export class ReadChainedDataFrame<R,E,G> {
         printArrowResults(arrowBuffers);
     }
 
-    getSession(): SparkSession { return this.session; }
-    getProgram(): DFProgram<R,E,G> { return this.prog; }
+    getSession(): SparkSession {
+        return this.session;
+    }
+
+    explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
+        const root = this.prog(ProtoDFAlg, ProtoExprAlg);
+        return ProtoExec.explain(root, this.session);
+    }
+    getProgram(): DFProgram<R, E, G> {
+        return this.prog;
+    }
 
     get write() {
-        return DataFrameWriterTF.fromDF<R,E,G, any>(this);
+        return DataFrameWriterTF.fromDF<R, E, G, any>(this);
     }
 }

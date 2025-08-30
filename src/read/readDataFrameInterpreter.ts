@@ -38,10 +38,10 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         args: [input]
     }),
 
-    coalesce: (args) => ({
+    coalesce: (input) => ({
         type: "UnresolvedFunction",
         name: "coalesce",
-        args
+        args: input
     }),
     explode: (input) => ({
         type: "UnresolvedFunction",
@@ -102,6 +102,20 @@ export const SparkExprAlg: ExprAlg<Expression> = {
                 ? delimiter
                 : {type: "Literal", value: delimiter}
         ]
+    }),
+    from_json: (jsonExpr, schema) => ({
+        type: "UnresolvedFunction",
+        name: "from_json",
+        args: [
+            jsonExpr,
+            {type: "Literal", value: schema}
+        ],
+    }),
+
+    to_json: (expr) => ({
+        type: "UnresolvedFunction",
+        name: "to_json",
+        args: [expr],
     }),
 };
 
@@ -201,4 +215,36 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         metrics,
         columns,
     }),
+    cache: (plan) => ({
+        type: "Cache",
+        input: plan
+    }),
+
+    persist: (plan, level) => ({
+        type: "Persist",
+        input: plan,
+        level
+    }),
+
+    unpersist: (plan, blocking) => ({
+        type: "Unpersist",
+        input: plan,
+        blocking
+    }),
+
+    repartition: (plan, numPartitions, shuffle) => ({
+        type: "Repartition",
+        input: plan,
+        numPartitions,
+        shuffle
+    }),
+
+    coalesce: (plan, numPartitions) => ({
+        type: "Coalesce",
+        input: plan,
+        numPartitions,
+        shuffle:false
+    }),
+
+
 };

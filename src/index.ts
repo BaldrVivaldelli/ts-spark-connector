@@ -1,14 +1,24 @@
-import {spark} from "./client/session";
-import {col, isNotNull, isNull, lit, posexplode, split, when} from "./engine/column";
+import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_json, when} from "./engine/column";
+import {SparkSession} from "./client/session";
 
 
 (async () => {
-    const people = spark.read
+    const session = SparkSession.builder()
+        .withAuth({ type: "token", token: "my-token" }) // opcional
+        .enableTLS({
+            keyStorePath: "./spark-server/certs/keystore.p12",
+            keyStorePassword: "password",
+            trustStorePath: "./spark-server/certs/cert.crt",
+            trustStorePassword: "password"
+        })
+        .getOrCreate();
+
+    const people = session.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/people.tsv");
 
-    const purchases = spark.read
+    const purchases = session.read
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
@@ -155,5 +165,21 @@ import {col, isNotNull, isNull, lit, posexplode, split, when} from "./engine/col
         .show();
     await people
         .summary(["count", "min", "50%", "75%", "max"], ["age"])
+        .show();
+    await purchases
+        .withColumn("jsonified", to_json(struct(col("product")))) //TODO: en una version futura voy a hacerlo sintacticamente mejor
+        .withColumn("parsed", from_json(col("jsonified"), "struct<product:string>")) //TODO: en una version futura voy a hacerlo sintacticamente mejor
+        .select("user_id", "product", "jsonified", "parsed")
+        .limit(5)
+        .show();
+    await purchases
+        .coalescePartitions(3)        // <-- 🧊 reduce particiones sin shuffle
+        .select("tags", "product") // <-- 🧹 selecciona columnas deseadas
+        .limit(5)
+        .show();
+    await purchases
+        .repartition(4) // cambia el número de particiones a 4 (con shuffle)
+        .select("tags", "product")
+        .limit(5)
         .show();
 })();

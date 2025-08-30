@@ -35,9 +35,11 @@ export type EBuilder = {
     isNotNull(): EBuilder;
     over(spec: (EX: ExprAlg<any>) => WindowSpec<any>): EBuilder
 
+    from_json(schema: string): EBuilder;
+    to_json(): EBuilder;
 };
 
-
+``
 const toE =
     (x: EBuilder | string | number | boolean) =>
         <E>(EX: ExprAlg<E>) =>
@@ -76,6 +78,8 @@ const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
         isNull:    () => EB(EX => EX.isNull(f(EX))),
         isNotNull: () => EB(EX => EX.isNotNull(f(EX))),
         over: (specB) => EB(EX => EX.win(f(EX), specB(EX))),
+        from_json: (schema: string) => EB(EX => EX.from_json(f(EX), schema)),
+        to_json: () => EB(EX => EX.to_json(f(EX))),
     };
 };
 
@@ -97,6 +101,17 @@ export function split(input: EBuilder, delimiter: string | EBuilder): EBuilder {
 
 export function getField(structCol: EBuilder, field: string): EBuilder {
     return EB(EX => EX.getField(structCol.build(EX), field));
+}
+
+export function to_json(expr: EBuilder): EBuilder {
+    return EB(EX => EX.to_json(expr.build(EX)));
+}
+
+export function from_json(jsonExpr: EBuilder, schema: string): EBuilder {
+    return EB(EX => EX.from_json(jsonExpr.build(EX), schema));
+}
+export function struct(...fields: EBuilder[]): EBuilder {
+    return call("struct", fields);
 }
 
 export function getItem(collection: EBuilder, key: EBuilder | string | number): EBuilder {

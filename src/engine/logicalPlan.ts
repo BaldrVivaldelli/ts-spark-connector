@@ -32,7 +32,13 @@ export type LogicalPlan =
     | { type: "Distinct"; input: LogicalPlan }
     | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean }
     | { type: "Describe"; input: LogicalPlan; columns: Expression[] }
-    | { type: "Summary"; input: LogicalPlan; metrics: Expression[]; columns: Expression[] };
+    | { type: "Summary"; input: LogicalPlan; metrics: Expression[]; columns: Expression[] }
+    | { type: "Cache"; input: LogicalPlan }
+    | { type: "Persist"; input: LogicalPlan; level?: string }
+    | { type: "Unpersist"; input: LogicalPlan; blocking?: boolean }
+    | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
+    | { type: "Coalesce"; input: LogicalPlan; numPartitions: number };
+
 
 export type Expression =
     | { type: "Column"; name: string }

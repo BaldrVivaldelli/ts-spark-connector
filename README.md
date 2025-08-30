@@ -1,4 +1,3 @@
-
 # ts-spark-connector
 
 🌱 **Status: Alpha – Early growth stage**
@@ -138,6 +137,21 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 }
 ```
 
+## 🧠 TLS Included
+
+```ts
+// Connect with TLS (if your Spark Connect server uses TLS)
+const spark = SparkSession.builder()
+        .enableTLS({
+          keyStorePath: "./certs/keystore.p12",
+          keyStorePassword: "password",
+          trustStorePath: "./certs/cert.crt",
+          trustStorePassword: "password",
+        })
+        .getOrCreate();
+
+```
+
 ## ✅ Status Features & Roadmap
 
 ## Legend
@@ -183,12 +197,12 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 | **describe()**, `summary()`                                            | ✅                                                               | —        |
 | **unionByName(...)**                                                   | ✅                                                               | —        |
 | **Complex types** (arrays/maps/struct) + `explode/posexplode`          | ✅                                                               | —        |
-| **JSON helpers** (`from_json`, `to_json`)                              | ❌ Not yet                                                       | **P2**   |
-| **cache() / persist() / unpersist()**                                  | ❌ Not yet                                                       | **P2**   |
-| **repartition(...) / coalesce(...)**                                   | ❌ Not yet                                                       | **P2**   |
-| **explain(...)** (`simple/extended/formatted`)                         | ❌ Not yet                                                       | **P2**   |
-| `SparkSession.builder.config(...)`                                     | ❌ Not yet                                                       | **P2**   |
-| Auth/TLS for Spark Connect                                             | ❌ Not yet                                                       | **P2**   |
+| **JSON helpers** (`from_json`, `to_json`)                              | ✅                                                               | **P2**   |
+| **cache() / persist() / unpersist()**                                  | 🔒 Not supported by spark connect                               | **P2**   |
+| **repartition(...) / coalesce(...)**                                   | ✅                                                               | **P2**   |
+| **explain(...)** (`simple/extended/formatted`)                         | ✅                                                               | **P2**   |
+| `SparkSession.builder.config(...)`                                     | ✅                                                               | **P2**   |
+| Auth/TLS for Spark Connect                                             | ✅                                                               | **P2**   |
 | **spark.sql(...)**                                                     | ❌ Not yet                                                       | **P3**   |
 | Temp views (`createOrReplaceTempView`)                                 | ❌ Not yet                                                       | **P3**   |
 | Catalog (`read.table`, `saveAsTable`)                                  | ✅                                                               | —        |

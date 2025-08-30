@@ -5,10 +5,11 @@ import {
     toProtoGroupType,
     toProtoSortDirection,
     // toProtoNullsOrder, // si tu proto lo necesita explícito en vez de boolean
-    toProtoSetOpType,
+    toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
 } from "./sparkConnectEnums";
 import {DFAlg, DFExec, ExprAlg, SortOrder, WindowSpec} from "../read/readDataframe";
 import {sparkGrpcClient} from "../client/sparkClient";
+import { SparkSession } from "../client/session";
 
 // ======================== EXPRESIONES (E = ProtoExpr) ========================
 
@@ -144,10 +145,27 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
                 input,
                 typeof delimiter === "object"
                     ? delimiter
-                    : { literal: { string: String(delimiter) } }
+                    : {literal: {string: String(delimiter)}}
             ]
         }
     }),
+    from_json: (jsonExpr, schema) => ({
+        unresolved_function: {
+            function_name: "from_json",
+            arguments: [
+                jsonExpr,
+                {literal: {string: schema}},
+            ],
+        },
+    }),
+
+    to_json: (expr) => ({
+        unresolved_function: {
+            function_name: "to_json",
+            arguments: [expr],
+        },
+    }),
+
 };
 
 // ========================= DATAFRAME (R = ProtoRel) =========================
@@ -223,6 +241,7 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
                 return {
                     child: expr,
                     direction: toProtoSortDirection(o.direction), // "ASCENDING" | "DESCENDING"
+
 
                     // En tu compiler usabas boolean nulls_first; mantenemos ese contrato:
                     nulls_first: o.nulls === "nullsFirst"
@@ -320,18 +339,71 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             },
         }
     }),
+    cache: (input) => ({
+        extension: {
+            cache: {
+                input
+            }
+        }
+    }),
+
+    persist: (input, level) => ({
+        extension: {
+            persist: {
+                input,
+                ...(level ? {storage_level: level} : {})
+            }
+        }
+    }),
+
+    unpersist: (input, blocking) => ({
+        extension: {
+            unpersist: {
+                input,
+                ...(blocking !== undefined ? {blocking} : {})
+            }
+        }
+    }),
+    repartition: (
+        input,
+        numPartitions: number,
+        shuffle = true
+    ) => ({
+        repartition: {
+            input,
+            num_partitions: numPartitions,
+            shuffle
+        }
+    }),
+
+    coalesce: (input, numPartitions) => ({
+        repartition: {
+            input,
+            num_partitions: numPartitions,
+            shuffle: false
+        }
+    }),
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {
     async collect(root, session) {
-        const req = { plan: { root } };
-        return sparkGrpcClient.executePlan({
-            session_id: session.getSessionId(),
-            user_context: session.getUserContext(),
-            plan: req.plan,
-        });
+        return sparkGrpcClient.executePlan(buildBaseRequest(root, session));
+    },
+
+    async explain(root: any, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<any[]> {
+        const baseReq = buildBaseRequest(root, session);
+        return sparkGrpcClient.executePlan(buildBaseRequest(root, session));
     }
 };
+
 export function programToProtobufRoot(root: ProtoRel) {
     return {plan: {root}};
+}
+
+function buildBaseRequest(root: any, session: SparkSession) {
+    return {
+        session_id: session.getSessionId(),
+        user_context: session.getUserContext(),
+        plan: {root},
+    };
 }
