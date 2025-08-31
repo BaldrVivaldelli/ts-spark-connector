@@ -1,6 +1,9 @@
 // src/read/session.ts
 import crypto from "crypto";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
+import {SessionAlgebra} from "./sessionAlgebra";
+import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
+import {DFProgram} from "../read/readDataframe";
 
 /** TYPES **/
 
@@ -17,12 +20,21 @@ export type AuthConfig =
 
 /** SPARK SESSION **/
 
-export class SparkSession {
+export class SparkSession implements SessionAlgebra {
     private readonly sessionId: string;
     private userContext: Record<string, any> = {};
 
     constructor(sessionId?: string) {
         this.sessionId = sessionId ?? crypto.randomUUID();
+    }
+
+    sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<R, E, G> {
+        const prog: DFProgram<R, E, G> = (DF) => DF.sql(query);
+        return new ReadChainedDataFrame(prog, this);
+    }
+    table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<R, E, G> {
+        const prog: DFProgram<R, E, G> = (DF) => DF.sql(`SELECT * FROM ${name}`);
+        return new ReadChainedDataFrame(prog, this);
     }
 
     static builder(): SparkSessionBuilder {
@@ -44,6 +56,7 @@ export class SparkSession {
     setUserContext(context: Record<string, any>) {
         this.userContext = context;
     }
+
 }
 
 export function createSparkSession(sessionId?: string): SparkSession {
@@ -103,6 +116,7 @@ class SparkSessionBuilder {
         session.setUserContext(this.configMap);
         return session;
     }
+
 }
 
 export const spark = createSparkSession();

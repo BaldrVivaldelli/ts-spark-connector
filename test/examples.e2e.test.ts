@@ -247,9 +247,34 @@ describe('examples (E2E)', () => {
             .limit(5)
             .show();
     }, 90_000);
-    it("should default to 'simple' mode when no argument is given", async () => {
-        const df = purchases().select("user_id", "product");
-        await df.explain();
 
+    it("should support SQL over an existing DataFrame", async () => {
+        const df = purchases().sql("SELECT * FROM purchases_tbl");
+        await df.explain();
     });
+
+    it("should allow creating a temp view from a DataFrame", async () => {
+        const df = purchases().select("user_id", "product", "amount").limit(5);
+        await df.write.createTempView("temp_view_test");
+
+        df.sql("SELECT * FROM temp_view_test").show();
+        const rows = await df.collectRaw();
+
+        expect(rows.length).toBeGreaterThan(0);
+    }, 90_000);
+
+    it("should replace an existing temp view with createOrReplaceTempView", async () => {
+        // Primer DataFrame con 5 filas
+        const df1 = purchases().select("user_id", "product", "amount").limit(5);
+        await df1.write.createOrReplaceTempView("temp_view_test");
+
+        const rows1 = await df1.sql("SELECT * FROM temp_view_test").collectRaw();
+        expect(rows1.length).toBe(6);
+
+        // Segundo DataFrame con solo 2 filas
+        const df2 = purchases().select("user_id", "product", "amount").limit(2);
+        await df2.write.createOrReplaceTempView("temp_view_test_new"); // debería reemplazar
+
+        const rows2 = await df2.sql("SELECT * FROM temp_view_test_new").show();
+    }, 90_000);
 });

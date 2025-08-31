@@ -1,6 +1,7 @@
 import { Expression, GroupBy, LogicalPlan } from "../engine/logicalPlan";
 import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./readDataframe";
+import {type} from "node:os";
 
 export const SparkExprAlg: ExprAlg<Expression> = {
     col: (name) => ({type: "Column", name}),
@@ -243,8 +244,10 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         type: "Coalesce",
         input: plan,
         numPartitions,
-        shuffle:false
+        shuffle: false
     }),
-
-
+    sql: (query) => ({
+        type: "Sql",
+        query: query
+    }),
 };

@@ -106,6 +106,20 @@ export class DataFrameWriterTF<R = DefaultR, E = unknown, G = unknown, W = Defau
         return EXE.run(root, this.session);
     }
 
+    async createTempView(name: string, impl?: { DF: DFAlg<R,E,G>, EX: ExprAlg<E>, WR: DFWritingAlg<R,W>, EXE: DFWritingExec<W> }) {
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const w0 = this.wProgram(WR, DF, EX);
+        const root = WR.createTempView(w0, name);
+        return EXE.run(root, this.session);
+    }
+
+    async createOrReplaceTempView(name: string, impl?: { DF: DFAlg<R,E,G>, EX: ExprAlg<E>, WR: DFWritingAlg<R,W>, EXE: DFWritingExec<W> }) {
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const w0 = this.wProgram(WR, DF, EX);
+        const root = WR.createOrReplaceTempView(w0, name);
+        return EXE.run(root, this.session);
+    }
+
     withBackend(impl: { DF: DFAlg<R,E,G>, EX: ExprAlg<E>, WR: DFWritingAlg<R,W>, EXE: DFWritingExec<W> }) {
         return new DataFrameWriterTF<R,E,G,W>(
             this.session, this.dfProgram, this.wProgram, impl.WR, impl.EXE, impl.DF, impl.EX

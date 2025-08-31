@@ -8,8 +8,8 @@ import {
     toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
 } from "./sparkConnectEnums";
 import {DFAlg, DFExec, ExprAlg, SortOrder, WindowSpec} from "../read/readDataframe";
-import {sparkGrpcClient} from "../client/sparkClient";
-import { SparkSession } from "../client/session";
+import {SparkSession} from "../client/session";
+import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
 
 // ======================== EXPRESIONES (E = ProtoExpr) ========================
 
@@ -383,27 +383,23 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             shuffle: false
         }
     }),
+    sql: (query: string) => ({
+        sql: {
+            query
+        }
+    })
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {
     async collect(root, session) {
-        return sparkGrpcClient.executePlan(buildBaseRequest(root, session));
+        return SparkConnectExecutor.for(session).execute(root);
     },
 
     async explain(root: any, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<any[]> {
-        const baseReq = buildBaseRequest(root, session);
-        return sparkGrpcClient.executePlan(buildBaseRequest(root, session));
+        return SparkConnectExecutor.for(session).execute(root);
     }
 };
 
 export function programToProtobufRoot(root: ProtoRel) {
     return {plan: {root}};
-}
-
-function buildBaseRequest(root: any, session: SparkSession) {
-    return {
-        session_id: session.getSessionId(),
-        user_context: session.getUserContext(),
-        plan: {root},
-    };
 }

@@ -19,6 +19,9 @@ export interface WriterSpec {
     bucketBy?: { numBuckets: number; columns: string[] };
     sortBy: string[];
     target?: { path?: string; table?: string };
+    viewName?: string;
+    asTempView?: boolean;
+    registerView?: { name: string; replace: boolean };
 }
 
 /** Álgebra TF de escritura: el child es el MISMO tipo R del DF. */
@@ -33,7 +36,8 @@ export interface DFWritingAlg<R, W> {
     sortBy(w: W, col: string, ...cols: string[]): W;
     targetPath(w: W, path: string): W;
     targetTable(w: W, table: string): W;
-
+    createOrReplaceTempView(w: W, viewName: string): W;
+    createTempView(w: W, name: string): W;
 }
 
 export interface DFWritingExec<W> {

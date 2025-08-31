@@ -110,6 +110,22 @@ export class DataFrameWriterTF<R = DefaultR, E = unknown, G = unknown, W = Defau
         return EXE.run(root, this.session);
     }
 
+    async createOrReplaceTempView(viewName: string): Promise<void>;
+    async createOrReplaceTempView(viewName: string, impl: Impl<R,E,G,W>): Promise<void>;
+    async createOrReplaceTempView(viewName: string, impl?: Impl<R,E,G,W>): Promise<void> {
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const root = WR.createOrReplaceTempView(this.wProgram(WR, DF, EX), viewName);
+        return EXE.run(root, this.session);
+    }
+
+    async createTempView(viewName: string): Promise<void>;
+    async createTempView(viewName: string, impl: Impl<R,E,G,W>): Promise<void>;
+    async createTempView(viewName: string, impl?: Impl<R,E,G,W>): Promise<void> {
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const root = WR.createTempView(this.wProgram(WR, DF, EX), viewName);
+        return EXE.run(root, this.session);
+    }
+
     // saveAsTable()
     async saveAsTable(table: string): Promise<void>;
     async saveAsTable(table: string, impl: Impl<R,E,G,W>): Promise<void>;

@@ -142,13 +142,13 @@ function userQuery<F>(dsl: DataFrameDSL<F>): F {
 ```ts
 // Connect with TLS (if your Spark Connect server uses TLS)
 const spark = SparkSession.builder()
-        .enableTLS({
-          keyStorePath: "./certs/keystore.p12",
-          keyStorePassword: "password",
-          trustStorePath: "./certs/cert.crt",
-          trustStorePassword: "password",
-        })
-        .getOrCreate();
+    .enableTLS({
+        keyStorePath: "./certs/keystore.p12",
+        keyStorePassword: "password",
+        trustStorePath: "./certs/cert.crt",
+        trustStorePassword: "password",
+    })
+    .getOrCreate();
 
 ```
 
@@ -203,8 +203,8 @@ const spark = SparkSession.builder()
 | **explain(...)** (`simple/extended/formatted`)                         | ✅                                                               | **P2**   |
 | `SparkSession.builder.config(...)`                                     | ✅                                                               | **P2**   |
 | Auth/TLS for Spark Connect                                             | ✅                                                               | **P2**   |
-| **spark.sql(...)**                                                     | ❌ Not yet                                                       | **P3**   |
-| Temp views (`createOrReplaceTempView`)                                 | ❌ Not yet                                                       | **P3**   |
+| **spark.sql(...)**                                                     | ✅                                                               | **P3**   |
+| Temp views (`createOrReplaceTempView`)                                 | ✅                                                               | **P3**   |
 | Catalog (`read.table`, `saveAsTable`)                                  | ✅                                                               | —        |
 | Plan viz / AST dump                                                    | ❌ Not yet                                                       | **P3**   |
 | **Join hints** (`broadcast`, `shuffle_replicate_nl`, etc.)             | ❌ Not yet                                                       | **P3**   |

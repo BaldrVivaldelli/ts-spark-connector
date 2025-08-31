@@ -107,6 +107,8 @@ export interface DFAlg<R, E, G = unknown> {
 
     coalesce(plan: R, numPartitions: number): R;
 
+    sql(query: string): R
+
 }
 
 export interface DFExec<R> {

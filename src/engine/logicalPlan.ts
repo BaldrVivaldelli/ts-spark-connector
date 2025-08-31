@@ -37,7 +37,8 @@ export type LogicalPlan =
     | { type: "Persist"; input: LogicalPlan; level?: string }
     | { type: "Unpersist"; input: LogicalPlan; blocking?: boolean }
     | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
-    | { type: "Coalesce"; input: LogicalPlan; numPartitions: number };
+    | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
+    | { type: "Sql"; query: string };
 
 
 export type Expression =
