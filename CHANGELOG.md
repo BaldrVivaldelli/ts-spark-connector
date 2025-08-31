@@ -1,3 +1,9 @@
+## [1.5.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.4.0...v1.5.0) (2025-08-31)
+
+### Features
+
+* add table temp create and .sql creation ([1bddf77](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/1bddf778970b98cc0a0b79002a395d45cb23ee0c))
+
 ## [1.4.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.3.0...v1.4.0) (2025-08-30)
 
 ### Features
