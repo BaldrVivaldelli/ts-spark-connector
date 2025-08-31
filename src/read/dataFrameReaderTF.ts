@@ -46,6 +46,10 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
         return this.make("table", name);
     }
 
+    sql(query: string): ReadChainedDataFrame<R, E, G> {
+        return this.make("sql", query);
+    }
+
     // ---------- interno ----------
     private make(format: string, path: string | string[]): ReadChainedDataFrame<R,E,G> {
         const prog: DFProgram<R,E,G> = (DF) => DF.relation(format, path, this.opts);

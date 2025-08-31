@@ -27,4 +27,4 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh && chown 1001:1001 /usr/local/bin/entrypoint.sh
 
 USER 1001
-ENTRYPOINT ["bash","/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash","/usr/local/bin/entrypoint.sh"]

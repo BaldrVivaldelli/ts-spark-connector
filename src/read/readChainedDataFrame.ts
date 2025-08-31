@@ -340,7 +340,9 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.coalesce(df, numPartitions));
     }
 
-
+    sql(query: string): ReadChainedDataFrame<R, E, G> {
+        return this.chain((df, _EX, DF) => DF.sql(query));
+    }
     cache(): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.cache(df));
     }

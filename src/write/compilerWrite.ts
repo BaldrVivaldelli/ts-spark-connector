@@ -7,24 +7,31 @@ type ProtoRel = any;
 export interface ProtoWriteRoot {
     child: ProtoRel;
     spec: WriterSpec;
+    tempViewName?: string;
 }
 
 export const ProtoWritingAlg: DFWritingAlg<ProtoRel, ProtoWriteRoot> = {
     fromChild(child) {
-        return { child, spec: { options: {}, partitionBy: [], sortBy: [] } };
+        return {child, spec: {options: {}, partitionBy: [], sortBy: []}};
     },
-    format: (w, fmt) => ({ ...w, spec: { ...w.spec, format: fmt } }),
-    mode:   (w, m)   => ({ ...w, spec: { ...w.spec, mode: m } }),
-    option: (w, k, v) => ({ ...w, spec: { ...w.spec, options: { ...w.spec.options, [k]: String(v) } } }),
-    options:(w, o)    => {
-        const norm = Object.fromEntries(Object.entries(o).map(([k,v]) => [k, String(v)]));
-        return { ...w, spec: { ...w.spec, options: { ...w.spec.options, ...norm } } };
+    format: (w, fmt) => ({...w, spec: {...w.spec, format: fmt}}),
+    mode: (w, m) => ({...w, spec: {...w.spec, mode: m}}),
+    option: (w, k, v) => ({...w, spec: {...w.spec, options: {...w.spec.options, [k]: String(v)}}}),
+    options: (w, o) => {
+        const norm = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
+        return {...w, spec: {...w.spec, options: {...w.spec.options, ...norm}}};
     },
-    partitionBy:(w, ...cs) => ({ ...w, spec: { ...w.spec, partitionBy: [...w.spec.partitionBy, ...cs] } }),
-    bucketBy:(w, n, c, ...cs) => ({ ...w, spec: { ...w.spec, bucketBy: { numBuckets: n, columns: [c, ...cs] } } }),
-    sortBy:(w, c, ...cs) => ({ ...w, spec: { ...w.spec, sortBy: [...w.spec.sortBy, c, ...cs] } }),
-    targetPath:(w, path) => ({ ...w, spec: { ...w.spec, target: { path } } }),
-    targetTable:(w, tab) => ({ ...w, spec: { ...w.spec, target: { table: tab } } }),
+    partitionBy: (w, ...cs) => ({...w, spec: {...w.spec, partitionBy: [...w.spec.partitionBy, ...cs]}}),
+    bucketBy: (w, n, c, ...cs) => ({...w, spec: {...w.spec, bucketBy: {numBuckets: n, columns: [c, ...cs]}}}),
+    sortBy: (w, c, ...cs) => ({...w, spec: {...w.spec, sortBy: [...w.spec.sortBy, c, ...cs]}}),
+    targetPath: (w, path) => ({...w, spec: {...w.spec, target: {path}}}),
+    targetTable: (w, tab) => ({...w, spec: {...w.spec, target: {table: tab}}}),
+    createOrReplaceTempView(w, name) {
+        return { ...w, tempViewName: name }
+    },
+    createTempView(w, name) {
+        return { ...w, spec: { ...w.spec, registerView: { name, replace: false } } };
+    },
 };
 
 
@@ -51,6 +58,30 @@ function toSaveModeV1(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists")
 export function protoWriteRootToPlan(root: ProtoWriteRoot) {
     const s = root.spec;
 
+    if (s.registerView) {
+        return {
+            command: {
+                create_dataframe_view: {
+                    name: s.registerView.name,
+                    is_local: false,
+                    replace: s.registerView.replace,
+                    input: root.child
+                }
+            }
+        };
+    }
+    if (root.tempViewName) {
+        return {
+            command: {
+                create_dataframe_view: {
+                    name: root.tempViewName,
+                    is_local: false,
+                    replace: true,
+                    input: root.child,
+                }
+            }
+        };
+    }
     const write_operation: any = {
         input: root.child,
         source: s.format ?? "parquet",

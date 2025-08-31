@@ -4,7 +4,7 @@ import {SparkSession} from "./client/session";
 
 (async () => {
     const session = SparkSession.builder()
-        .withAuth({ type: "token", token: "my-token" }) // opcional
+        .withAuth({type: "token", token: "my-token"}) // opcional
         .enableTLS({
             keyStorePath: "./spark-server/certs/keystore.p12",
             keyStorePassword: "password",
@@ -22,6 +22,9 @@ import {SparkSession} from "./client/session";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
+
+
+
 
     await purchases
         .withColumn("tags_arr", split(col("tags"), lit(",")))  // dividir en array
@@ -182,4 +185,6 @@ import {SparkSession} from "./client/session";
         .select("tags", "product")
         .limit(5)
         .show();
+    session.sql("SELECT * FROM purchases_tbl").show();
+
 })();
