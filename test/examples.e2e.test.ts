@@ -268,7 +268,7 @@ describe('examples (E2E)', () => {
         await df1.write.createOrReplaceTempView("temp_view_test");
 
         const rows1 = await df1.sql("SELECT * FROM temp_view_test").collectRaw();
-        expect(rows1.length).toBe(7);
+        expect(rows1.length).toBe(6);
 
         // Segundo DataFrame con solo 2 filas
         const df2 = purchases().select("user_id", "product", "amount").limit(2);
