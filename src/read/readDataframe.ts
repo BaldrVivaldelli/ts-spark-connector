@@ -1,4 +1,4 @@
-import {JoinTypeInput} from "../engine/sparkConnectEnums";
+import {ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {SparkSession} from "../client/session";
 
 export type SortDirection = "asc" | "desc";
@@ -113,7 +113,7 @@ export interface DFAlg<R, E, G = unknown> {
 
 export interface DFExec<R> {
     collect(root: R, session: SparkSession): Promise<any[]>;
-    explain(root: R, session: SparkSession, ): Promise<any[]>;
+    explain(root: R, session: SparkSession, mode :ExplainModeInput): Promise<any[]>;
 
 }
 export type DFProgram<R, E, G = unknown> =

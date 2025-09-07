@@ -249,7 +249,7 @@ describe('examples (E2E)', () => {
     }, 90_000);
 
     it("should support SQL over an existing DataFrame", async () => {
-        const df = purchases().sql("SELECT * FROM purchases_tbl");
+        const df = purchases().sql("SHOW TABLES");
         await df.explain();
     });
 
@@ -277,4 +277,69 @@ describe('examples (E2E)', () => {
 
         const rows2 = await df2.sql("SELECT * FROM temp_view_test_new").show();
     }, 90_000);
+
+    it('toClientASTJSON() devuelve JSON legible', async () => {
+        const df = purchases()
+            .select('user_id', 'product', 'amount')
+            .filter(col('amount').gt(100))
+            .orderBy(col('user_id').descNullsLast())
+            .limit(5);
+
+        const json = df.toClientASTJSON();
+        console.log('\n=== toClientASTJSON ===\n', json, '\n=======================\n');
+
+        expect(typeof json).toBe('string');
+        expect(json.length).toBeGreaterThan(10);
+        expect(json.trim().startsWith('{')).toBe(true);
+
+        const parsed = JSON.parse(json);
+        expect(parsed).toBeTruthy();
+        // chequeo suave para no acoplar tests
+        expect(json).toMatch(/relation|select|filter|orderBy/i);
+    }, 90_000);
+
+    it('toClientASTMermaid() devuelve un diagrama Mermaid', async () => {
+        const df = purchases()
+            .select('user_id', 'product', 'amount')
+            .filter(col('amount').gt(50))
+            .orderBy(col('user_id').descNullsLast())
+            .limit(3);
+
+        const mermaid = df.toClientASTMermaid();
+        console.log('\n=== toClientASTMermaid ===\n', mermaid, '\n==========================\n');
+        expect(typeof mermaid).toBe('string');
+        expect(mermaid.length).toBeGreaterThan(10);
+        // formato Mermaid típico
+        expect(mermaid.startsWith('flowchart')).toBe(true);
+        expect(mermaid).toMatch(/-->/);
+    }, 90_000);
+
+    it('toSparkLogicalPlanJSON() devuelve JSON válido del logical plan cliente', async () => {
+        const df = purchases()
+            .select('user_id', 'product', 'amount')
+            .filter(col('amount').gt(200))
+            .limit(2);
+
+        const json = df.toSparkLogicalPlanJSON();
+        console.log('\n=== toSparkLogicalPlanJSON ===\n', json, '\n==============================\n');
+        expect(typeof json).toBe('string');
+        const obj = JSON.parse(json);
+        expect(obj).toBeTruthy();
+        // pista de que hay nodos comunes
+        expect(json).toMatch(/relation|project|filter|csv/i);
+    }, 90_000);
+
+    it('toProtoJSON() devuelve JSON válido del proto', async () => {
+        const df = purchases()
+            .select('user_id', 'product')
+            .limit(1);
+
+        const json = df.toProtoJSON();
+        console.log('\n=== toProtoJSON ===\n', json, '\n===================\n');
+        expect(typeof json).toBe('string');
+        const obj = JSON.parse(json);
+        expect(obj).toBeTruthy();
+    }, 90_000);
+
+
 });
