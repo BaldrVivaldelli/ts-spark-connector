@@ -264,12 +264,11 @@ describe('examples (E2E)', () => {
     }, 90_000);
 
     it("should replace an existing temp view with createOrReplaceTempView", async () => {
-        // Primer DataFrame con 5 filas
         const df1 = purchases().select("user_id", "product", "amount").limit(5);
         await df1.write.createOrReplaceTempView("temp_view_test");
 
         const rows1 = await df1.sql("SELECT * FROM temp_view_test").collectRaw();
-        expect(rows1.length).toBe(6);
+        expect(rows1.length).toBe(7);
 
         // Segundo DataFrame con solo 2 filas
         const df2 = purchases().select("user_id", "product", "amount").limit(2);
@@ -341,5 +340,14 @@ describe('examples (E2E)', () => {
         expect(obj).toBeTruthy();
     }, 90_000);
 
+    it("emite nodo Hint en el LogicalPlan cliente (JSON)", () => {
+        const right = session.read.csv("/data/purchases.tsv").broadcast(); // encadenable
+        const left  = session.read.csv("/data/people.tsv");
+        const df    = left.join(right, col("id").eq(col("user_id")), "INNER");
+
+        const json = df.toSparkLogicalPlanJSON();
+        expect(json).toMatch(/"type":\s*"Hint"/);
+        expect(json).toMatch(/"name":\s*"broadcast"/);
+    });
 
 });

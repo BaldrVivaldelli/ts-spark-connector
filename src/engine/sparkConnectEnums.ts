@@ -157,3 +157,9 @@ export function toProtoExplainMode(mode: ExplainModeInput): ExplainMode {
     if (!m) throw new Error(`Unsupported explain mode: ${mode}`);
     return m;
 }
+
+export type JoinHintName =
+    | "broadcast"
+    | "merge"
+    | "shuffle_hash"
+    | "shuffle_replicate_nl";

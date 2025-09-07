@@ -3,7 +3,7 @@ import {LogicalPlan} from "../engine/logicalPlan";
 import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
 import {SparkSession} from "../client/session";
 import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 import {toJSON, toMermaid} from "../trace/traceSerializers";
@@ -336,6 +336,26 @@ export class ReadChainedDataFrame<R, E, G> {
             return result;
         });
 
+    }
+
+    hint(name: JoinHintName | string, ...params: any[]) {
+        return this.chain((df, _EX, DF) => DF.hint(df, name, params));
+    }
+
+    broadcast() {
+        return this.hint("broadcast");
+    }
+
+    mergeHint() {
+        return this.hint("merge");
+    }
+
+    shuffleHashHint() {
+        return this.hint("shuffle_hash");
+    }
+
+    shuffleReplicateNLHint() {
+        return this.hint("shuffle_replicate_nl");
     }
 
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G> {

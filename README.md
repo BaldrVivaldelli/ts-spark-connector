@@ -149,7 +149,7 @@ const session = SparkSession.builder()
 | Catalog (`read.table`, `saveAsTable`)                                  | ✅         |
 | **Plan viz / AST dump**                                                | ✅         |
 | **cache() / persist() / unpersist()**                                  | ⚠️ Limited by Spark Connect |
-| **Join hints** (`broadcast`, etc.)                                     | ❌         |
+| **Join hints** (`broadcast`, etc.)                                     | ✅         |
 | **sample(...)**, `randomSplit(...)`                                    | ❌         |
 | UDF (scalar)                                                           | ❌         |
 | **UDAF / Vectorized UDF (Arrow)**                                      | ❌         |

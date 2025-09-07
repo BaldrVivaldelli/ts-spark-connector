@@ -1,4 +1,4 @@
-import {GroupTypeInput, JoinTypeInput} from "./sparkConnectEnums";
+import {GroupTypeInput, JoinHintName, JoinTypeInput} from "./sparkConnectEnums";
 import {FrameBoundary} from "./column";
 import {FrameType, SortOrder} from "../read/readDataframe";
 
@@ -38,7 +38,8 @@ export type LogicalPlan =
     | { type: "Unpersist"; input: LogicalPlan; blocking?: boolean }
     | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
     | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
-    | { type: "Sql"; query: string };
+    | { type: "Sql"; query: string }
+    | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan };
 
 
 export type Expression =

@@ -1,4 +1,4 @@
-import {ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {SparkSession} from "../client/session";
 
 export type SortDirection = "asc" | "desc";
@@ -23,6 +23,8 @@ export type WindowSpec<E> = {
     orderBy: Array<{ input: E; direction: SortDirection; nulls?: NullsOrder }>;
     frame?: { type: FrameType; start: FrameBoundary; end: FrameBoundary };
 };
+
+
 
 export interface ExprAlg<E> {
     col(name: string): E;
@@ -108,6 +110,9 @@ export interface DFAlg<R, E, G = unknown> {
     coalesce(plan: R, numPartitions: number): R;
 
     sql(query: string): R
+
+    hint(plan: R, name: JoinHintName | string, params?: any[]): R;
+
 
 }
 

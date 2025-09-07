@@ -1,5 +1,5 @@
 import { Expression, GroupBy, LogicalPlan } from "../engine/logicalPlan";
-import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {DFAlg, ExprAlg, SortOrder, WindowSpec} from "./readDataframe";
 import {type} from "node:os";
 
@@ -250,4 +250,11 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         type: "Sql",
         query: query
     }),
+    hint: (plan, name, params) => ({
+        type: "Hint",
+        name,
+        params: params ?? [],
+        child: plan,
+    }),
+
 };
