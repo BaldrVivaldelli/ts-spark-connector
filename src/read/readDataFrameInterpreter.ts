@@ -256,5 +256,20 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy> = {
         params: params ?? [],
         child: plan,
     }),
+    sample: (plan, lowerBound, upperBound, withReplacement, seed, deterministicOrder) => ({
+        type: "Sample",
+        input: plan,
+        lowerBound,
+        upperBound,
+        ...(withReplacement !== undefined ? { withReplacement } : {}),
+        ...(seed !== undefined ? { seed } : {}),
+        ...(deterministicOrder !== undefined ? { deterministicOrder } : {}),
+    }),
+    drop: (plan, columnNames) => ({
+        type: "Drop",
+        input: plan,
+        columnNames,
+    }),
+
 
 };

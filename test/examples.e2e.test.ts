@@ -350,4 +350,66 @@ describe('examples (E2E)', () => {
         expect(json).toMatch(/"name":\s*"broadcast"/);
     });
 
+    it("sample(0.1) compila como Sample y ejecuta show()", async () => {
+        const df = purchases().select("user_id", "product", "amount");
+
+        const s1 = df.sample(0.1);
+        const json1 = s1.toSparkLogicalPlanJSON();
+        console.log("🔎 sample(0.1) LogicalPlan:", json1);
+
+        expect(json1).toMatch(/"type":\s*"Sample"/);
+        expect(json1).toMatch(/"upperBound":\s*0\.1/);
+
+        await s1.limit(3).show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+    it("sample(1.5, true, 42) setea withReplacement y seed, y ejecuta show()", async () => {
+        const df = purchases().select("user_id", "product", "amount");
+
+        const s2 = df.sample(1.5, true, 42);
+        const json2 = s2.toSparkLogicalPlanJSON();
+        console.log("🔎 sample(1.5, true, 42) LogicalPlan:", json2);
+
+        expect(json2).toMatch(/"type":\s*"Sample"/);
+        expect(json2).toMatch(/"withReplacement":\s*true/);
+        expect(json2).toMatch(/"seed":\s*42/);
+
+        await s2.limit(3).show();
+        expect(true).toBe(true);
+    }, 90_000);
+
+    it('randomSplit([0.8, 0.2], 7) añade rand, filtra por rangos y luego dropea la col temporal', async () => {
+        const df = purchases().select("user_id", "product", "amount");
+        const [train, test] = df.randomSplit([0.8, 0.2], 7);
+
+        const trainJson = train.toSparkLogicalPlanJSON();
+        const testJson  = test.toSparkLogicalPlanJSON();
+
+        console.log("🔎 randomSplit train LogicalPlan:", trainJson);
+        console.log("🔎 randomSplit test  LogicalPlan:", testJson);
+
+        // raíz Drop (se elimina la col temporal en la salida)
+        expect(trainJson).toMatch(/"type":\s*"Drop"/);
+        expect(testJson).toMatch(/"type":\s*"Drop"/);
+
+        // se agregó rand(seed=7) con alias __rand_split__
+        expect(trainJson).toMatch(/"type":\s*"UnresolvedFunction"[\s\S]*"name":\s*"rand"[\s\S]*"value":\s*7/);
+        expect(testJson).toMatch(/"type":\s*"UnresolvedFunction"[\s\S]*"name":\s*"rand"[\s\S]*"value":\s*7/);
+        expect(trainJson).toMatch(/"alias":\s*"__rand_split__"/);
+        expect(testJson).toMatch(/"alias":\s*"__rand_split__"/);
+
+        // rangos: train [0.0, 0.8)  /  test [0.8, 1.0]
+        expect(trainJson).toMatch(/"op":\s*">="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0(\.0+)?/);
+        expect(trainJson).toMatch(/"op":\s*"<"\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0\.8/);
+
+        expect(testJson).toMatch(/"op":\s*">="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0\.8/);
+        expect(testJson).toMatch(/"op":\s*"<="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*1(\.0+)?/);
+
+        // que ejecuten sin reventar
+        await train.limit(3).show();
+        await test.limit(3).show();
+        expect(true).toBe(true);
+    }, 90_000);
+
 });

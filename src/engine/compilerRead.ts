@@ -396,6 +396,22 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             parameters: params ,
         }
     }),
+    sample: (input, lower, upper, withReplacement, seed, deterministicOrder) => ({
+        sample: {
+            input,
+            lower_bound: lower,
+            upper_bound: upper,
+            ...(withReplacement !== undefined ? { with_replacement: withReplacement } : {}),
+            ...(seed !== undefined ? { seed } : {}),
+            ...(deterministicOrder !== undefined ? { deterministic_order: deterministicOrder } : {}),
+        }
+    }),
+    drop: (input, columnNames) => ({
+        drop: {
+            input,
+            column_names: columnNames, // usamos nombres; también podrías usar 'columns' (expr)
+        }
+    }),
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {

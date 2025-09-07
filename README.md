@@ -150,7 +150,7 @@ const session = SparkSession.builder()
 | **Plan viz / AST dump**                                                | ✅         |
 | **cache() / persist() / unpersist()**                                  | ⚠️ Limited by Spark Connect |
 | **Join hints** (`broadcast`, etc.)                                     | ✅         |
-| **sample(...)**, `randomSplit(...)`                                    | ❌         |
+| **sample(...)**, `randomSplit(...)`                                    | ✅         |
 | UDF (scalar)                                                           | ❌         |
 | **UDAF / Vectorized UDF (Arrow)**                                      | ❌         |
 | Structured Streaming                                                   | ❌         |

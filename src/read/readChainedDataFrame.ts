@@ -365,6 +365,7 @@ export class ReadChainedDataFrame<R, E, G> {
     sql(query: string): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.sql(query));
     }
+
     cache(): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.cache(df));
     }
@@ -401,8 +402,9 @@ export class ReadChainedDataFrame<R, E, G> {
 
     explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
         const root = this.prog(ProtoDFAlg, ProtoExprAlg);
-        return ProtoExec.explain(root, this.session,mode);
+        return ProtoExec.explain(root, this.session, mode);
     }
+
     getProgram(): DFProgram<R, E, G> {
         return this.prog;
     }
@@ -435,4 +437,60 @@ export class ReadChainedDataFrame<R, E, G> {
         const protoRoot = this.prog(ProtoDFAlg, ProtoExprAlg);
         return JSON.stringify(protoRoot, null, 2);
     }
+
+    sample(fraction: number, withReplacement = false, seed?: number, deterministicOrder = false) {
+        if (!withReplacement && (fraction < 0 || fraction > 1)) {
+            throw new Error("sample(): fraction debe estar en [0,1] cuando withReplacement=false");
+        }
+        const lb = 0.0, ub = fraction;
+        return this.chain((df, _EX, DF) => DF.sample(df, lb, ub, withReplacement, seed, deterministicOrder));
+    }
+
+// 2.2) drop (para ayudarnos con randomSplit si agregamos una col temporal)
+    drop(...columnNames: string[]) {
+        return this.chain((df, _EX, DF) => DF.drop(df, columnNames));
+    }
+
+// 2.3) randomSplit: devuelve un array de DFs disjuntos
+    randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<R, E, G>[] {
+        if (!weights?.length) throw new Error("randomSplit(): weights vacío");
+        const sum = weights.reduce((a, b) => a + b, 0);
+        if (sum <= 0) throw new Error("randomSplit(): suma de weights debe ser > 0");
+
+        // límites cumulativos normalizados [0,1]
+        const bounds: Array<[number, number]> = [];
+        let acc = 0;
+        for (const w of weights) {
+            const start = acc / sum;
+            acc += w;
+            const end = acc / sum;
+            bounds.push([start, end]);
+        }
+
+        // nombre de columna temporal
+        const RAND_COL = "__rand_split__";
+
+        // df base con columna rand(seed)
+        const dfWithRand = this.withColumn(
+            RAND_COL,
+            {build: EX => EX.call("rand", seed != null ? [EX.lit(seed)] : [])} // rand(seed?) como expr
+        );
+
+        // generar cada split filtrando por rango
+        const splits = bounds.map(([lo, hi], idx) => {
+            const split = dfWithRand.filter({
+                build: EX => EX.logical(
+                    "AND",
+                    EX.bin(">=", EX.col(RAND_COL), EX.lit(lo)),
+                    // último tramo cerrado a derecha para cubrir 1.0
+                    EX.bin(idx === bounds.length - 1 ? "<=" : "<", EX.col(RAND_COL), EX.lit(hi)),
+                )
+            }).drop(RAND_COL); // quitamos la col temporal
+
+            return split;
+        });
+
+        return splits;
+    }
+
 }
