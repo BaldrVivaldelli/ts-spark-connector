@@ -1,3 +1,17 @@
+## [1.6.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.5.0...v1.6.0) (2025-09-07)
+
+### Features
+
+* add broadcast and hints, with test e2e ([bfc6e60](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/bfc6e602f66ee95ab18fcaffe95babd296e8b53f))
+* modifiy readme, add trace feature and configs ([649766a](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/649766a5859cfdf47909217d5be03a7e3c060fbe))
+
+### Bug Fixes
+
+* add type impl ([b713ba7](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/b713ba7f930122f6577aa8142152337db1642778))
+* refactor condition ([73b7ac2](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/73b7ac2ce57a382d51eb1cf011455be89b023bd4))
+* refactor condition ([92093d1](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/92093d15924fede122b1e96dbeea18f846c0f1a8))
+* test condition ([8593b67](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/8593b675fa375f0c4aa00a9ca3f3c589fe4ce487))
+
 ## [1.5.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.4.0...v1.5.0) (2025-08-31)
 
 ### Features
