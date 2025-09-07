@@ -39,7 +39,9 @@ export type LogicalPlan =
     | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
     | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
     | { type: "Sql"; query: string }
-    | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan };
+    | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan }
+    | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
+    | { type: "Drop"; input: LogicalPlan; columnNames: string[] };
 
 
 export type Expression =

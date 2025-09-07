@@ -113,6 +113,9 @@ export interface DFAlg<R, E, G = unknown> {
 
     hint(plan: R, name: JoinHintName | string, params?: any[]): R;
 
+    sample(plan: R,lowerBound: number,upperBound: number,withReplacement?: boolean,seed?: number,deterministicOrder?: boolean): R;
+
+    drop(plan: R, columnNames: string[]): R;
 
 }
 
