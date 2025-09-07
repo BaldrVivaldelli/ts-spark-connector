@@ -3,9 +3,11 @@ import {LogicalPlan} from "../engine/logicalPlan";
 import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
 import {SparkSession} from "../client/session";
 import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinTypeInput} from "../engine/sparkConnectEnums";
+import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {printArrowResults} from "../utils/arrowPrinter";
 import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
+import {toJSON, toMermaid} from "../trace/traceSerializers";
+import {TraceDFAlg, TraceExprAlg} from "../trace/trace";
 
 type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 type SortKeyInput =
@@ -336,6 +338,26 @@ export class ReadChainedDataFrame<R, E, G> {
 
     }
 
+    hint(name: JoinHintName | string, ...params: any[]) {
+        return this.chain((df, _EX, DF) => DF.hint(df, name, params));
+    }
+
+    broadcast() {
+        return this.hint("broadcast");
+    }
+
+    mergeHint() {
+        return this.hint("merge");
+    }
+
+    shuffleHashHint() {
+        return this.hint("shuffle_hash");
+    }
+
+    shuffleReplicateNLHint() {
+        return this.hint("shuffle_replicate_nl");
+    }
+
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.coalesce(df, numPartitions));
     }
@@ -379,7 +401,7 @@ export class ReadChainedDataFrame<R, E, G> {
 
     explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
         const root = this.prog(ProtoDFAlg, ProtoExprAlg);
-        return ProtoExec.explain(root, this.session);
+        return ProtoExec.explain(root, this.session,mode);
     }
     getProgram(): DFProgram<R, E, G> {
         return this.prog;
@@ -387,5 +409,30 @@ export class ReadChainedDataFrame<R, E, G> {
 
     get write() {
         return DataFrameWriterTF.fromDF<R, E, G, any>(this);
+    }
+
+    private compileTrace(): any {
+        // Igual que compileToSparkPlan, pero usando el Alg de trazas
+        return this.prog(TraceDFAlg as any, TraceExprAlg as any);
+    }
+
+    toClientASTJSON(): string {
+        const root = this.compileTrace();
+        return toJSON(root);
+    }
+
+    toClientASTMermaid(): string {
+        const root = this.compileTrace();
+        return toMermaid(root);
+    }
+
+    toSparkLogicalPlanJSON(): string {
+        const lp = this.compileToSparkPlan();
+        return JSON.stringify(lp, null, 2);
+    }
+
+    toProtoJSON(): string {
+        const protoRoot = this.prog(ProtoDFAlg, ProtoExprAlg);
+        return JSON.stringify(protoRoot, null, 2);
     }
 }

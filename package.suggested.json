@@ -1,0 +1,40 @@
+{
+  "name": "ts-spark-connector",
+  "version": "1.6.0",
+  "description": "TypeScript client for Apache Spark Connect",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.es.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BaldrVivaldelli/ts-spark-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BaldrVivaldelli/ts-spark-connector/issues"
+  },
+  "homepage": "https://github.com/BaldrVivaldelli/ts-spark-connector#readme",
+  "keywords": ["spark", "spark-connect", "apache-spark", "typescript", "dataframe"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

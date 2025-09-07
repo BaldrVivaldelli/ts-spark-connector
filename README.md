@@ -1,7 +1,5 @@
 # ts-spark-connector
 
-🌱 **Status: Alpha – Early growth stage**
-
 TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html).  
 Construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
 
@@ -11,212 +9,156 @@ Construct Spark logical plans entirely in TypeScript and run them against a Spar
 - Evaluate transformations locally or stream results via Arrow
 - Tagless Final DSL design with support for multiple backends
 - Composable, immutable, and strongly typed DataFrame operations
-- Supports column expressions (`col`, `.gt`, `.alias`, `.and`, etc.)
+- Column expressions (`col`, `.gt`, `.alias`, `.and`, etc.)
 - Compatible with Spark Connect Protobuf and
   `spark-submit --class org.apache.spark.sql.connect.service.SparkConnectServer`
-- **Supports Spark SetOperations** (`UNION`, `INTERSECT`, `EXCEPT`) with `by_name`, `is_all`, and
-  `allow_missing_columns`
-- Support for Spark-compatible joins with configurable join types
-- Session-aware execution without relying on global singletons
-- Includes **ready-to-run examples** in the `examples/` folder
+- **Set operations** (`UNION`, `INTERSECT`, `EXCEPT`) with `by_name`, `is_all`, and `allow_missing_columns`
+- Spark-compatible joins with configurable join types
+- Session-aware execution (no global singletons)
+- **Plan viz / AST dump**: export client AST to JSON & Mermaid
+- **Ready-to-run examples** in `examples/`
 
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/your-org/ts-spark-connector
-cd ts-read-connector
+git clone https://github.com/BaldrVivaldelli/ts-spark-connector
+cd ts-spark-connector
 npm install
 ```
 
-## 🔧 Docker Setup
+> You need a running **Spark Connect** server. See [`spark-server/README.md`](spark-server/README.md) for a ready-to-use Docker setup, or run your own server.
 
-You need a Spark Connect server running. Example `docker-compose.yml`:
-
-```yaml
-services:
-  spark:
-    build: ./read-server
-    ports:
-      - "15002:15002"
-    volumes:
-      - ./example_data:/data
-    environment:
-      - SPARK_NO_DAEMONIZE=true
-```
-
-`spark-server/Dockerfile`:
-
-```Dockerfile
-FROM bitnami/spark:latest
-USER root
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-CMD ["/entrypoint.sh"]
-```
-
-`spark-server/entrypoint.sh`:
-
-```bash
-#!/bin/bash
-/opt/bitnami/read/bin/read-submit   --class org.apache.read.sql.connect.service.SparkConnectServer   --conf read.sql.connect.enable=true   --conf read.sql.connect.grpc.binding=0.0.0.0:15002   /opt/bitnami/read/jars/read-connect_2.12-4.0.0.jar
-```
-
-Example data in `/example_data`:
-
-- `people.tsv`
-- `purchases.tsv`
-
-## 📂 Examples
-
-We include a set of TypeScript scripts in the `examples/` folder:
-
-| File            | Description                               |
-|-----------------|-------------------------------------------|
-| `join.ts`       | Inner join between two datasets           |
-| `groupBy.ts`    | Aggregations with `groupBy` and `orderBy` |
-| `withColumn.ts` | Adding and renaming columns               |
-| `union.ts`      | `SetOperation` with UNION queries         |
-| `distinct.ts`   | Using `distinct()` and `dropDuplicates()` |
-
-Run any example with:
-
-```bash
-npx tsx examples/join.ts
-```
-
-## 🧪 Quick Usage
+## 🧪 Quick Start
 
 ```ts
-import {spark} from "./src/read/session";
-import {col} from "./src/engine/column";
+import { SparkSession } from "./src/client/session";
+import { col } from "./src/engine/column";
 
-const people = spark.read
-    .option("delimiter", "\t")
-    .option("header", "true")
-    .csv("/data/people.tsv");
+const session = SparkSession.builder()
+  // optional: auth / TLS
+  .getOrCreate();
 
-const purchases = spark.read
-    .option("delimiter", "\t")
-    .option("header", "true")
-    .csv("/data/purchases.tsv");
+const people = session.read
+  .option("delimiter", "\t")
+  .option("header", "true")
+  .csv("/data/people.tsv");
 
-people
-    .join(purchases, col("id").eq(col("user_id")), "left")
-    .select("name", "product", "amount")
-    .filter(col("amount").gt(100))
-    .show();
+const purchases = session.read
+  .option("delimiter", "\t")
+  .option("header", "true")
+  .csv("/data/purchases.tsv");
+
+await people
+  .join(purchases, col("id").eq(col("user_id")), "left")
+  .select("name", "product", "amount")
+  .filter(col("amount").gt(100))
+  .show();
 ```
 
-### Example: UNION with SetOperation
+### Example: UNION (Set Operation)
 
 ```ts
 const p2024 = purchases.filter(col("year").eq(2024));
 const p2025 = purchases.filter(col("year").eq(2025));
 
-p2024.union(p2025, {is_all: true, by_name: false})
-    .limit(5)
-    .show();
+await p2024.union(p2025, { is_all: true, by_name: false })
+  .limit(5)
+  .show();
 ```
 
-## 💡 Column Expressions
+## 🗺️ Plan viz / AST dump
+
+Inspect the **client-side** plan (before server optimization):
 
 ```ts
-col("age").gt(18)
-col("country").eq("AR")
-col("age").gt(18).and(col("active").eq(true)).alias("eligible")
+const df = purchases
+  .select("user_id", "product", "amount")
+  .filter(col("amount").gt(100))
+  .orderBy(col("user_id").descNullsLast());
+
+console.log(df.toClientASTJSON());      // JSON AST
+console.log(df.toClientASTMermaid());   // Mermaid diagram
+console.log(df.toSparkLogicalPlanJSON());// Client logical plan
+console.log(df.toProtoJSON());           // Spark Connect proto
 ```
 
-## 🧠 Tagless Final DSL
+> Tip: write these strings to disk (`.mmd`, `.json`) and publish them as CI artifacts.
+
+## 🔐 TLS
 
 ```ts
-function userQuery<F>(dsl: DataFrameDSL<F>): F {
-    return dsl
-        .select(["name", "age"])
-        .filter("age > 18")
-        .withColumn("eligible", col("age").gt(18).and(col("country").eq("AR")));
-}
+const session = SparkSession.builder()
+  .enableTLS({
+    keyStorePath: "./certs/keystore.p12",
+    keyStorePassword: "password",
+    trustStorePath: "./certs/cert.crt",
+    trustStorePassword: "password",
+  })
+  .getOrCreate();
 ```
 
-## 🧠 TLS Included
+## ✅ Compatibility Matrix
 
-```ts
-// Connect with TLS (if your Spark Connect server uses TLS)
-const spark = SparkSession.builder()
-    .enableTLS({
-        keyStorePath: "./certs/keystore.p12",
-        keyStorePassword: "password",
-        trustStorePath: "./certs/cert.crt",
-        trustStorePassword: "password",
-    })
-    .getOrCreate();
+| Component        | Supported / Tested                 |
+|------------------|------------------------------------|
+| Spark Connect    | 3.5.x                              |
+| Scala ABI (JAR)  | 2.12 (`spark-connect_2.12`)        |
+| Node.js          | 18, 20, 22                         |
+| OS               | Linux (CI); macOS (local)          |
 
-```
+> Planned: add CI jobs for macOS/Windows; update table as coverage expands.
 
-## ✅ Status Features & Roadmap
+## ✅ Feature Matrix
 
-## Legend
-
-- **P0** = Paridad base inmediata
-- **P1** = I/O realista
-- **P2** = Performance & DX
-- **P3** = SQL/Catálogo & control
-- **P4** = UDF (scalar / vectorizadas)
-- **P5** = Streaming / Lakehouse / JDBC
-- **P6** = MLlib
-- **—** = ya implementado
-
-## Feature Matrix
-
-| Feature                                                                | Supported                                                       | Priority |
-|------------------------------------------------------------------------|-----------------------------------------------------------------|----------|
-| CSV Reading                                                            | ✅                                                               | —        |
-| Filtering                                                              | ✅                                                               | —        |
-| Projection / Alias                                                     | ✅                                                               | —        |
-| Arrow decoding                                                         | ✅ (`.show()` prints tabular output)                             | —        |
-| Column expressions                                                     | ✅ (`col`, `.gt`, `.and`, `.alias`, etc.)                        | —        |
-| DSL abstraction                                                        | ✅ Tagless Final                                                 | —        |
-| Join                                                                   | ✅ Supports all join types                                       | —        |
-| Aggregation                                                            | ✅ (`groupBy().agg({...})`)                                      | —        |
-| Distinct                                                               | ✅ (`distinct()`, `dropDuplicates(...)`)                         | —        |
-| Sorting                                                                | ✅ (`orderBy(...)`, `sort(...)`)                                 | —        |
-| Limit & Take                                                           | ✅ (`limit(n)`)                                                  | —        |
-| **SetOperation**                                                       | ✅ (`UNION`, `INTERSECT`, `EXCEPT`)                              | —        |
-| Column renaming                                                        | ✅ (`withColumnRenamed(...)`)                                    | —        |
-| Type declarations                                                      | ✅ `.d.ts` published to NPM                                      | —        |
-| Modular compiler core                                                  | ✅ (`engine/` separated from Spark backend)                      | —        |
-| NPM Package                                                            | ✅ [Published](https://www.npmjs.com/package/ts-spark-connector) | —        |
-| Tests (Unit + Integration)                                             | ✅                                                               | —        |
-| **withColumn(...)**                                                    | ✅                                                               | —        |
-| **when(...).otherwise(...)** (CASE WHEN)                               | ✅                                                               | —        |
-| **Window functions** (`over`, `partitionBy`, `orderBy`, `rowsBetween`) | ✅                                                               | —        |
-| **Null handling** (`na.drop`, `na.fill`, `na.replace`, `isNull`)       | ✅                                                               | —        |
-| **Parquet Reading**                                                    | ✅                                                               | —        |
-| **JSON Reading**                                                       | ✅                                                               | —        |
-| **DataFrameWriter** (CSV/JSON/Parquet/ORC)                             | ✅                                                               | —        |
-| Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅                                                               | —        |
-| **describe()**, `summary()`                                            | ✅                                                               | —        |
-| **unionByName(...)**                                                   | ✅                                                               | —        |
-| **Complex types** (arrays/maps/struct) + `explode/posexplode`          | ✅                                                               | —        |
-| **JSON helpers** (`from_json`, `to_json`)                              | ✅                                                               | **P2**   |
-| **cache() / persist() / unpersist()**                                  | 🔒 Not supported by spark connect                               | **P2**   |
-| **repartition(...) / coalesce(...)**                                   | ✅                                                               | **P2**   |
-| **explain(...)** (`simple/extended/formatted`)                         | ✅                                                               | **P2**   |
-| `SparkSession.builder.config(...)`                                     | ✅                                                               | **P2**   |
-| Auth/TLS for Spark Connect                                             | ✅                                                               | **P2**   |
-| **spark.sql(...)**                                                     | ✅                                                               | **P3**   |
-| Temp views (`createOrReplaceTempView`)                                 | ✅                                                               | **P3**   |
-| Catalog (`read.table`, `saveAsTable`)                                  | ✅                                                               | —        |
-| Plan viz / AST dump                                                    | ❌ Not yet                                                       | **P3**   |
-| **Join hints** (`broadcast`, `shuffle_replicate_nl`, etc.)             | ❌ Not yet                                                       | **P3**   |
-| **sample(...)**, `randomSplit(...)`                                    | ❌ Not yet                                                       | **P3**   |
-| UDF (scalar)                                                           | ❌ Not yet                                                       | **P4**   |
-| **UDAF / Vectorized UDF (Arrow)**                                      | ❌ Not yet                                                       | **P4**   |
-| Structured Streaming (`readStream` / `writeStream`)                    | ❌ Not yet                                                       | **P5**   |
-| Watermark / trigger / output modes                                     | ❌ Not yet                                                       | **P5**   |
-| Lakehouse: Delta/Iceberg/Hudi (`format(...)`)                          | ❌ Not yet                                                       | **P5**   |
-| JDBC read/write (`format("jdbc")`)                                     | ❌ Not yet                                                       | **P5**   |
-| **MLlib** (Pipelines/Transformers/Estimators básicos)                  | ❌ Not yet                                                       | **P6**   |
+| Feature                                                                | Supported |
+|------------------------------------------------------------------------|-----------|
+| CSV Reading                                                            | ✅         |
+| Filtering                                                              | ✅         |
+| Projection / Alias                                                     | ✅         |
+| Arrow decoding (`.show()`)                                             | ✅         |
+| Column expressions (`col`, `.gt`, `.and`, `.alias`, etc.)              | ✅         |
+| DSL abstraction (Tagless Final)                                        | ✅         |
+| Joins (configurable types)                                             | ✅         |
+| Aggregation (`groupBy().agg({...})`)                                   | ✅         |
+| Distinct (`distinct()`, `dropDuplicates(...)`)                         | ✅         |
+| Sorting (`orderBy(...)`, `sort(...)`)                                  | ✅         |
+| Limit (`limit(n)`)                                                     | ✅         |
+| **Set operations** (`UNION`, `INTERSECT`, `EXCEPT`)                    | ✅         |
+| Column renaming (`withColumnRenamed(...)`)                             | ✅         |
+| Type declarations (`.d.ts`)                                            | ✅         |
+| Modular compiler core (backend-agnostic)                               | ✅         |
+| Tests (Unit + Integration + E2E)                                       | ✅         |
+| **withColumn(...)**                                                    | ✅         |
+| **when(...).otherwise(...)**                                           | ✅         |
+| **Window functions**                                                   | ✅         |
+| **Null handling** (`isNull`, `na.drop/fill/replace`)                   | ✅         |
+| **Parquet Reading**                                                    | ✅         |
+| **JSON Reading**                                                       | ✅         |
+| **DataFrameWriter** (CSV/JSON/Parquet/ORC/Avro)                        | ✅         |
+| Write `partitionBy`, `bucketBy`, `sortBy`                              | ✅         |
+| **describe()**, `summary()`                                            | ✅         |
+| **unionByName(...)**                                                   | ✅         |
+| **Complex types** + `explode/posexplode`                               | ✅         |
+| **JSON helpers** (`from_json`, `to_json`)                              | ✅         |
+| **repartition(...) / coalesce(...)**                                   | ✅         |
+| **explain(...)** (`simple/extended/formatted`)                         | ✅         |
+| `SparkSession.builder.config(...)`                                     | ✅         |
+| Auth/TLS for Spark Connect                                             | ✅         |
+| **spark.sql(...)**                                                     | ✅         |
+| Temp views (`createOrReplaceTempView`)                                 | ✅         |
+| Catalog (`read.table`, `saveAsTable`)                                  | ✅         |
+| **Plan viz / AST dump**                                                | ✅         |
+| **cache() / persist() / unpersist()**                                  | ⚠️ Limited by Spark Connect |
+| **Join hints** (`broadcast`, etc.)                                     | ✅         |
+| **sample(...)**, `randomSplit(...)`                                    | ❌         |
+| UDF (scalar)                                                           | ❌         |
+| **UDAF / Vectorized UDF (Arrow)**                                      | ❌         |
+| Structured Streaming                                                   | ❌         |
+| Watermark / triggers / output modes                                    | ❌         |
+| Lakehouse: Delta/Iceberg/Hudi                                          | ❌         |
+| JDBC read/write                                                        | ❌         |
+| **MLlib**                                                              | ❌         |
 
 ## 📄 License
 
-Apache-2.0 — This project aims to democratize access to Spark features from the TypeScript ecosystem.
+Apache-2.0

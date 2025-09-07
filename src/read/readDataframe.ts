@@ -1,4 +1,4 @@
-import {JoinTypeInput} from "../engine/sparkConnectEnums";
+import {ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {SparkSession} from "../client/session";
 
 export type SortDirection = "asc" | "desc";
@@ -23,6 +23,8 @@ export type WindowSpec<E> = {
     orderBy: Array<{ input: E; direction: SortDirection; nulls?: NullsOrder }>;
     frame?: { type: FrameType; start: FrameBoundary; end: FrameBoundary };
 };
+
+
 
 export interface ExprAlg<E> {
     col(name: string): E;
@@ -109,11 +111,14 @@ export interface DFAlg<R, E, G = unknown> {
 
     sql(query: string): R
 
+    hint(plan: R, name: JoinHintName | string, params?: any[]): R;
+
+
 }
 
 export interface DFExec<R> {
     collect(root: R, session: SparkSession): Promise<any[]>;
-    explain(root: R, session: SparkSession, ): Promise<any[]>;
+    explain(root: R, session: SparkSession, mode :ExplainModeInput): Promise<any[]>;
 
 }
 export type DFProgram<R, E, G = unknown> =

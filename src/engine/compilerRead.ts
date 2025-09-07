@@ -6,6 +6,7 @@ import {
     toProtoSortDirection,
     // toProtoNullsOrder, // si tu proto lo necesita explícito en vez de boolean
     toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
+    JoinHintName,
 } from "./sparkConnectEnums";
 import {DFAlg, DFExec, ExprAlg, SortOrder, WindowSpec} from "../read/readDataframe";
 import {SparkSession} from "../client/session";
@@ -387,7 +388,14 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
         sql: {
             query
         }
-    })
+    }),
+    hint: (plan: ProtoRel, name: string, params?: any[]) => ({
+        hint: {
+            input: plan,
+            name: name,
+            parameters: params ,
+        }
+    }),
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {
