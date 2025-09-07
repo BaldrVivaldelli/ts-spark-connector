@@ -1,3 +1,14 @@
+## [1.7.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.6.0...v1.7.0) (2025-09-07)
+
+### Features
+
+* se agrega nueva feature sample(...), randomSplit(...) ([1463140](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/1463140504b9d7f0235c1cb5aca2fbe609b8fc53))
+
+### Bug Fixes
+
+* add correct email ([de7ead9](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/de7ead9267d5ebd1a492961dc6c020e74fb952b3))
+* fix typo ([5def24f](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/5def24fd2b621b236a5ff16408556be4962e6a9c))
+
 ## [1.6.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.5.0...v1.6.0) (2025-09-07)
 
 ### Features
