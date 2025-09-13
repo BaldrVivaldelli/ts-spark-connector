@@ -4,6 +4,7 @@ import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import {SessionAlgebra} from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
 import {DFProgram} from "../algebra";
+import {SqlCap} from "../algebra/batch-capabilities";
 
 /** TYPES **/
 
@@ -28,13 +29,18 @@ export class SparkSession implements SessionAlgebra {
         this.sessionId = sessionId ?? crypto.randomUUID();
     }
 
-    sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<R, E, G> {
-        const prog: DFProgram<R, E, G> = (DF) => DF.sql(query);
-        return new ReadChainedDataFrame(prog, this);
+    sql<R = unknown, E = unknown, G = unknown>(
+        query: string
+    ): ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown> {
+        const prog: DFProgram<R, E, G, SqlCap<R>, unknown> = (DF) => DF.sql(query);
+        return new ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown>(prog, this);
     }
-    table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<R, E, G> {
-        const prog: DFProgram<R, E, G> = (DF) => DF.sql(`SELECT * FROM ${name}`);
-        return new ReadChainedDataFrame(prog, this);
+    table<R = unknown, E = unknown, G = unknown>(
+        name: string
+    ): ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown> {
+        const prog: DFProgram<R, E, G, SqlCap<R>, unknown> = (DF) =>
+            DF.sql(`SELECT * FROM ${name}`);
+        return new ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown>(prog, this);
     }
 
     static builder(): SparkSessionBuilder {

@@ -45,5 +45,9 @@ export interface DFWritingExec<W> {
 }
 
 /** TF full-lazy: el programa de write recibe DF/EX e instancia desde el child R. */
-export type DFWritingProgramFull<R, E, G, W> =
-    (WR: DFWritingAlg<R, W>, DF: DFAlg<R, E, G>, EX: ExprAlg<E>) => W;
+// writeDataFrame.ts
+export type DFWritingProgramFull<R, E, G, W, CDF = unknown, CEX = unknown> = (
+    WR:  DFWritingAlg<R, W>,
+    DF:  DFAlg<R, E, G, CDF>,
+    EX:  ExprAlg<E> & CEX
+) => W;
