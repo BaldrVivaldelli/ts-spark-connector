@@ -5,9 +5,9 @@ import {
     DFWritingAlg, DFWritingExec, DFWritingProgramFull,
     SaveMode, WriterFormat
 } from "./writeDataFrame";
-import { DFAlg, DFProgram, ExprAlg } from "../read/readDataframe";
 import { ProtoDFAlg, ProtoExprAlg } from "../engine/compilerRead";
 import { ProtoWritingExec } from "./protoWriterExec";
+import {DFAlg, DFProgram, ExprAlg} from "../algebra";
 
 type DefaultR = any;               // ProtoRel
 type DefaultW = ProtoWriteRoot;

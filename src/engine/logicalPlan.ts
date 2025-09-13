@@ -1,6 +1,6 @@
 import {GroupTypeInput, JoinHintName, JoinTypeInput} from "./sparkConnectEnums";
 import {FrameBoundary} from "./column";
-import {FrameType, SortOrder} from "../read/readDataframe";
+import {FrameType, SortOrder} from "../types";
 
 export interface WindowSpecExpr {
     partitionBy: Expression[];

@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import {SessionAlgebra} from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import {DFProgram} from "../read/readDataframe";
+import {DFProgram} from "../algebra";
 
 /** TYPES **/
 

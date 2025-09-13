@@ -8,9 +8,11 @@ import {
     toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
     JoinHintName,
 } from "./sparkConnectEnums";
-import {DFAlg, DFExec, ExprAlg, SortOrder, WindowSpec} from "../read/readDataframe";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
+import {DFAlg, ExprAlg} from "../algebra";
+import {SortOrder, WindowSpec} from "../types";
+import {DFExec} from "../executables";
 
 // ======================== EXPRESIONES (E = ProtoExpr) ========================
 

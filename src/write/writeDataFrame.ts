@@ -1,6 +1,6 @@
 // src/write/algebra.ts
 import type { SparkSession } from "../client/session";
-import {DFAlg, ExprAlg} from "../read/readDataframe";
+import {DFAlg, ExprAlg} from "../algebra";
 
 export type SaveMode = "append" | "overwrite" | "ignore" | "error" | "errorifexists";
 export type WriterFormat =

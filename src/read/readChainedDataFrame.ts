@@ -1,13 +1,19 @@
-import {SparkDFAlg, SparkExprAlg} from "./readDataFrameInterpreter";
-import {LogicalPlan} from "../engine/logicalPlan";
-import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
-import {SparkSession} from "../client/session";
-import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
-import {printArrowResults} from "../utils/arrowPrinter";
-import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
-import {toJSON, toMermaid} from "../trace/traceSerializers";
-import {TraceDFAlg, TraceExprAlg} from "../trace/trace";
+import { SparkDFAlg, SparkExprAlg } from "./readDataFrameInterpreter";
+import { LogicalPlan } from "../engine/logicalPlan";
+import { ProtoDFAlg, ProtoExec, ProtoExprAlg } from "../engine/compilerRead";
+import { SparkSession } from "../client/session";
+import {
+    DEFAULT_JOIN_TYPE,
+    ExplainModeInput,
+    JoinHintName,
+    JoinTypeInput,
+} from "../engine/sparkConnectEnums";
+import { printArrowResults } from "../utils/arrowPrinter";
+import { DataFrameWriterTF } from "../write/dataFrameWriterTF";
+import { toJSON, toMermaid } from "../trace/traceSerializers";
+import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
+import {NullsOrder, SortOrder} from "../types";
+import {DFAlg, DFProgram, ExprAlg} from "../algebra";
 
 type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 type SortKeyInput =
