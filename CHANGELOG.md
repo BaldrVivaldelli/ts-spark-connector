@@ -1,3 +1,10 @@
+## [1.8.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.7.0...v1.8.0) (2025-09-14)
+
+### Features
+
+* refactor for Streaming Algebra so it dont colide with batch algebra ([7174081](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/71740811502a8912e8695f14a5fa1bca072d68f1))
+* spark stream part 4 ([da6a88f](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/da6a88fd289ccff963fca2d562a1d757b143c2f9))
+
 ## [1.7.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.6.0...v1.7.0) (2025-09-07)
 
 ### Features
