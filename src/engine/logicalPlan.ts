@@ -1,6 +1,6 @@
 import {GroupTypeInput, JoinHintName, JoinTypeInput} from "./sparkConnectEnums";
 import {FrameBoundary} from "./column";
-import {FrameType, SortOrder} from "../read/readDataframe";
+import {FrameType, SortOrder} from "../types";
 
 export interface WindowSpecExpr {
     partitionBy: Expression[];
@@ -18,6 +18,13 @@ export type GroupBy = {
     type: "GroupBy";
     input: LogicalPlan;
     expressions: Expression[];
+};
+
+export type DataSource = {
+    format: string;
+    paths?: string[];
+    options?: Record<string, string>;
+    streaming?: boolean;
 };
 
 export type LogicalPlan =
@@ -41,7 +48,9 @@ export type LogicalPlan =
     | { type: "Sql"; query: string }
     | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
-    | { type: "Drop"; input: LogicalPlan; columnNames: string[] };
+    | { type: "Drop"; input: LogicalPlan; columnNames: string[] }
+    | { type: "EventTimeWatermark"; input: LogicalPlan; eventTimeCol: Expression; delay: string }
+    | { type: "Read"; data_source: DataSource; is_streaming?: boolean }
 
 
 export type Expression =

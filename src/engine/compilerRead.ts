@@ -8,9 +8,15 @@ import {
     toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
     JoinHintName,
 } from "./sparkConnectEnums";
-import {DFAlg, DFExec, ExprAlg, SortOrder, WindowSpec} from "../read/readDataframe";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
+import {SortOrder, WindowSpec} from "../types";
+import {DFExec} from "../executables";
+import {DFAlg, ExprAlg} from "../algebra";
+import {StreamingCaps} from "../algebra/streaming-dataframe";
+
+type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
+
 
 // ======================== EXPRESIONES (E = ProtoExpr) ========================
 
@@ -169,13 +175,11 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
 
 };
 
-// ========================= DATAFRAME (R = ProtoRel) =========================
-
 type ProtoRel = any;
 
-type ProtoGroup = { __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: any } };
+export type ProtoGroup = { __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: any } };
 
-export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
+export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     relation: (format, path, options) => ({
         read: {
             data_source: {
@@ -185,7 +189,6 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             },
         },
     }),
-
     select: (input, columns) => ({
         project: {
             input,
@@ -325,16 +328,16 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             })),
         },
     }),
-    describe: (plan, columns) => ({
+    describe: (input, columns) => ({
         project: {
-            plan,
+            input,
             expressions: columns,
         },
     }),
-    summary: (plan, metrics, columns) => ({
+    summary: (input, metrics, columns) => ({
         extension: {
             value: {
-                input: plan,
+                input: input,
                 metrics,
                 columns,
             },
@@ -389,9 +392,9 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             query
         }
     }),
-    hint: (plan: ProtoRel, name: string, params?: any[]) => ({
+    hint: (input: ProtoRel, name: string, params?: any[]) => ({
         hint: {
-            input: plan,
+            input: input,
             name: name,
             parameters: params ,
         }
@@ -411,6 +414,19 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup> = {
             input,
             column_names: columnNames, // usamos nombres; también podrías usar 'columns' (expr)
         }
+    }),
+    withWatermark(input, eventTimeCol, delay) {
+        return { type: "EventTimeWatermark", input, eventTimeCol, delay };
+    },
+    readStream: (format: string, options?: Record<string, string>) => ({
+        read: {
+            data_source: {
+                format,
+                paths: [],                 // p.ej. "rate" no requiere paths
+                options: options ?? {},
+            },
+            is_streaming: true,          // ← va ACÁ (en Read), no en data_source
+        },
     }),
 };
 

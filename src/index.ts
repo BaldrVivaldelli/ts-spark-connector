@@ -187,4 +187,22 @@ import {SparkSession} from "./client/session";
         .show();
     session.sql("SELECT * FROM purchases_tbl").show();
 
+    const clicks =
+        session.readStream<any, any, any>("rate", { rowsPerSecond: "2" })
+            .select("value", "timestamp");
+
+    const clickPurchases =
+        clicks
+            .join(
+                purchases.select("user_id", "product", "amount"),
+                col("value").eq(col("user_id")), // ajustá si tu columna stream != user_id
+                "LEFT"
+            )
+            .groupBy("value")
+            .agg({
+                last_seen: "max(timestamp)",
+                spent: "sum(amount)"
+            });
+
+
 })();

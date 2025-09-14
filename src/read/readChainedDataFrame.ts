@@ -1,58 +1,69 @@
-import {SparkDFAlg, SparkExprAlg} from "./readDataFrameInterpreter";
-import {LogicalPlan} from "../engine/logicalPlan";
-import {ProtoDFAlg, ProtoExec, ProtoExprAlg} from "../engine/compilerRead";
-import {SparkSession} from "../client/session";
-import {DFAlg, DFProgram, ExprAlg, NullsOrder, SortOrder} from "./readDataframe";
-import {DEFAULT_JOIN_TYPE, ExplainModeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
-import {printArrowResults} from "../utils/arrowPrinter";
-import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
-import {toJSON, toMermaid} from "../trace/traceSerializers";
-import {TraceDFAlg, TraceExprAlg} from "../trace/trace";
+import { SparkDFAlg, SparkExprAlg } from "./readDataFrameInterpreter";
+import { LogicalPlan } from "../engine/logicalPlan";
+import { ProtoDFAlg, ProtoExec, ProtoExprAlg } from "../engine/compilerRead";
+import { SparkSession } from "../client/session";
+import {
+    DEFAULT_JOIN_TYPE,
+    ExplainModeInput,
+    JoinHintName,
+    JoinTypeInput,
+} from "../engine/sparkConnectEnums";
+import { printArrowResults } from "../utils/arrowPrinter";
+import {DataFrameWriterTF, DefaultW} from "../write/dataFrameWriterTF";
+import { toJSON, toMermaid } from "../trace/traceSerializers";
+import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
+import { NullsOrder, SortOrder } from "../types";
+import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingReadCap} from "../algebra";
+import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/batch-capabilities";
 
-type EBuilder = { build<E>(EX: ExprAlg<E>): E };
-type SortKeyInput =
+export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
+export type SortKeyInput =
     | string
     | EBuilder
     | ((EX: ExprAlg<any>) => SortOrder<any>);
-export const col = (name: string): EBuilder => ({build: EX => EX.col(name)});
-export const lit = (v: string | number | boolean): EBuilder => ({build: EX => EX.lit(v)});
+
+export const col = (name: string): EBuilder => ({ build: EX => EX.col(name) });
+export const lit = (v: string | number | boolean): EBuilder => ({ build: EX => EX.lit(v) });
 export const eq = (l: EBuilder, r: EBuilder | string | number | boolean): EBuilder => ({
     build: EX => EX.bin("=", l.build(EX), typeof r === "object" ? (r as EBuilder).build(EX) : EX.lit(r as any))
 });
-export const asc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
-    ({expr: e.build(EX), direction: "asc", nulls});
-export const desc = (e: EBuilder, nulls?: NullsOrder) => (EX: ExprAlg<any>): SortOrder<any> =>
-    ({expr: e.build(EX), direction: "desc", nulls});
+export const asc = (e: EBuilder, nulls?: NullsOrder) =>
+    (EX: ExprAlg<any>): SortOrder<any> => ({ expr: e.build(EX), direction: "asc", nulls });
+export const desc = (e: EBuilder, nulls?: NullsOrder) =>
+    (EX: ExprAlg<any>): SortOrder<any> => ({ expr: e.build(EX), direction: "desc", nulls });
 
-export class ReadChainedDataFrame<R, E, G> {
-    private readonly prog: DFProgram<any, any, any>;
+export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
+    private readonly prog: DFProgram<R, E, G, CDF, CEX>;
 
-    constructor(p: DFProgram<R, E, G>, private readonly session: SparkSession) {
+    constructor(p: DFProgram<R, E, G, CDF, CEX>, private readonly session: SparkSession) {
         this.prog = p;
     }
 
-    static fromCSV<R, E, G>(
+    static fromCSV<R, E, G, CDF = {}, CEX = {}>(
         path: string | string[],
         session: SparkSession,
         options?: Record<string, string>
     ) {
-        const p: DFProgram<R, E, G> = (DF) => DF.relation("csv", path, options);
-        return new ReadChainedDataFrame<R, E, G>(p, session);
+        const p: DFProgram<R, E, G, CDF, CEX> = (DF) => DF.relation("csv", path, options);
+        return new ReadChainedDataFrame<R, E, G, CDF, CEX>(p, session);
     }
 
-    private chain(step: (df: any, EX: ExprAlg<any>, DF: DFAlg<any, any, any>) => any) {
-        const next: DFProgram<any, any, any> = (DF, EX) => step(this.prog(DF, EX), EX, DF);
+
+    private chain<CDF2 = unknown, CEX2 = unknown>(
+        step: (df: R, EX: ExprAlg<E> & CEX & CEX2, DF: DFAlg<R, E, G, CDF & CDF2>) => R
+    ): ReadChainedDataFrame<R, E, G, CDF & CDF2, CEX & CEX2> {
+        const next: DFProgram<R, E, G, CDF & CDF2, CEX & CEX2> = (DF, EX) =>
+            step(this.prog(DF, EX), EX, DF);
         return new ReadChainedDataFrame(next, this.session);
     }
 
-    select(...cols: string[]): ReadChainedDataFrame<R, E, G>;
-    select(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G>;
-    select(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G> {
+    select(...cols: string[]): ReadChainedDataFrame<R, E, G, CDF, CEX>;
+    select(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G, CDF, CEX>;
+    select(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G, CDF, CEX> {
         return this.chain((df, EX, DF) =>
             DF.select(df, cols.map(c => typeof c === "string" ? EX.col(c) : c.build(EX)))
         );
     }
-
 
     filter(cond: EBuilder) {
         return this.chain((df, EX, DF) => DF.filter(df, cond.build(EX)));
@@ -62,11 +73,18 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.chain((df, EX, DF) => DF.withColumn(df, name, e.build(EX)));
     }
 
-    join(right: ReadChainedDataFrame<R, E, G>, on: EBuilder, jt: JoinTypeInput = DEFAULT_JOIN_TYPE) {
-        const next: DFProgram<any, any, any> = (DF, EX) =>
-            DF.join(this.prog(DF, EX), right.prog(DF, EX), on.build(EX), jt);
-        return new ReadChainedDataFrame(next, this.session);
+    join<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<R, E, G, RCDF, RCEX>,
+        on: EBuilder,
+        jt: JoinTypeInput = DEFAULT_JOIN_TYPE
+    ): ReadChainedDataFrame<R, E, G, CDF & RCDF, CEX & RCEX> {
+        return this.chain<RCDF, RCEX>((_, EX, DF) => {
+            const leftPlan  = this.prog(DF, EX);
+            // DF tiene al menos CDF & RCDF; EX tiene al menos CEX & RCEX.
+            const rightPlan = right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX);
+            return DF.join(leftPlan, rightPlan, on.build(EX), jt);
+        });
     }
+
 
     groupBy(...by: (string | EBuilder)[]) {
         const self = this;
@@ -74,28 +92,23 @@ export class ReadChainedDataFrame<R, E, G> {
         const parseAgg = (s: string) => {
             const m = s.match(/^\s*([A-Za-z_]\w*)\s*\(\s*([^)]+)\s*\)\s*$/);
             if (!m) throw new Error(`Invalid aggregation: ${s}`);
-            return {fn: m[1], arg: m[2]};
+            return { fn: m[1], arg: m[2] };
         };
 
         return {
             agg(aggs: Record<string, EBuilder | string>) {
-                const next: DFProgram<any, any, any> = (DF, EX) => {
-                    // by: string|EBuilder -> E
+                const next: DFProgram<R, E, G, CDF, CEX> = (DF, EX) => {
                     const keys = by.map(b => typeof b === "string" ? EX.col(b) : b.build(EX));
-
                     const g = DF.groupBy(self.prog(DF, EX), keys);
-
-                    // aggs: alias -> E (si es string, parsear "fn(col)")
                     const exprs = Object.fromEntries(
                         Object.entries(aggs).map(([alias, v]) => {
                             if (typeof v === "string") {
-                                const {fn, arg} = parseAgg(v);
+                                const { fn, arg } = parseAgg(v);
                                 return [alias, EX.call(fn, [EX.col(arg)])];
                             }
                             return [alias, v.build(EX)];
                         })
                     );
-
                     return DF.agg(g, exprs);
                 };
                 return new ReadChainedDataFrame(next, self.session);
@@ -103,14 +116,12 @@ export class ReadChainedDataFrame<R, E, G> {
         };
     }
 
-
     orderBy(...colsOrKeys: SortKeyInput[]) {
         return this.chain((df, EX, DF) => {
             const orders = colsOrKeys.map(k => {
-                if (typeof k === "string") return {expr: EX.col(k), direction: "asc" as const};
-                if (typeof k === "function") return k(EX); // ya devuelve SortOrder<E>
-                /* k es EBuilder */
-                return {expr: k.build(EX), direction: "asc" as const};
+                if (typeof k === "string") return { expr: EX.col(k), direction: "asc" as const };
+                if (typeof k === "function") return k(EX);
+                return { expr: k.build(EX), direction: "asc" as const };
             });
             return DF.orderBy(df, orders);
         });
@@ -119,9 +130,9 @@ export class ReadChainedDataFrame<R, E, G> {
     sort(...colsOrKeys: SortKeyInput[]) {
         return this.chain((df, EX, DF) => {
             const orders = colsOrKeys.map(k => {
-                if (typeof k === "string") return {expr: EX.col(k), direction: "asc" as const};
+                if (typeof k === "string") return { expr: EX.col(k), direction: "asc" as const };
                 if (typeof k === "function") return k(EX);
-                return {expr: k.build(EX), direction: "asc" as const};
+                return { expr: k.build(EX), direction: "asc" as const };
             });
             return DF.sort(df, orders);
         });
@@ -135,10 +146,9 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.distinct(df));
     }
 
-
-    dropDuplicates(...cols: string[]): ReadChainedDataFrame<R, E, G>;
-    dropDuplicates(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G>;
-    dropDuplicates(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G> {
+    dropDuplicates(...cols: string[]): ReadChainedDataFrame<R, E, G, CDF, CEX>;
+    dropDuplicates(...cols: EBuilder[]): ReadChainedDataFrame<R, E, G, CDF, CEX>;
+    dropDuplicates(...cols: (string | EBuilder)[]): ReadChainedDataFrame<R, E, G, CDF, CEX> {
         return this.chain((df, EX, DF) => {
             const exprs =
                 cols.length === 0
@@ -148,8 +158,8 @@ export class ReadChainedDataFrame<R, E, G> {
         });
     }
 
-    union(right: ReadChainedDataFrame<R, E, G>): ReadChainedDataFrame<R, E, G> {
-        const next: DFProgram<any, any, any> = (DF, EX) => {
+    union(right: ReadChainedDataFrame<R, E, G, CDF, CEX>): ReadChainedDataFrame<R, E, G, CDF, CEX> {
+        const next: DFProgram<R, E, G, CDF, CEX> = (DF, EX) => {
             const leftPlan = this.prog(DF, EX);
             const rightPlan = right.prog(DF, EX);
             return DF.union(leftPlan, rightPlan);
@@ -157,10 +167,17 @@ export class ReadChainedDataFrame<R, E, G> {
         return new ReadChainedDataFrame(next, this.session);
     }
 
-    unionByName(right: ReadChainedDataFrame<R, E, G>, allowMissingColumns = false) {
-        const next: DFProgram<any, any, any> = (DF, EX) =>
-            DF.union(this.prog(DF, EX), right.prog(DF, EX), {byName: true, allowMissingColumns});
-        return new ReadChainedDataFrame(next, this.session);
+    unionByName<RCDF = unknown, RCEX = unknown>(
+        right: ReadChainedDataFrame<R, E, G, RCDF, RCEX>,
+        allowMissingColumns = false
+    ): ReadChainedDataFrame<R, E, G, CDF & RCDF, CEX & RCEX> {
+        return this.chain<RCDF, RCEX>((_, EX, DF) =>
+            DF.union(
+                this.prog(DF, EX),
+                right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
+                { byName: true, allowMissingColumns }
+            )
+        );
     }
 
     withColumnRenamed(oldName: string, newName: string) {
@@ -171,7 +188,7 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.chain((df, _EX, DF) => DF.withColumnsRenamed(df, mapping));
     }
 
-    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ReadChainedDataFrame<R, E, G> {
+    coalesce(name: string, ...exprs: Array<string | EBuilder | number | boolean>): ReadChainedDataFrame<R, E, G, CDF, CEX> {
         return this.chain((df, EX, DF) => {
             const toE = (x: string | EBuilder | number | boolean) =>
                 typeof x === "string"
@@ -189,13 +206,7 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.chain((df, EX, DF) => {
             const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
             const stats = ["count", "mean", "stddev", "min", "max"] as const;
-            const fn = (s: typeof stats[number]) =>
-                s === "mean" ? "avg" : s === "stddev" ? "stddev_samp" : s;
-
-            // NULL(double) sin cast: nullif(1.0,1.0)
             const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]);
-
-            // rlike sobre stringificado (soporta cols string o numéricas)
             const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
             const toDoubleIfNumeric = (name: string) =>
                 EX.caseWhen(
@@ -204,15 +215,13 @@ export class ReadChainedDataFrame<R, E, G> {
                             EX.call("concat", [EX.lit(""), EX.col(name)]),
                             EX.lit(NUMERIC_RX),
                         ]),
-                        then: EX.bin("*", EX.lit(1.0), EX.col(name)), // 1.0 * col -> DOUBLE
+                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),
                     }],
                     NULL_D
                 );
 
-            // (1) Pushdown de proyección (si la fuente lo soporta, ahorra IO)
             const pruned = DF.select(df, colNames.map(n => EX.col(n)));
 
-            // (2) UN SOLO AGG con TODAS las medidas
             const numExpr: Record<string, any> = Object.fromEntries(
                 colNames.map(n => [n, toDoubleIfNumeric(n)])
             );
@@ -220,7 +229,7 @@ export class ReadChainedDataFrame<R, E, G> {
             const measures = Object.fromEntries(
                 colNames.flatMap(n => ([
                     [`__${n}_count`, EX.call("count", [EX.col(n)])],
-                    [`__${n}_mean`, EX.call("avg", [numExpr[n]])],
+                    [`__${n}_mean`,   EX.call("avg", [numExpr[n]])],
                     [`__${n}_stddev`, EX.call("stddev_samp", [numExpr[n]])],
                     [`__${n}_min`, EX.call("min", [EX.col(n)])],
                     [`__${n}_max`, EX.call("max", [EX.col(n)])],
@@ -229,7 +238,6 @@ export class ReadChainedDataFrame<R, E, G> {
 
             const aggregated = DF.agg(DF.groupBy(pruned, [] as any[]), measures);
 
-            // (3) 5 Projects sobre el mismo 'aggregated' y UNION ALL por nombre
             const projectFor = (stat: typeof stats[number]) =>
                 DF.select(aggregated, [
                     EX.alias(EX.lit(stat), "summary"),
@@ -239,7 +247,7 @@ export class ReadChainedDataFrame<R, E, G> {
                 ]);
 
             return stats.slice(1).reduce(
-                (acc, s) => DF.union(acc, projectFor(s), {byName: true}),
+                (acc, s) => DF.union(acc, projectFor(s), { byName: true }),
                 projectFor(stats[0])
             );
         });
@@ -260,37 +268,34 @@ export class ReadChainedDataFrame<R, E, G> {
                     const p = parseFloat(m) / 100;
                     if (!(p >= 0 && p <= 1)) throw new Error(`summary(): percentil inválido '${m}'`);
                     const pct = Math.round(p * 100);
-                    return {kind: "pct", p, label: `${pct}%`, suffix: `p${pct}`};
+                    return { kind: "pct", p, label: `${pct}%`, suffix: `p${pct}` };
                 }
                 if (m === "std") m = "stddev";
                 const ok = ["count", "mean", "stddev", "min", "max"] as const;
                 if ((ok as readonly string[]).includes(m)) {
-                    return {kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m)};
+                    return { kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m) };
                 }
                 throw new Error(`summary(): métrica no soportada '${m}'`);
             };
             const parsed: Parsed[] = req.map(norm);
 
-            // 1) Helpers (mismos que en describe optimizado)
             const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
-            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]); // NULL DOUBLE
+            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]);
             const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
             const toDoubleIfNumeric = (name: string) =>
                 EX.caseWhen(
                     [{
                         when: EX.call("rlike", [
-                            EX.call("concat", [EX.lit(""), EX.col(name)]), // stringify para rlike
+                            EX.call("concat", [EX.lit(""), EX.col(name)]),
                             EX.lit(NUMERIC_RX),
                         ]),
-                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),   // fuerza DOUBLE sin cast
+                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),
                     }],
                     NULL_D
                 );
 
-            // 2) Pushdown de columnas
             const pruned = DF.select(df, colNames.map(n => EX.col(n)));
 
-            // 3) Un solo AGG con todas las medidas solicitadas
             const pairs: [string, any][] = [];
             for (const n of colNames) {
                 const numArg = toDoubleIfNumeric(n);
@@ -302,16 +307,13 @@ export class ReadChainedDataFrame<R, E, G> {
                         if (m.name === "min") pairs.push([`__${n}_min`, EX.call("min", [EX.col(n)])]);
                         if (m.name === "max") pairs.push([`__${n}_max`, EX.call("max", [EX.col(n)])]);
                     } else {
-                        // percentiles (uno por alias; simple y robusto)
                         pairs.push([`__${n}_${m.suffix}`, EX.call("percentile_approx", [numArg, EX.lit(m.p)])]);
-                        // (si querés menos funciones, podés usar array de percentiles y luego element_at)
                     }
                 }
             }
             const measures = Object.fromEntries(pairs);
             const aggregated = DF.agg(DF.groupBy(pruned, [] as any[]), measures);
 
-            // 4) Un Project por métrica y UNION ALL por nombre
             const projectFor = (m: Parsed) =>
                 DF.select(aggregated, [
                     EX.alias(EX.lit(m.label), "summary"),
@@ -322,24 +324,18 @@ export class ReadChainedDataFrame<R, E, G> {
 
             const rows = parsed.map(projectFor);
             return rows.slice(1).reduce(
-                (acc, r) => DF.union(acc, r, {byName: true}),
+                (acc, r) => DF.union(acc, r, { byName: true }),
                 rows[0]
             );
         });
     }
 
-    repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => {
-            console.log("df antes de repartir:", JSON.stringify(df, null, 2));
-            const result = DF.repartition(df, numPartitions, shuffle);
-            console.log("df después de repartir:", JSON.stringify(result, null, 2));
-            return result;
-        });
-
+    repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<R, E, G, CDF & RepartitionCap<R>, CEX> {
+        return this.chain<RepartitionCap<R>>((df, _EX, DF) => DF.repartition(df, numPartitions, shuffle));
     }
 
     hint(name: JoinHintName | string, ...params: any[]) {
-        return this.chain((df, _EX, DF) => DF.hint(df, name, params));
+        return this.chain<HintCap<R>>((df, _EX, DF) => DF.hint(df, name, params));
     }
 
     broadcast() {
@@ -358,33 +354,44 @@ export class ReadChainedDataFrame<R, E, G> {
         return this.hint("shuffle_replicate_nl");
     }
 
-    coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => DF.coalesce(df, numPartitions));
+    coalescePartitions(numPartitions: number): ReadChainedDataFrame<R, E, G, CDF & RepartitionCap<R>, CEX> {
+        return this.chain<RepartitionCap<R>>((df, _EX, DF) => DF.coalesce(df, numPartitions));
     }
 
-    sql(query: string): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => DF.sql(query));
+    sql(query: string): ReadChainedDataFrame<R, E, G, CDF & SqlCap<R>, CEX> {
+        return this.chain<SqlCap<R>>((_df, _EX, DF) => DF.sql(query));
     }
 
-    cache(): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => DF.cache(df));
+    cache(): ReadChainedDataFrame<R, E, G, CDF & CacheCap<R>, CEX> {
+        return this.chain<CacheCap<R>>((df, _EX, DF) => DF.cache(df));
     }
 
-    persist(level?: string): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => DF.persist(df, level ?? "MEMORY_AND_DISK"));
+    persist(level?: string): ReadChainedDataFrame<R, E, G, CDF & CacheCap<R>, CEX> {
+        return this.chain<CacheCap<R>>((df, _EX, DF) => DF.persist(df, level ?? "MEMORY_AND_DISK"));
     }
 
-    unpersist(blocking?: boolean): ReadChainedDataFrame<R, E, G> {
-        return this.chain((df, _EX, DF) => DF.unpersist(df, blocking));
+    unpersist(blocking?: boolean): ReadChainedDataFrame<R, E, G, CDF & CacheCap<R>, CEX> {
+        return this.chain<CacheCap<R>>((df, _EX, DF) => DF.unpersist(df, blocking));
     }
 
+    runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R {
+        return this.prog(DF, EX);
+    }
+
+    getProgram(): DFProgram<R, E, G, CDF, CEX> {
+        return this.prog;
+    }
+
+    getSession(): SparkSession {
+        return this.session;
+    }
 
     private compileToSparkPlan(): LogicalPlan {
-        return this.prog(SparkDFAlg, SparkExprAlg) as LogicalPlan;
+        return this.prog(SparkDFAlg as any, SparkExprAlg as any) as LogicalPlan;
     }
 
     async collectRaw(): Promise<any[]> {
-        const root = this.prog(ProtoDFAlg, ProtoExprAlg);
+        const root = this.prog(ProtoDFAlg as any, ProtoExprAlg as any);
         return ProtoExec.collect(root, this.session);
     }
 
@@ -396,25 +403,16 @@ export class ReadChainedDataFrame<R, E, G> {
         printArrowResults(arrowBuffers);
     }
 
-    getSession(): SparkSession {
-        return this.session;
-    }
-
     explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
-        const root = this.prog(ProtoDFAlg, ProtoExprAlg);
+        const root = this.prog(ProtoDFAlg as any, ProtoExprAlg as any);
         return ProtoExec.explain(root, this.session, mode);
     }
 
-    getProgram(): DFProgram<R, E, G> {
-        return this.prog;
-    }
-
-    get write() {
-        return DataFrameWriterTF.fromDF<R, E, G, any>(this);
+    get write(): DataFrameWriterTF<R, E, G, DefaultW, CDF, CEX> {
+        return DataFrameWriterTF.fromDF<R, E, G, DefaultW, CDF, CEX>(this);
     }
 
     private compileTrace(): any {
-        // Igual que compileToSparkPlan, pero usando el Alg de trazas
         return this.prog(TraceDFAlg as any, TraceExprAlg as any);
     }
 
@@ -434,7 +432,7 @@ export class ReadChainedDataFrame<R, E, G> {
     }
 
     toProtoJSON(): string {
-        const protoRoot = this.prog(ProtoDFAlg, ProtoExprAlg);
+        const protoRoot = this.prog(ProtoDFAlg as any, ProtoExprAlg as any);
         return JSON.stringify(protoRoot, null, 2);
     }
 
@@ -443,21 +441,18 @@ export class ReadChainedDataFrame<R, E, G> {
             throw new Error("sample(): fraction debe estar en [0,1] cuando withReplacement=false");
         }
         const lb = 0.0, ub = fraction;
-        return this.chain((df, _EX, DF) => DF.sample(df, lb, ub, withReplacement, seed, deterministicOrder));
+        return this.chain<SamplingCap<R>>((df, _EX, DF) => DF.sample(df, lb, ub, withReplacement, seed, deterministicOrder));
     }
 
-// 2.2) drop (para ayudarnos con randomSplit si agregamos una col temporal)
     drop(...columnNames: string[]) {
         return this.chain((df, _EX, DF) => DF.drop(df, columnNames));
     }
 
-// 2.3) randomSplit: devuelve un array de DFs disjuntos
-    randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<R, E, G>[] {
+    randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<R, E, G, CDF, CEX>[] {
         if (!weights?.length) throw new Error("randomSplit(): weights vacío");
         const sum = weights.reduce((a, b) => a + b, 0);
         if (sum <= 0) throw new Error("randomSplit(): suma de weights debe ser > 0");
 
-        // límites cumulativos normalizados [0,1]
         const bounds: Array<[number, number]> = [];
         let acc = 0;
         for (const w of weights) {
@@ -467,30 +462,42 @@ export class ReadChainedDataFrame<R, E, G> {
             bounds.push([start, end]);
         }
 
-        // nombre de columna temporal
         const RAND_COL = "__rand_split__";
 
-        // df base con columna rand(seed)
         const dfWithRand = this.withColumn(
             RAND_COL,
-            {build: EX => EX.call("rand", seed != null ? [EX.lit(seed)] : [])} // rand(seed?) como expr
+            { build: EX => EX.call("rand", seed != null ? [EX.lit(seed)] : []) }
         );
 
-        // generar cada split filtrando por rango
         const splits = bounds.map(([lo, hi], idx) => {
             const split = dfWithRand.filter({
                 build: EX => EX.logical(
                     "AND",
                     EX.bin(">=", EX.col(RAND_COL), EX.lit(lo)),
-                    // último tramo cerrado a derecha para cubrir 1.0
                     EX.bin(idx === bounds.length - 1 ? "<=" : "<", EX.col(RAND_COL), EX.lit(hi)),
                 )
-            }).drop(RAND_COL); // quitamos la col temporal
-
+            }).drop(RAND_COL);
             return split;
         });
 
         return splits;
     }
 
+    static readStream<R, E, G, CDF = unknown, CEX = unknown>(
+        format: string,
+        session: SparkSession,
+        options?: Record<string, string>
+    ) {
+        type Need = StreamingReadCap<R>;
+        const p: DFProgram<R, E, G, CDF & Need, CEX> =
+            (DF: DFAlg<R, E, G, CDF & Need>) => DF.readStream(format, options);
+        return new ReadChainedDataFrame<R, E, G, CDF & Need, CEX>(p, session);
+    }
+
+    withWatermark(eventTimeCol: EBuilder, delay: string) {
+        type Need = EventTimeWatermarkCap<R, E>;
+        return this.chain<Need>((df, EX, DF) =>
+            (DF as DFAlg<R, E, G, CDF & Need>).withWatermark(df, eventTimeCol.build(EX), delay)
+        );
+    }
 }

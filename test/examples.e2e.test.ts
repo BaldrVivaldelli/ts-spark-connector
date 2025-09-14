@@ -2,6 +2,7 @@
 import {describe, it, expect, beforeAll} from 'vitest';
 import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
 import {SparkSession} from "../src/client/session";
+import {ReadChainedDataFrame} from "../src/read/readChainedDataFrame";
 
 
 let spark: any;
@@ -411,5 +412,17 @@ describe('examples (E2E)', () => {
         await test.limit(3).show();
         expect(true).toBe(true);
     }, 90_000);
+
+    it("streaming: readStream + watermark + trigger + outputMode aparecen en el AST de cliente", () => {
+        const s = ReadChainedDataFrame
+            .readStream<any, any, any>("rate", session, { rowsPerSecond: "1" })
+            .withWatermark(col("timestamp"), "10 minutes")
+            .select("value");
+
+        // no ejecutamos show() (es streaming); verificamos el AST de cliente (trazas)
+        const trace = s.toClientASTJSON();
+        expect(trace).toMatch(/readStream/i);
+        expect(trace).toMatch(/withWatermark/i);
+    });
 
 });

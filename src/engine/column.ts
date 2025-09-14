@@ -1,7 +1,9 @@
 // src/engine/column.ts  — Tagless Final builders (sin AST público)
 
-import {ExprAlg, NullsOrder, SortDirection, WindowSpec} from "../read/readDataframe";
 
+
+import {ExprAlg} from "../algebra";
+import {NullsOrder, SortDirection, WindowSpec} from "../types";
 
 export type FrameBoundary =
     | { type: "UnboundedPreceding" }

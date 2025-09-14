@@ -1,7 +1,7 @@
 // src/read/DataFrameReaderTF.ts
 import { ReadChainedDataFrame } from "./readChainedDataFrame";
 import { SparkSession } from "../client/session";
-import { DFProgram } from "./readDataframe";
+import {DFProgram} from "../algebra";
 
 type Opts = Record<string, string>;
 
