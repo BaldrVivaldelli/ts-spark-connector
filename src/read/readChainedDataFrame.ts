@@ -13,8 +13,7 @@ import {DataFrameWriterTF, DefaultW} from "../write/dataFrameWriterTF";
 import { toJSON, toMermaid } from "../trace/traceSerializers";
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
-import { DFAlg, DFProgram, ExprAlg } from "../algebra";
-import {StreamingReadCap, WatermarkCap} from "../algebra/streaming-capabilities";
+import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingReadCap} from "../algebra";
 import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/batch-capabilities";
 
 export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
@@ -49,16 +48,6 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         return new ReadChainedDataFrame<R, E, G, CDF, CEX>(p, session);
     }
 
-    static readStream<R, E, G, CDF = {}, CEX = {}>(
-        format: string,
-        session: SparkSession,
-        options?: Record<string, string>
-    ) {
-        type Need = StreamingReadCap<R>;
-        const p: DFProgram<R, E, G, CDF & Need, CEX> = (DF: DFAlg<R, E, G, CDF & Need>) =>
-            DF.readStream(format, options);
-        return new ReadChainedDataFrame<R, E, G, CDF & Need, CEX>(p, session);
-    }
 
     private chain<CDF2 = unknown, CEX2 = unknown>(
         step: (df: R, EX: ExprAlg<E> & CEX & CEX2, DF: DFAlg<R, E, G, CDF & CDF2>) => R
@@ -385,13 +374,6 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         return this.chain<CacheCap<R>>((df, _EX, DF) => DF.unpersist(df, blocking));
     }
 
-    withWatermark(eventTimeCol: EBuilder, delay: string): ReadChainedDataFrame<R, E, G, CDF & WatermarkCap<R, E>, CEX> {
-        type Need = WatermarkCap<R, E>;
-        return this.chain<Need>((df, EX, DF) =>
-            (DF as unknown as DFAlg<R, E, G, CDF & Need>).withWatermark(df, eventTimeCol.build(EX), delay)
-        );
-    }
-
     runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R {
         return this.prog(DF, EX);
     }
@@ -499,5 +481,23 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         });
 
         return splits;
+    }
+
+    static readStream<R, E, G, CDF = unknown, CEX = unknown>(
+        format: string,
+        session: SparkSession,
+        options?: Record<string, string>
+    ) {
+        type Need = StreamingReadCap<R>;
+        const p: DFProgram<R, E, G, CDF & Need, CEX> =
+            (DF: DFAlg<R, E, G, CDF & Need>) => DF.readStream(format, options);
+        return new ReadChainedDataFrame<R, E, G, CDF & Need, CEX>(p, session);
+    }
+
+    withWatermark(eventTimeCol: EBuilder, delay: string) {
+        type Need = EventTimeWatermarkCap<R, E>;
+        return this.chain<Need>((df, EX, DF) =>
+            (DF as DFAlg<R, E, G, CDF & Need>).withWatermark(df, eventTimeCol.build(EX), delay)
+        );
     }
 }

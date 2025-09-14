@@ -20,6 +20,13 @@ export type GroupBy = {
     expressions: Expression[];
 };
 
+export type DataSource = {
+    format: string;
+    paths?: string[];
+    options?: Record<string, string>;
+    streaming?: boolean;
+};
+
 export type LogicalPlan =
     | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string> }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
@@ -41,7 +48,9 @@ export type LogicalPlan =
     | { type: "Sql"; query: string }
     | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
-    | { type: "Drop"; input: LogicalPlan; columnNames: string[] };
+    | { type: "Drop"; input: LogicalPlan; columnNames: string[] }
+    | { type: "EventTimeWatermark"; input: LogicalPlan; eventTimeCol: Expression; delay: string }
+    | { type: "Read"; data_source: DataSource; is_streaming?: boolean }
 
 
 export type Expression =

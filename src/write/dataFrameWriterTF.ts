@@ -7,7 +7,7 @@ import {
     SaveMode,
     WriterFormat
 } from "./writeDataFrame";
-import { ProtoDFAlg, ProtoExprAlg } from "../engine/compilerRead";
+import {ProtoDFAlg, ProtoExprAlg, ProtoGroup} from "../engine/compilerRead";
 import { ProtoWritingExec } from "./protoWriterExec";
 import { DFAlg, DFProgram, ExprAlg } from "../algebra";
 
@@ -217,15 +217,19 @@ export class DataFrameWriterTF<
     avro()    { return this.format("avro"); }
 
     private defaults(
-        this: DataFrameWriterTF<R, E, G, W, unknown, unknown>
-    ): Impl<R, E, G, W, unknown, unknown>;
+        this: DataFrameWriterTF<R, E, ProtoGroup, W, unknown, unknown>
+    ): Impl<R, E, ProtoGroup, W, unknown, unknown>;
     private defaults(): Impl<R, E, G, W, CDF, CEX>;
-    private defaults(): Impl<R, E, G, W, CDF, CEX> {
+    private defaults(): any {
+        if (this.DF && this.EX && this.WR && this.EXE) {
+            return { DF: this.DF, EX: this.EX, WR: this.WR, EXE: this.EXE };
+        }
+        // fallback Proto* SOLO válido cuando matchea el overload especializado
         return {
-            DF: (this.DF ?? (ProtoDFAlg as DFAlg<R, E, G, CDF>)),
-            EX: (this.EX ?? (ProtoExprAlg as ExprAlg<E> & CEX)),
-            WR: (this.WR ?? (ProtoWritingAlg as DFWritingAlg<R, W>)),
-            EXE: (this.EXE ?? (ProtoWritingExec as DFWritingExec<W>)),
+            DF:  ProtoDFAlg,
+            EX:  ProtoExprAlg,
+            WR:  ProtoWritingAlg,
+            EXE: ProtoWritingExec,
         };
     }
 }

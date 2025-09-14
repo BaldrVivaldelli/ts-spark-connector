@@ -8,82 +8,113 @@ let _id = 0;
 const nid = (pfx: string) => `${pfx}_${++_id}`;
 
 export const TraceExprAlg = {
-    col: (name: string): TraceNode => ({ id: nid("col"), label: `col(${name})`, children: [] }),
-    lit: (v: any): TraceNode => ({ id: nid("lit"), label: `lit(${JSON.stringify(v)})`, children: [] }),
+    col: (name: string): TraceNode => ({id: nid("col"), label: `col(${name})`, children: []}),
+    lit: (v: any): TraceNode => ({id: nid("lit"), label: `lit(${JSON.stringify(v)})`, children: []}),
     bin: (op: string, l: TraceNode, r: TraceNode): TraceNode =>
-        ({ id: nid("bin"), label: op, children: [l, r] }),
+        ({id: nid("bin"), label: op, children: [l, r]}),
     call: (fn: string, args: TraceNode[]): TraceNode =>
-        ({ id: nid("call"), label: fn, children: args }),
+        ({id: nid("call"), label: fn, children: args}),
     alias: (e: TraceNode, name: string): TraceNode =>
-        ({ id: nid("alias"), label: `alias(${name})`, children: [e] }),
+        ({id: nid("alias"), label: `alias(${name})`, children: [e]}),
     caseWhen: (branches: { when: TraceNode; then: TraceNode }[], elseE: TraceNode): TraceNode =>
-        ({ id: nid("case"), label: "case_when", children: [...branches.flatMap(b => [b.when, b.then]), elseE] }),
+        ({id: nid("case"), label: "case_when", children: [...branches.flatMap(b => [b.when, b.then]), elseE]}),
     coalesce: (exprs: TraceNode[]): TraceNode =>
-        ({ id: nid("coalesce"), label: "coalesce", children: exprs }),
+        ({id: nid("coalesce"), label: "coalesce", children: exprs}),
 } as const;
 
 export const TraceDFAlg = {
-    relation: (format: string, path: string | string[], opts?: Record<string,string>): TraceNode =>
-        ({ id: nid("rel"), label: `relation(${format})`, children: [] }),
+    relation: (format: string, path: string | string[], opts?: Record<string, string>): TraceNode =>
+        ({id: nid("rel"), label: `relation(${format})`, children: []}),
 
     select: (df: TraceNode, cols: TraceNode[]): TraceNode =>
-        ({ id: nid("select"), label: `select[${cols.length}]`, children: [df, ...cols] }),
+        ({id: nid("select"), label: `select[${cols.length}]`, children: [df, ...cols]}),
 
     filter: (df: TraceNode, cond: TraceNode): TraceNode =>
-        ({ id: nid("filter"), label: "filter", children: [df, cond] }),
+        ({id: nid("filter"), label: "filter", children: [df, cond]}),
 
     withColumn: (df: TraceNode, name: string, e: TraceNode): TraceNode =>
-        ({ id: nid("withCol"), label: `withColumn(${name})`, children: [df, e] }),
+        ({id: nid("withCol"), label: `withColumn(${name})`, children: [df, e]}),
 
     join: (l: TraceNode, r: TraceNode, on: TraceNode, jt: string): TraceNode =>
-        ({ id: nid("join"), label: `join(${jt})`, children: [l, r, on] }),
+        ({id: nid("join"), label: `join(${jt})`, children: [l, r, on]}),
 
     groupBy: (df: TraceNode, keys: TraceNode[]): TraceNode =>
-        ({ id: nid("groupBy"), label: `groupBy[${keys.length}]`, children: [df, ...keys] }),
+        ({id: nid("groupBy"), label: `groupBy[${keys.length}]`, children: [df, ...keys]}),
 
     agg: (dfOrG: TraceNode, pairs: Record<string, TraceNode>): TraceNode =>
-        ({ id: nid("agg"), label: `agg[${Object.keys(pairs).length}]`, children: [dfOrG, ...Object.entries(pairs).map(([k,v]) =>
-                ({ id: nid("alias"), label: `as(${k})`, children: [v] }))]}),
+        ({
+            id: nid("agg"),
+            label: `agg[${Object.keys(pairs).length}]`,
+            children: [dfOrG, ...Object.entries(pairs).map(([k, v]) =>
+                ({id: nid("alias"), label: `as(${k})`, children: [v]}))]
+        }),
 
-    orderBy: (df: TraceNode, orders: {expr: TraceNode; direction: "asc" | "desc"}[]): TraceNode =>
-        ({ id: nid("orderBy"), label: `orderBy[${orders.length}]`, children: [df, ...orders.map(o => o.expr)] }),
+    orderBy: (df: TraceNode, orders: { expr: TraceNode; direction: "asc" | "desc" }[]): TraceNode =>
+        ({id: nid("orderBy"), label: `orderBy[${orders.length}]`, children: [df, ...orders.map(o => o.expr)]}),
 
-    sort: (df: TraceNode, orders: {expr: TraceNode; direction: "asc" | "desc"}[]): TraceNode =>
-        ({ id: nid("sort"), label: `sort[${orders.length}]`, children: [df, ...orders.map(o => o.expr)] }),
+    sort: (df: TraceNode, orders: { expr: TraceNode; direction: "asc" | "desc" }[]): TraceNode =>
+        ({id: nid("sort"), label: `sort[${orders.length}]`, children: [df, ...orders.map(o => o.expr)]}),
 
     limit: (df: TraceNode, n: number): TraceNode =>
-        ({ id: nid("limit"), label: `limit(${n})`, children: [df] }),
+        ({id: nid("limit"), label: `limit(${n})`, children: [df]}),
 
     distinct: (df: TraceNode): TraceNode =>
-        ({ id: nid("distinct"), label: "distinct", children: [df] }),
+        ({id: nid("distinct"), label: "distinct", children: [df]}),
 
     dropDuplicates: (df: TraceNode, exprs?: TraceNode[]): TraceNode =>
-        ({ id: nid("dropDup"), label: `dropDuplicates[${exprs?.length ?? 0}]`, children: [df, ...(exprs ?? [])] }),
+        ({id: nid("dropDup"), label: `dropDuplicates[${exprs?.length ?? 0}]`, children: [df, ...(exprs ?? [])]}),
 
     union: (l: TraceNode, r: TraceNode, _opts?: any): TraceNode =>
-        ({ id: nid("union"), label: "union", children: [l, r] }),
+        ({id: nid("union"), label: "union", children: [l, r]}),
 
     withColumnRenamed: (df: TraceNode, oldN: string, newN: string): TraceNode =>
-        ({ id: nid("rename"), label: `rename(${oldN}→${newN})`, children: [df] }),
+        ({id: nid("rename"), label: `rename(${oldN}→${newN})`, children: [df]}),
 
-    withColumnsRenamed: (df: TraceNode, _m: Record<string,string>): TraceNode =>
-        ({ id: nid("renameMany"), label: "renameMany", children: [df] }),
+    withColumnsRenamed: (df: TraceNode, _m: Record<string, string>): TraceNode =>
+        ({id: nid("renameMany"), label: "renameMany", children: [df]}),
 
     repartition: (df: TraceNode, n: number, _shuf: boolean): TraceNode =>
-        ({ id: nid("repartition"), label: `repartition(${n})`, children: [df] }),
+        ({id: nid("repartition"), label: `repartition(${n})`, children: [df]}),
 
     coalesce: (df: TraceNode, n: number): TraceNode =>
-        ({ id: nid("coalesce"), label: `coalesce(${n})`, children: [df] }),
+        ({id: nid("coalesce"), label: `coalesce(${n})`, children: [df]}),
 
     cache: (df: TraceNode): TraceNode =>
-        ({ id: nid("cache"), label: "cache", children: [df] }),
+        ({id: nid("cache"), label: "cache", children: [df]}),
 
     persist: (df: TraceNode, level: string): TraceNode =>
-        ({ id: nid("persist"), label: `persist(${level})`, children: [df] }),
+        ({id: nid("persist"), label: `persist(${level})`, children: [df]}),
 
     unpersist: (df: TraceNode, _blocking?: boolean): TraceNode =>
-        ({ id: nid("unpersist"), label: "unpersist", children: [df] }),
+        ({id: nid("unpersist"), label: "unpersist", children: [df]}),
 
     sql: (_: string): TraceNode =>
-        ({ id: nid("sql"), label: "sql(query)", children: [] }),
+        ({id: nid("sql"), label: "sql(query)", children: []}),
+    readStream: (format: string, options?: Record<string, string>): TraceNode =>
+        ({
+            id: nid("readStream"),
+            label: `readStream(${format}${options ? ",opts" : ""})`,
+            children: []
+        }),
+
+    withWatermark: (df: TraceNode, eventTimeCol: TraceNode, delay: string): TraceNode =>
+        ({
+            id: nid("watermark"),
+            label: `withWatermark(${delay})`,
+            children: [df, eventTimeCol]
+        }),
+
+    withTrigger: (df: TraceNode, trigger: { once?: boolean; processingTimeMs?: number }): TraceNode =>
+        ({
+            id: nid("trigger"),
+            label: `withTrigger(${trigger.once ? "once" : (trigger.processingTimeMs != null ? `${trigger.processingTimeMs}ms` : "")})`,
+            children: [df]
+        }),
+
+    withOutputMode: (df: TraceNode, mode: "append" | "update" | "complete"): TraceNode =>
+        ({
+            id: nid("outputMode"),
+            label: `withOutputMode(${mode})`,
+            children: [df]
+        })
 } as const;

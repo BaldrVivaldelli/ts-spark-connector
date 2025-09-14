@@ -5,6 +5,7 @@ import {SessionAlgebra} from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
 import {DFProgram} from "../algebra";
 import {SqlCap} from "../algebra/batch-capabilities";
+import { StreamingReadCap } from "../algebra/streaming-capabilities";
 
 /** TYPES **/
 
@@ -27,6 +28,10 @@ export class SparkSession implements SessionAlgebra {
 
     constructor(sessionId?: string) {
         this.sessionId = sessionId ?? crypto.randomUUID();
+    }
+
+    readStream<R, E, G>(format: string, options?: Record<string, string>) {
+        return ReadChainedDataFrame.readStream<R, E, G>(format, this, options);
     }
 
     sql<R = unknown, E = unknown, G = unknown>(
