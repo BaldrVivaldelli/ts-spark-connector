@@ -31,7 +31,6 @@ const client = new proto.spark.connect.SparkConnectService(
 
 export const sparkGrpcClient = {
     async executePlan(request: any): Promise<any[]> {
-        console.log("[DEBUG] Request gRPC:", JSON.stringify(request, null, 2));
         return new Promise((resolve, reject) => {
             const call = client.executePlan(request);
 
