@@ -1,6 +1,14 @@
+// Main entry point - export public API
+export { SparkSession } from "./client/session";
+export {
+    col, isNull, isNotNull, when, lit,
+    explode, posexplode, split, to_json, from_json, struct
+} from "./engine/column";
+
+// Example usage (commented out for production, uncomment for development/examples)
+/*
 import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_json, when} from "./engine/column";
 import {SparkSession} from "./client/session";
-
 
 (async () => {
     const session = SparkSession.builder()
@@ -206,3 +214,4 @@ import {SparkSession} from "./client/session";
 
 
 })();
+*/

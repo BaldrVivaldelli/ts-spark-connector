@@ -11,6 +11,7 @@ let col: any, isNull: any, isNotNull: any, when: any;
 beforeAll(async () => {
     // si no viene del entorno, usa el local
     process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
+    console.log('Using SPARK_CONNECT_URL:', process.env.SPARK_CONNECT_URL);
 
     ({spark} = await import('../src/client/session'));
     ({col, isNull, isNotNull, when} = await import('../src/engine/column'));

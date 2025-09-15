@@ -16,8 +16,16 @@ const packageDefinition = protoLoader.loadSync(
 
 const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 
+// Extract host:port from SPARK_CONNECT_URL environment variable
+function getSparkConnectAddress(): string {
+    const url = process.env.SPARK_CONNECT_URL || "sc://localhost:15002";
+    // Remove sc:// prefix if present
+    const address = url.replace(/^sc:\/\//, "");
+    return address;
+}
+
 const client = new proto.spark.connect.SparkConnectService(
-    "localhost:15002",
+    getSparkConnectAddress(),
     grpc.credentials.createInsecure()
 );
 
