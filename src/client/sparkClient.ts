@@ -24,15 +24,22 @@ function getSparkConnectAddress(): string {
     return address;
 }
 
-const client = new proto.spark.connect.SparkConnectService(
-    getSparkConnectAddress(),
-    grpc.credentials.createInsecure()
-);
+// Lazy client creation - only create when first used
+let _client: any = null;
+function getClient() {
+    if (!_client) {
+        _client = new proto.spark.connect.SparkConnectService(
+            getSparkConnectAddress(),
+            grpc.credentials.createInsecure()
+        );
+    }
+    return _client;
+}
 
 export const sparkGrpcClient = {
     async executePlan(request: any): Promise<any[]> {
         return new Promise((resolve, reject) => {
-            const call = client.executePlan(request);
+            const call = getClient().executePlan(request);
 
             const results: any[] = [];
 
