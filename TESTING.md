@@ -46,20 +46,24 @@ The test runner waits for the Spark server to be healthy before running tests. T
 - `SPARK_CONNECT_URL`: Set to `sc://spark:15002` to connect to the Spark container
 - Other environment variables can be added to the `docker-compose.test.yml` file
 
-## File Mounts
+## Data and Certificates
 
-- `./example_data` is mounted as `/data` in both containers for test data access
-- `./spark-server/certs` is mounted for SSL/TLS certificates
+- `./example_data` is copied into both containers as `/data` for test data access
+- `./spark-server/certs` is copied into containers for SSL/TLS certificates
+- All files are embedded in the container images for consistency and isolation
 
 ## Troubleshooting
 
 ### Tests failing to connect to Spark
+
 - Check that the Spark container is healthy: `docker-compose -f docker-compose.test.yml ps`
 - View Spark logs: `docker-compose -f docker-compose.test.yml logs spark`
 
 ### Build failures
+
 - Ensure all dependencies are listed in `package.json`
 - Check that TypeScript compilation succeeds: `npm run build`
 
 ### Permission issues
+
 - The Spark container runs as user 1001, make sure files are accessible
