@@ -1,0 +1,34 @@
+services:
+  spark:
+    build:
+      context: .
+      dockerfile: spark-server/Dockerfile
+    ports:
+      - "15002:15002"   # Spark Connect gRPC port
+      - "4040:4040"     # Spark UI (optional)
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "15002"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks:
+      - test-network
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      spark:
+        condition: service_healthy
+    environment:
+      - SPARK_CONNECT_URL=sc://spark:15002
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

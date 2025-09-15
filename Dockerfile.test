@@ -1,0 +1,27 @@
+# Dockerfile for running tests with all dependencies
+FROM node:20-alpine
+
+# Install netcat for health checks
+RUN apk add --no-cache netcat-openbsd
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files and config files first (for better Docker layer caching)
+COPY package*.json tsconfig*.json ./
+
+# Install dependencies (skip prepare script that requires source files)
+RUN npm ci --ignore-scripts
+
+# Copy source code and tests
+COPY . .
+
+# Copy data files and certificates for tests
+COPY ./example_data /data
+COPY ./spark-server/certs /app/spark-server/certs
+
+# Build the TypeScript code
+RUN npm run build
+
+# Default command runs tests
+CMD ["npm", "test"]

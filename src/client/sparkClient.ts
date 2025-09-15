@@ -16,16 +16,30 @@ const packageDefinition = protoLoader.loadSync(
 
 const proto = grpc.loadPackageDefinition(packageDefinition) as any;
 
-const client = new proto.spark.connect.SparkConnectService(
-    "localhost:15002",
-    grpc.credentials.createInsecure()
-);
+// Extract host:port from SPARK_CONNECT_URL environment variable
+function getSparkConnectAddress(): string {
+    const url = process.env.SPARK_CONNECT_URL || "sc://localhost:15002";
+    // Remove sc:// prefix if present
+    const address = url.replace(/^sc:\/\//, "");
+    return address;
+}
+
+// Lazy client creation - only create when first used
+let _client: any = null;
+function getClient() {
+    if (!_client) {
+        _client = new proto.spark.connect.SparkConnectService(
+            getSparkConnectAddress(),
+            grpc.credentials.createInsecure()
+        );
+    }
+    return _client;
+}
 
 export const sparkGrpcClient = {
     async executePlan(request: any): Promise<any[]> {
-        console.log("[DEBUG] Request gRPC:", JSON.stringify(request, null, 2));
         return new Promise((resolve, reject) => {
-            const call = client.executePlan(request);
+            const call = getClient().executePlan(request);
 
             const results: any[] = [];
 
@@ -38,9 +52,8 @@ export const sparkGrpcClient = {
         });
     },
     explain(request: any): Promise<string> {
-        console.log("[DEBUG] Request gRPC:", JSON.stringify(request, null, 2));
         return new Promise((resolve, reject) => {
-            client.explain(request, (err: any, response: any) => {
+            getClient().explain(request, (err: any, response: any) => {
                 if (err) return reject(err);
 
                 if (typeof response?.explain_string === "string") {

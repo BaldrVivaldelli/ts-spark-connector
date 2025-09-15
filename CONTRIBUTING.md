@@ -12,24 +12,48 @@ Thanks for considering a contribution to **ts-spark-connector**!
    npm ci
    ```
 
-2. (Optional) Start a local Spark Connect server (see `spark-server/README.md`) and export:
-
-   ```bash
-   export SPARK_CONNECT_URL=sc://localhost:15002
-   ```
-
 ## Development
 
 - Code style: TypeScript + ESLint + Prettier
-- Tests: Vitest (`npm test`); E2E require a running Spark Connect server
+- Tests: Vitest (`npm test` for unit tests)
 - Build: `npm run build`
 
-Run E2E tests:
+## Testing
+
+### Unit Tests
 
 ```bash
-docker compose up -d --build spark
-npx vitest run "test/**/*.e2e.test.ts"
+npm test
 ```
+
+### E2E Tests (Recommended: Docker-based)
+
+For complete end-to-end testing with all dependencies:
+
+```bash
+# Run all E2E tests in Docker environment
+npm run test:docker
+
+# Clean up afterwards
+npm run test:docker:cleanup
+```
+
+### E2E Tests (Manual Spark Setup)
+
+Alternatively, you can manually start Spark and run tests:
+
+```bash
+# Start Spark server
+docker compose up -d --build spark
+
+# Run E2E tests
+npx vitest run "test/**/*.e2e.test.ts"
+
+# Clean up
+docker compose down
+```
+
+📖 **For detailed testing instructions, see [TESTING.md](./TESTING.md)**
 
 ## Pull Requests
 

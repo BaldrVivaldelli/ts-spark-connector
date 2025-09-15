@@ -1,6 +1,8 @@
 services:
   spark:
-    build: ./spark-server
+    build:
+      context: .
+      dockerfile: spark-server/Dockerfile
     ports:
       - "15002:15002"   # Spark Connect gRPC port
       - "4040:4040"     # Spark UI (opcional)

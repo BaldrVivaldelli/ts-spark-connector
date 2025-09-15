@@ -17,23 +17,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Boot Spark
-        run: docker compose -f docker-compose.yml up -d spark
-
-      - name: Wait for Spark
-        run: |
-          for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then
-              echo "✅ Spark is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for Spark... ($i/60)"
-            sleep 2
-          done
-          echo "❌ Spark did not start in time"
-          docker compose -f docker-compose.yml logs spark
-          exit 1
-
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
@@ -46,42 +29,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+      - name: Create ivy2 directory
+        run: mkdir -p ivy2
 
-      - name: Install deps & build
-        run: |
-          npm ci
-          npm run build
+      - name: Run E2E tests with Docker
+        run: npm run test:docker
 
-      - name: Boot Spark
-        run: docker compose -f docker-compose.yml up -d spark
+      - name: Dump logs (on failure)
+        if: failure()
+        run: npm run test:docker:logs || true
 
-      - name: Wait for Spark
-        run: |
-          for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then
-              echo "✅ Spark is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for Spark... ($i/60)"
-            sleep 2
-          done
-          echo "❌ Spark did not start in time"
-          docker compose -f docker-compose.yml logs spark
-          exit 1
-
-      - name: Run E2E tests
-        env:
-          SPARK_CONNECT_URL: "sc://localhost:15002"
-        run: npx vitest run "tests/**/*.e2e.test.ts" --reporter=default
-
-      - name: Dump logs (always)
+      - name: Clean up (always)
         if: always()
-        run: docker compose -f docker-compose.yml logs spark || true
-
-      - name: Shutdown stack (always)
-        if: always()
-        run: docker compose -f docker-compose.yml down -v
+        run: npm run test:docker:cleanup || true
