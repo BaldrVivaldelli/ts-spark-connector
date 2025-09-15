@@ -1,3 +1,16 @@
+## [1.9.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.8.0...v1.9.0) (2025-09-15)
+
+### Features
+
+* add Docker-based test environment with complete Spark setup ([402377d](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/402377d7e27b6b611b418aaf8ba11619a8cb68b1))
+* docker test environment ([afea97b](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/afea97bce4e9d23c44422036dd6c2cd45802b44f)), closes [#28](https://github.com/BaldrVivaldelli/ts-spark-connector/issues/28)
+
+### Bug Fixes
+
+* lazy Spark client creation and exclude E2E tests from unit test runs ([7d90ec6](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/7d90ec6fc091f7ecc229bfc1a306152eb8e17030))
+* update to Docker Compose v2 commands for CI compatibility ([8a686fa](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/8a686fa5acc5b0a97e0c157ed9ffaad4110daae8))
+* use getClient() in explain method and remove debug logging ([99a47b4](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/99a47b41a577512c04dbce6400508c14db5c38c4))
+
 ## [1.8.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.7.0...v1.8.0) (2025-09-14)
 
 ### Features
