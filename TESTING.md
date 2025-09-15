@@ -26,10 +26,10 @@ npm run test:docker:logs
 
 ```bash
 # Build and run tests
-docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit test-runner
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit test-runner
 
 # Clean up afterwards
-docker-compose -f docker-compose.test.yml down -v
+docker compose -f docker-compose.test.yml down -v
 ```
 
 ## How it works
@@ -56,8 +56,8 @@ The test runner waits for the Spark server to be healthy before running tests. T
 
 ### Tests failing to connect to Spark
 
-- Check that the Spark container is healthy: `docker-compose -f docker-compose.test.yml ps`
-- View Spark logs: `docker-compose -f docker-compose.test.yml logs spark`
+- Check that the Spark container is healthy: `docker compose -f docker-compose.test.yml ps`
+- View Spark logs: `docker compose -f docker-compose.test.yml logs spark`
 
 ### Build failures
 
