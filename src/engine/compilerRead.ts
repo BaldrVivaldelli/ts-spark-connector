@@ -12,8 +12,8 @@ import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
 import {SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
-import {DFAlg, ExprAlg} from "../algebra";
-import {StreamingCaps} from "../algebra/streaming-dataframe";
+import {DFAlg, ExprAlg} from "../algebra/read";
+import {StreamingCaps} from "../algebra/read/streaming-dataframe";
 
 type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
 

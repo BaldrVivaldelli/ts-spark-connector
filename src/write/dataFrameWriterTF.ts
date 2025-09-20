@@ -1,15 +1,11 @@
 import { ProtoWriteRoot, ProtoWritingAlg } from "./compilerWrite";
 import { SparkSession } from "../client/session";
-import {
-    DFWritingAlg,
-    DFWritingExec,
-    DFWritingProgramFull,
-    SaveMode,
-    WriterFormat
-} from "./writeDataFrame";
+
 import {ProtoDFAlg, ProtoExprAlg, ProtoGroup} from "../engine/compilerRead";
 import { ProtoWritingExec } from "./protoWriterExec";
-import { DFAlg, DFProgram, ExprAlg } from "../algebra";
+import { DFAlg, DFProgram, ExprAlg } from "../algebra/read";
+import {DFWritingAlg, SaveMode, WriterFormat} from "../algebra/write";
+import {DFWritingExec, DFWritingProgramFull} from "./writeDataFrame";
 
 // ==================== tipos base ====================
 type DefaultR = any;

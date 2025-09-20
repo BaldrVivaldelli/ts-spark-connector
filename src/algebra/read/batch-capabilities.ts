@@ -1,4 +1,4 @@
-import { JoinHintName } from "../engine/sparkConnectEnums";
+import { JoinHintName } from "../../engine/sparkConnectEnums";
 
 // Gestión de cache/persist
 export interface CacheCap<R> {

@@ -3,9 +3,9 @@ import crypto from "crypto";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import {SessionAlgebra} from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import {DFProgram} from "../algebra";
-import {SqlCap} from "../algebra/batch-capabilities";
-import { StreamingReadCap } from "../algebra/streaming-capabilities";
+import {DFProgram} from "../algebra/read";
+import {SqlCap} from "../algebra/read/batch-capabilities";
+import { StreamingReadCap } from "../algebra/read/streaming-capabilities";
 
 /** TYPES **/
 

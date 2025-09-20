@@ -2,7 +2,7 @@
 
 
 
-import {ExprAlg} from "../algebra";
+import {ExprAlg} from "../algebra/read";
 import {NullsOrder, SortDirection, WindowSpec} from "../types";
 
 export type FrameBoundary =

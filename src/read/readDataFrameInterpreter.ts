@@ -1,7 +1,7 @@
 import { Expression, GroupBy, LogicalPlan } from "../engine/logicalPlan";
 import {DEFAULT_JOIN_TYPE, GroupTypeInput, JoinHintName, JoinTypeInput} from "../engine/sparkConnectEnums";
 import {type} from "node:os";
-import {DFAlg, ExprAlg} from "../algebra";
+import {DFAlg, ExprAlg} from "../algebra/read";
 import {SortOrder, WindowSpec} from "../types";
 
 export const SparkExprAlg: ExprAlg<Expression> = {

@@ -13,8 +13,8 @@ import {DataFrameWriterTF, DefaultW} from "../write/dataFrameWriterTF";
 import { toJSON, toMermaid } from "../trace/traceSerializers";
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
-import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingReadCap} from "../algebra";
-import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/batch-capabilities";
+import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingReadCap} from "../algebra/read";
+import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/read/batch-capabilities";
 
 export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 export type SortKeyInput =

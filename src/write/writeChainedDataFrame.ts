@@ -1,13 +1,11 @@
 // src/write/dataFrameWriterTF.ts
 import { ProtoWriteRoot, ProtoWritingAlg } from "./compilerWrite";
 import { SparkSession } from "../client/session";
-import {
-    DFWritingAlg, DFWritingExec, DFWritingProgramFull,
-    SaveMode, WriterFormat
-} from "./writeDataFrame";
 import { ProtoDFAlg, ProtoExprAlg } from "../engine/compilerRead";
 import { ProtoWritingExec } from "./protoWriterExec";
-import {DFAlg, DFProgram, ExprAlg} from "../algebra";
+import {DFAlg, DFProgram, ExprAlg} from "../algebra/read";
+import {DFWritingExec, DFWritingProgramFull} from "./writeDataFrame";
+import {DFWritingAlg, SaveMode, WriterFormat} from "../algebra/write";
 
 type DefaultR = any;               // ProtoRel
 type DefaultW = ProtoWriteRoot;

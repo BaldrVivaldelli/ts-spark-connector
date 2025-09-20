@@ -1,6 +1,6 @@
-// src/engine/compiler-writer.ts
+// src/write/compilerWrite.ts
 
-import {DFWritingAlg, WriterSpec} from "./writeDataFrame";
+import {DFWritingAlg, SaveMode, WriterFormat, WriterSpec} from "../algebra/write";
 
 type ProtoRel = any;
 
@@ -11,49 +11,93 @@ export interface ProtoWriteRoot {
 }
 
 export const ProtoWritingAlg: DFWritingAlg<ProtoRel, ProtoWriteRoot> = {
-    fromChild(child) {
-        return {child, spec: {options: {}, partitionBy: [], sortBy: []}};
+    fromChild(child: ProtoRel): ProtoWriteRoot {
+        return { child, spec: { options: {}, partitionBy: [], sortBy: [] } };
     },
-    format: (w, fmt) => ({...w, spec: {...w.spec, format: fmt}}),
-    mode: (w, m) => ({...w, spec: {...w.spec, mode: m}}),
-    option: (w, k, v) => ({...w, spec: {...w.spec, options: {...w.spec.options, [k]: String(v)}}}),
-    options: (w, o) => {
-        const norm = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
-        return {...w, spec: {...w.spec, options: {...w.spec.options, ...norm}}};
+
+    format(w: ProtoWriteRoot, fmt: WriterFormat): ProtoWriteRoot {
+        return { ...w, spec: { ...w.spec, format: fmt } };
     },
-    partitionBy: (w, ...cs) => ({...w, spec: {...w.spec, partitionBy: [...w.spec.partitionBy, ...cs]}}),
-    bucketBy: (w, n, c, ...cs) => ({...w, spec: {...w.spec, bucketBy: {numBuckets: n, columns: [c, ...cs]}}}),
-    sortBy: (w, c, ...cs) => ({...w, spec: {...w.spec, sortBy: [...w.spec.sortBy, c, ...cs]}}),
-    targetPath: (w, path) => ({...w, spec: {...w.spec, target: {path}}}),
-    targetTable: (w, tab) => ({...w, spec: {...w.spec, target: {table: tab}}}),
-    createOrReplaceTempView(w, name) {
-        return { ...w, tempViewName: name }
+
+    mode(w: ProtoWriteRoot, m: SaveMode): ProtoWriteRoot {
+        return { ...w, spec: { ...w.spec, mode: m } };
     },
-    createTempView(w, name) {
-        return { ...w, spec: { ...w.spec, registerView: { name, replace: false } } };
+
+    option(w: ProtoWriteRoot, k: string, v: string): ProtoWriteRoot {
+        return {
+            ...w,
+            spec: { ...w.spec, options: { ...w.spec.options, [k]: String(v) } },
+        };
+    },
+
+    options(w: ProtoWriteRoot, o: Record<string, string>): ProtoWriteRoot {
+        const norm = Object.fromEntries(
+            Object.entries(o).map(([k, v]) => [k, String(v)])
+        );
+        return {
+            ...w,
+            spec: { ...w.spec, options: { ...w.spec.options, ...norm } },
+        };
+    },
+
+    partitionBy(w: ProtoWriteRoot, ...cs: string[]): ProtoWriteRoot {
+        return {
+            ...w,
+            spec: { ...w.spec, partitionBy: [...w.spec.partitionBy, ...cs] },
+        };
+    },
+
+    bucketBy(w: ProtoWriteRoot, n: number, c: string, ...cs: string[]): ProtoWriteRoot {
+        return {
+            ...w,
+            spec: { ...w.spec, bucketBy: { numBuckets: n, columns: [c, ...cs] } },
+        };
+    },
+
+    sortBy(w: ProtoWriteRoot, c: string, ...cs: string[]): ProtoWriteRoot {
+        return {
+            ...w,
+            spec: { ...w.spec, sortBy: [...w.spec.sortBy, c, ...cs] },
+        };
+    },
+
+    targetPath(w: ProtoWriteRoot, path: string): ProtoWriteRoot {
+        return { ...w, spec: { ...w.spec, target: { path } } };
+    },
+
+    targetTable(w: ProtoWriteRoot, tab: string): ProtoWriteRoot {
+        return { ...w, spec: { ...w.spec, target: { table: tab } } };
+    },
+
+    createOrReplaceTempView(w: ProtoWriteRoot, name: string): ProtoWriteRoot {
+        return { ...w, tempViewName: name };
+    },
+
+    createTempView(w: ProtoWriteRoot, name: string): ProtoWriteRoot {
+        return {
+            ...w,
+            spec: { ...w.spec, registerView: { name, replace: false } },
+        };
     },
 };
 
-
-function toSaveModeV1(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists") {
+function toSaveModeV1(
+    m?: "append" | "overwrite" | "ignore" | "error" | "errorifexists"
+) {
     switch (m) {
-        case "append":        return 1; // SAVE_MODE_APPEND
-        case "overwrite":     return 2; // SAVE_MODE_OVERWRITE
+        case "append":
+            return 1; // SAVE_MODE_APPEND
+        case "overwrite":
+            return 2; // SAVE_MODE_OVERWRITE
         case "error":
-        case "errorifexists": return 3; // SAVE_MODE_ERROR_IF_EXISTS
-        case "ignore":        return 4; // SAVE_MODE_IGNORE
-        default:              return 0; // SAVE_MODE_UNSPECIFIED
+        case "errorifexists":
+            return 3; // SAVE_MODE_ERROR_IF_EXISTS
+        case "ignore":
+            return 4; // SAVE_MODE_IGNORE
+        default:
+            return 0; // SAVE_MODE_UNSPECIFIED
     }
 }
-
-/*function toModeV2(m?: "append"|"overwrite"|"ignore"|"error"|"errorifexists") {
-    switch (m) {
-        case "append":    return 4; // MODE_APPEND
-        case "overwrite": return 2; // MODE_OVERWRITE
-        // el resto no tiene mapping directo; elegí política o expone nuevos modos
-        default:          return 0; // MODE_UNSPECIFIED
-    }
-}*/
 
 export function protoWriteRootToPlan(root: ProtoWriteRoot) {
     const s = root.spec;
@@ -65,9 +109,9 @@ export function protoWriteRootToPlan(root: ProtoWriteRoot) {
                     name: s.registerView.name,
                     is_local: false,
                     replace: s.registerView.replace,
-                    input: root.child
-                }
-            }
+                    input: root.child,
+                },
+            },
         };
     }
     if (root.tempViewName) {
@@ -78,16 +122,17 @@ export function protoWriteRootToPlan(root: ProtoWriteRoot) {
                     is_local: false,
                     replace: true,
                     input: root.child,
-                }
-            }
+                },
+            },
         };
     }
+
     const write_operation: any = {
         input: root.child,
         source: s.format ?? "parquet",
-        mode: toSaveModeV1(s.mode),                // 1..4
-        options: s.options,                         // map<string,string>
-        partitioning_columns: s.partitionBy,        // string[]
+        mode: toSaveModeV1(s.mode),
+        options: s.options,
+        partitioning_columns: s.partitionBy,
     };
 
     if (s.bucketBy) {
@@ -101,10 +146,7 @@ export function protoWriteRootToPlan(root: ProtoWriteRoot) {
     if (s.target?.path) {
         write_operation.path = s.target.path;
     } else if (s.target?.table) {
-        write_operation.table = {
-            table_name: s.target.table,
-            save_method: 1, // SAVE_AS_TABLE
-        };
+        write_operation.table = { table_name: s.target.table, save_method: 1 };
     } else {
         throw new Error("V1: falta destino path o table.");
     }

@@ -1,10 +1,8 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
-import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
-import {SparkSession} from "../src/client/session";
+import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src";
+import {SparkSession} from "../src";
 import {ReadChainedDataFrame} from "../src/read/readChainedDataFrame";
-
-
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
 
@@ -258,7 +256,7 @@ describe('examples (E2E)', () => {
         const df = purchases().select("user_id", "product", "amount").limit(5);
         await df.write.createTempView("temp_view_test");
 
-        df.sql("SELECT * FROM temp_view_test").show();
+        await df.sql("SELECT * FROM temp_view_test").show();
         const rows = await df.collectRaw();
 
         expect(rows.length).toBeGreaterThan(0);

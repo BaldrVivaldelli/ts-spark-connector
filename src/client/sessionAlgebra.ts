@@ -1,6 +1,6 @@
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import {SqlCap} from "../algebra/batch-capabilities";
-import {StreamingReadCap} from "../algebra/streaming-capabilities";
+import {SqlCap} from "../algebra/read/batch-capabilities";
+import {StreamingReadCap} from "../algebra/read/streaming-capabilities";
 
 export interface SessionAlgebra {
     sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown>;
