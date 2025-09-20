@@ -1,4 +1,6 @@
 // src/write/stream-capabilities.ts
+import {StreamWriterFormat, WStream} from "./write-core";
+
 export type OutputMode = "append" | "update" | "complete";
 
 export type Trigger =
@@ -20,4 +22,10 @@ export interface CheckpointCap<W> {
 
 export interface QueryNameCap<W> {
     queryName(w: W, name: string): W;
+}
+export interface StreamLiftCap<R> {
+    writeStream(df: R): WStream;
+}
+export interface StreamFormatCap {
+    format(w: WStream, fmt: StreamWriterFormat): WStream;
 }

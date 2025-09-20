@@ -1,23 +1,30 @@
-import type { WriteCore } from "./write-core";
-import type { ModeCap, BucketSortCap, ViewsCap } from "./write-batch-capabilities";
-import type {
-    OutputModeCap,
-    TriggerCap,
-    CheckpointCap,
-    QueryNameCap,
-} from "./write-stream-capabilities";
+// src/write/programs.ts
+import type { DFAlg, ExprAlg } from "../read";
+import type { WBatch, WStream } from "./write-core";
+import type { BatchWriterAlg, StreamWriterAlg } from "./dataframe";
 
-export type DFWritingAlg<R, W> =
-    WriteCore<R, W> &
-    ModeCap<W> &
-    BucketSortCap<W> &
-    ViewsCap<W>;
+/**
+ * Programa genérico de escritura (batch o streaming).
+ * WRALG = álgebra concreta del writer (BatchWriterAlg<R> o StreamWriterAlg<R>).
+ */
+export type WProgram<
+    R, E, G,            // tipos del mundo DF
+    W,                  // nodo del writer (WBatch | WStream)
+    CDF = unknown,
+    CEX = unknown,
+    WRALG = unknown
+> = (
+    WR: WRALG,
+    DF: DFAlg<R, E, G, CDF>,
+    EX: ExprAlg<E> & CEX
+) => W;
 
+/** Programa especializado para BATCH */
+export type BatchWProgram<
+    R, E, G, CDF = unknown, CEX = unknown
+> = WProgram<R, E, G, WBatch, CDF, CEX, BatchWriterAlg<R>>;
 
-
-export type StreamWritingAlg<R, W> =
-    WriteCore<R, W> &
-    OutputModeCap<W> &
-    TriggerCap<W> &
-    CheckpointCap<W> &
-    QueryNameCap<W>;
+/** Programa especializado para STREAMING */
+export type StreamWProgram<
+    R, E, G, CDF = unknown, CEX = unknown
+> = WProgram<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>;

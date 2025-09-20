@@ -1,6 +1,8 @@
 // src/write/write-core.ts
 export type SaveMode = "append" | "overwrite" | "ignore" | "error" | "errorifexists";
-export type WriterFormat = "parquet" | "csv" | "json" | "orc" | "avro";
+export type BatchWriterFormat = "parquet" | "csv" | "json" | "orc" | "avro";
+
+export type StreamWriterFormat = "console" | "kafka" | "memory";
 
 export interface WriterTarget {
     path?: string;
@@ -8,7 +10,7 @@ export interface WriterTarget {
 }
 
 export interface WriterCommonSpec {
-    format?: WriterFormat;
+    format?: BatchWriterFormat;
     options: Record<string, string>;
     partitionBy: string[];
     target?: WriterTarget;
@@ -20,7 +22,7 @@ export interface WriteCore<R, W> {
     fromChild(child: R): W;
 
     // comunes a ambos mundos
-    format(w: W, fmt: WriterFormat): W;
+    format(w: W, fmt: BatchWriterFormat): W;
     option(w: W, k: string, v: string): W;
     options(w: W, opts: Record<string, string>): W;
     partitionBy(w: W, ...cols: string[]): W;
@@ -38,3 +40,7 @@ export interface WriterSpec extends WriterCommonSpec {
     asTempView?: boolean;
     registerView?: { name: string; replace: boolean };
 }
+export interface WBatchBrand { __wflavor?: "batch" }
+export interface WStreamBrand { __wflavor?: "stream" }
+export type WBatch = {} & WBatchBrand;
+export type WStream = {} & WStreamBrand;

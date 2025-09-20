@@ -25,6 +25,8 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<any>> 
 
     async runWrite(root: ProtoWriteRoot): Promise<any[]> {
         const plan = protoWriteRootToPlan(root);
+
+        console.log(JSON.stringify(plan, null, 2));
         return await sparkGrpcClient.executePlan({
             plan,
             session_id: this.session.getSessionId(),

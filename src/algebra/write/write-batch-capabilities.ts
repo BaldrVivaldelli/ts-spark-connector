@@ -1,7 +1,7 @@
 // src/write/write-batch-capabilities.ts
 import type { SaveMode } from "./write-core";
 
-export interface ModeCap<W> {
+export interface BatchFormatCap<W> {
     mode(w: W, m: SaveMode): W;
 }
 

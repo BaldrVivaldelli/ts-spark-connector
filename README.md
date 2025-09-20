@@ -151,10 +151,10 @@ const session = SparkSession.builder()
 | **cache() / persist() / unpersist()**                                  | ⚠️ Limited by Spark Connect |
 | **Join hints** (`broadcast`, etc.)                                     | ✅         |
 | **sample(...)**, `randomSplit(...)`                                    | ✅         |
-| UDF (scalar)                                                           | ❌         |
-| **UDAF / Vectorized UDF (Arrow)**                                      | ❌         |
-| Structured Streaming                                                   | ❌         |
-| Watermark / triggers / output modes                                    | ❌         |
+| UDF (scalar)                                                           | ⚠️ Limited by Spark Connect |
+| **UDAF / Vectorized UDF (Arrow)**                                      | ⚠️ Limited by Spark Connect |
+| Structured Streaming                                                   | ✅         |
+| Watermark / triggers / output modes                                    | ✅         |
 | Lakehouse: Delta/Iceberg/Hudi                                          | ❌         |
 | JDBC read/write                                                        | ❌         |
 | **MLlib**                                                              | ❌         |
