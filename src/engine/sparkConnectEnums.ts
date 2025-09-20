@@ -1,6 +1,8 @@
 // src/engine/sparkConnectEnums.ts
 
-import {SaveMode} from "../write/writeDataFrame";
+
+
+import {SaveMode} from "../algebra/write";
 
 export type ProtoSortDirection = "ASCENDING" | "DESCENDING";
 export type ProtoNullsOrder = "UNSPECIFIED" | "NULLS_FIRST" | "NULLS_LAST";

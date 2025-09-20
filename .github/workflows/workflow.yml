@@ -17,6 +17,23 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up -d spark
+
+      - name: Wait for Spark
+        run: |
+          for i in {1..60}; do
+            if nc -z 127.0.0.1 15002; then
+              echo "✅ Spark is up!"
+              exit 0
+            fi
+            echo "⏳ Waiting for Spark... ($i/60)"
+            sleep 2
+          done
+          echo "❌ Spark did not start in time"
+          docker compose -f docker-compose.yml logs spark
+          exit 1
+
       - run: npm ci
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
@@ -35,9 +52,19 @@ jobs:
       - name: Run E2E tests with Docker
         run: npm run test:docker
 
-      - name: Dump logs (on failure)
-        if: failure()
-        run: npm run test:docker:logs || true
+      - name: Wait for Spark
+        run: |
+          for i in {1..60}; do
+            if nc -z 127.0.0.1 15002; then
+              echo "✅ Spark is up!"
+              exit 0
+            fi
+            echo "⏳ Waiting for Spark... ($i/60)"
+            sleep 2
+          done
+          echo "❌ Spark did not start in time"
+          docker compose -f docker-compose.yml logs spark
+          exit 1
 
       - name: Clean up (always)
         if: always()

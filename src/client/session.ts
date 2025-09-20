@@ -1,11 +1,15 @@
 // src/read/session.ts
 import crypto from "crypto";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
-import {SessionAlgebra} from "./sessionAlgebra";
+import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import {DFProgram} from "../algebra";
-import {SqlCap} from "../algebra/batch-capabilities";
-import { StreamingReadCap } from "../algebra/streaming-capabilities";
+import {DFProgram, StreamingMark} from "../algebra/read";
+import { SqlCap } from "../algebra/read/batch-capabilities";
+import { StreamingReadCap } from "../algebra/read/streaming-capabilities";
+
+// ⬇️ (opcional) si querés exponer writeStream desde la sesión:
+import { DataFrameWriterTF } from "../write/dataFrameWriterTF";
+import { WStream } from "../algebra/write"; // o desde donde declares WStream
 
 /** TYPES **/
 
@@ -30,16 +34,37 @@ export class SparkSession implements SessionAlgebra {
         this.sessionId = sessionId ?? crypto.randomUUID();
     }
 
-    readStream<R, E, G>(format: string, options?: Record<string, string>) {
+    // ===== Streaming read: idéntico a tu implementación actual =====
+    readStream<R, E, G>(
+        format: string,
+        options?: Record<string, string>
+    ): ReadChainedDataFrame<R, E, G, StreamingReadCap<R> & StreamingMark<R>, unknown> {
         return ReadChainedDataFrame.readStream<R, E, G>(format, this, options);
     }
 
+    // ===== (Opcional) Atajo de streaming write desde la sesión =====
+    // Delegamos en df.writeStream() para mantener una sola fuente de verdad.
+    // Si tenés el brand StreamingMark<R>, podés tiparlo más fuerte.
+    writeStream<
+        R = unknown,
+        E = unknown,
+        G = unknown,
+        CDF = unknown,
+        CEX = unknown
+    >(
+        df: ReadChainedDataFrame<R, E, G, CDF, CEX>
+    ): DataFrameWriterTF<R, E, G, WStream, CDF, CEX, any> {
+        return (df as any).writeStream();
+    }
+
+    // ===== SQL helpers (batch) =====
     sql<R = unknown, E = unknown, G = unknown>(
         query: string
     ): ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown> {
         const prog: DFProgram<R, E, G, SqlCap<R>, unknown> = (DF) => DF.sql(query);
         return new ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown>(prog, this);
     }
+
     table<R = unknown, E = unknown, G = unknown>(
         name: string
     ): ReadChainedDataFrame<R, E, G, SqlCap<R>, unknown> {
@@ -67,7 +92,6 @@ export class SparkSession implements SessionAlgebra {
     setUserContext(context: Record<string, any>) {
         this.userContext = context;
     }
-
 }
 
 export function createSparkSession(sessionId?: string): SparkSession {
@@ -127,7 +151,6 @@ class SparkSessionBuilder {
         session.setUserContext(this.configMap);
         return session;
     }
-
 }
 
 export const spark = createSparkSession();

@@ -9,12 +9,14 @@ import {
     JoinTypeInput,
 } from "../engine/sparkConnectEnums";
 import { printArrowResults } from "../utils/arrowPrinter";
-import {DataFrameWriterTF, DefaultW} from "../write/dataFrameWriterTF";
+import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 import { toJSON, toMermaid } from "../trace/traceSerializers";
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
-import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingReadCap} from "../algebra";
-import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/batch-capabilities";
+import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, StreamingMark, StreamingReadCap} from "../algebra/read";
+import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/read/batch-capabilities";
+import {BatchWProgram, StreamWProgram, WBatch, WStream} from "../algebra/write";
+import {BatchWriterAlg, StreamWriterAlg} from "../algebra/write/dataframe";
 
 export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 export type SortKeyInput =
@@ -408,8 +410,44 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         return ProtoExec.explain(root, this.session, mode);
     }
 
-    get write(): DataFrameWriterTF<R, E, G, DefaultW, CDF, CEX> {
-        return DataFrameWriterTF.fromDF<R, E, G, DefaultW, CDF, CEX>(this);
+    // dentro de ReadChainedDataFrame<...>
+    write(
+        this: ReadChainedDataFrame<R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>
+    ): DataFrameWriterTF<
+        R, E, G,
+        WBatch,
+        Exclude<CDF, StreamingMark<R>>,
+        CEX,
+        BatchWriterAlg<R>
+    > {
+        if ((this as any).__isStreaming) {
+            throw new Error("No podés usar .write (batch) sobre un DF de streaming. Usá .writeStream().");
+        }
+        type CDFBatch = Exclude<CDF, StreamingMark<R>>;
+
+        // Programa batch: levanta el child del DF y lo “liffea” al writer batch
+        const prog: BatchWProgram<R, E, G, CDFBatch, CEX> =
+            (WR, DF, EX) => {
+                const root = this.getProgram()(DF as any, EX as any);
+                return (WR as any).fromChild(root);
+            };
+
+        // Adaptamos a WProgram genérico que usa DataFrameWriterTF
+        const wProgram = (WR: BatchWriterAlg<R>, DF: DFAlg<R, E, G, CDFBatch>, EX: ExprAlg<E> & CEX) =>
+            prog(WR, DF, EX);
+
+        return DataFrameWriterTF.fromParts<
+            R, E, G,
+            WBatch,
+            CDFBatch,
+            CEX,
+            BatchWriterAlg<R>
+        >({
+            session: this.getSession(),
+            dfProgram: this.getProgram() as unknown as DFProgram<R, E, G, CDFBatch, CEX>,
+            wProgram, // ← el adaptado
+            // WR/EXE/DF/EX opcionales: DataFrameWriterTF usará los defaults (Proto*)
+        });
     }
 
     private compileTrace(): any {
@@ -488,7 +526,7 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         session: SparkSession,
         options?: Record<string, string>
     ) {
-        type Need = StreamingReadCap<R>;
+        type Need = StreamingReadCap<R>  & StreamingMark<R>;
         const p: DFProgram<R, E, G, CDF & Need, CEX> =
             (DF: DFAlg<R, E, G, CDF & Need>) => DF.readStream(format, options);
         return new ReadChainedDataFrame<R, E, G, CDF & Need, CEX>(p, session);
@@ -499,5 +537,17 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         return this.chain<Need>((df, EX, DF) =>
             (DF as DFAlg<R, E, G, CDF & Need>).withWatermark(df, eventTimeCol.build(EX), delay)
         );
+    }
+
+    writeStream(
+        this: ReadChainedDataFrame<R, E, G, CDF & StreamingMark<R>, CEX>
+    ): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>> {
+        const prog: StreamWProgram<R, E, G, CDF & StreamingMark<R>, CEX> =
+            (WR, DF, EX) => WR.writeStream(this.getProgram()(DF as any, EX as any));
+        return DataFrameWriterTF.fromParts({
+            session: this.getSession(),
+            dfProgram: this.getProgram() as any,
+            wProgram: (WR, DF, EX) => prog(WR as any, DF, EX),
+        });
     }
 }

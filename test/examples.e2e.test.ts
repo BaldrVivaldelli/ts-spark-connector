@@ -1,10 +1,8 @@
 // test/examples.e2e.test.ts
 import {describe, it, expect, beforeAll} from 'vitest';
-import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src/engine/column";
-import {SparkSession} from "../src/client/session";
+import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src";
+import {SparkSession} from "../src";
 import {ReadChainedDataFrame} from "../src/read/readChainedDataFrame";
-
-
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
 
@@ -133,7 +131,7 @@ describe('examples (E2E)', () => {
     it('write: save resumen', async () => {
         await purchases()
             .select('user_id', 'product', 'amount')
-            .write
+            .write()                        // <-- antes: .write
             .mode('overwrite')
             .save('/data/dest/purchases_summary');
         expect(true).toBe(true);
@@ -141,15 +139,15 @@ describe('examples (E2E)', () => {
 
     it('write: parquet / csv / json / saveAsTable', async () => {
         const pu = purchases();
-        await pu.write.parquet().save('/data/dest/purchases_parquet');
-        await pu.write.csv().option('header', true).save('/data/dest/purchases_csv');
-        await pu.write.json().save('/data/dest/purchases_json');
-        await pu.write.mode('overwrite').saveAsTable('purchases_tbl');
+        await pu.write().parquet().save('/data/dest/purchases_parquet');
+        await pu.write().csv().option('header', true).save('/data/dest/purchases_csv');
+        await pu.write().json().save('/data/dest/purchases_json');
+        await pu.write().mode('overwrite').saveAsTable('purchases_tbl');
         expect(true).toBe(true);
     }, 90_000);
 
     it('write: partitionBy(year) parquet overwrite', async () => {
-        await purchases().write
+        await purchases().write()
             .partitionBy('year')
             .parquet()
             .mode('overwrite')
@@ -157,8 +155,9 @@ describe('examples (E2E)', () => {
         expect(true).toBe(true);
     }, 90_000);
 
+
     it('write: bucketBy + sortBy + parquet + saveAsTable', async () => {
-        await purchases().write
+        await purchases().write()
             .bucketBy(2, 'user_id')
             .sortBy('product')
             .parquet()
@@ -174,14 +173,14 @@ describe('examples (E2E)', () => {
             .agg({total_spent: 'sum(amount)'})
             .orderBy(col('total_spent').descNullsLast());
 
-        await topSpenders.write.parquet().mode('overwrite').save('/data/dest/top_spenders');
+        await topSpenders.write().parquet().mode('overwrite').save('/data/dest/top_spenders');
         expect(true).toBe(true);
     }, 90_000);
 
     it('write: orc + avro (option)', async () => {
         const pu = purchases();
-        await pu.write.orc().mode('overwrite').save('/data/dest/purchases_orc');
-        await pu.write.avro().option('compression', 'snappy').mode('append')
+        await pu.write().orc().mode('overwrite').save('/data/dest/purchases_orc');
+        await pu.write().avro().option('compression', 'snappy').mode('append')
             .save('/data/dest/purchases_avro');
         expect(true).toBe(true);
     }, 90_000);
@@ -256,9 +255,9 @@ describe('examples (E2E)', () => {
 
     it("should allow creating a temp view from a DataFrame", async () => {
         const df = purchases().select("user_id", "product", "amount").limit(5);
-        await df.write.createTempView("temp_view_test");
+        await df.write().createTempView("temp_view_test");
 
-        df.sql("SELECT * FROM temp_view_test").show();
+        await df.sql("SELECT * FROM temp_view_test").show();
         const rows = await df.collectRaw();
 
         expect(rows.length).toBeGreaterThan(0);
@@ -266,14 +265,14 @@ describe('examples (E2E)', () => {
 
     it("should replace an existing temp view with createOrReplaceTempView", async () => {
         const df1 = purchases().select("user_id", "product", "amount").limit(5);
-        await df1.write.createOrReplaceTempView("temp_view_test");
+        await df1.write().createOrReplaceTempView("temp_view_test");
 
         const rows1 = await df1.sql("SELECT * FROM temp_view_test").collectRaw();
         expect(rows1.length).toBeGreaterThan(1);
 
         // Segundo DataFrame con solo 2 filas
         const df2 = purchases().select("user_id", "product", "amount").limit(2);
-        await df2.write.createOrReplaceTempView("temp_view_test_new"); // debería reemplazar
+        await df2.write().createOrReplaceTempView("temp_view_test_new"); // debería reemplazar
 
         await df2.sql("SELECT * FROM temp_view_test_new").show();
     }, 90_000);
@@ -424,5 +423,31 @@ describe('examples (E2E)', () => {
         expect(trace).toMatch(/readStream/i);
         expect(trace).toMatch(/withWatermark/i);
     });
+
+    it('streaming: writeStream serializa sink + trigger + outputMode en el AST', () => {
+        const s = ReadChainedDataFrame
+            .readStream<any, any, any>('rate', session, { rowsPerSecond: '1' })
+            .withWatermark(col('timestamp'), '10 minutes')
+            .select('value');
+
+        const w = s.writeStream()
+            .format('console')
+            .outputMode('append')
+            .trigger({ processingTime: '1 second' })
+            .checkpoint('/chk/rate_stream')
+            .queryName('rate_q');
+
+        const trace = w.toClientASTJSON();
+
+        expect(trace).toMatch(/"kind"\s*:\s*"streamingWrite"/i);
+
+        expect(trace).toMatch(/"format"\s*:\s*"console"/i);
+        expect(trace).toMatch(/"outputMode"\s*:\s*"append"/i);
+        expect(trace).toMatch(/"trigger"/i);
+        expect(trace).toMatch(/"checkpointLocation"/i);
+        expect(trace).toMatch(/"queryName"\s*:\s*"rate_q"/i);
+
+    });
+
 
 });

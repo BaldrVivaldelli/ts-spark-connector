@@ -1,4 +1,4 @@
-import { NullsOrder, SortDirection, WindowSpec } from "../types";
+import { NullsOrder, SortDirection, WindowSpec } from "../../types";
 
 
 export interface ExprAlg<E> {
