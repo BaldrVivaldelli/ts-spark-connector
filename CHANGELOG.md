@@ -1,3 +1,13 @@
+## [1.10.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.9.0...v1.10.0) (2025-09-20)
+
+### Features
+
+* refactor write streaming ([03a0e86](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/03a0e86d99adf3361ab1c4138e9c98e0263a5cd2))
+
+### Bug Fixes
+
+* fix workflow ([3a65441](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/3a65441d4929d2aecbb67867b3ee98585912f48a))
+
 ## [1.9.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.8.0...v1.9.0) (2025-09-15)
 
 ### Features
