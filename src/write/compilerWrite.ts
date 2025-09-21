@@ -5,10 +5,9 @@ import type {
     StreamWriterFormat,
     WriterSpec,
     WBatchBrand,
-    WStreamBrand,
+    WStreamBrand, Trigger,
 } from "../algebra/write";
 import type { BatchWriterAlg, StreamWriterAlg } from "../algebra/write/dataframe";
-import type { Trigger } from "../algebra/write/write-stream-capabilities"; // ajustá el path si difiere
 
 type ProtoRel = any;
 
@@ -16,6 +15,10 @@ export interface ProtoWriteRoot {
     child: ProtoRel;
     spec: WriterSpec;
     tempViewName?: string;
+
+    start?: boolean;
+    awaitTermination?: boolean;
+    createStreamingView?: string;
 }
 
 function asBatch(w: ProtoWriteRoot): WBatchBrand {
@@ -129,6 +132,23 @@ export const ProtoWritingAlg = {
         const root = w as unknown as ProtoWriteRoot;
         return asStream({ ...root, spec: { ...root.spec, queryName: name } as WriterSpec });
     },
+    start(w: any): any {
+        const root = w as ProtoWriteRoot;
+        const next: ProtoWriteRoot = { ...root, start: true };
+        return asStream(next);
+    },
+
+    awaitTermination(w: any): any {
+        const root = w as ProtoWriteRoot;
+        const next: ProtoWriteRoot = { ...root, awaitTermination: true };
+        return asStream(next);
+    },
+    fromTempView(w: ProtoWriteRoot, name: string): ProtoWriteRoot {
+        return {
+            ...w,
+            createStreamingView: name
+        };
+    }
 } as unknown as BatchWriterAlg<ProtoRel> & StreamWriterAlg<ProtoRel>; // 👈 cast final, sin sobrecargas
 
 
@@ -194,7 +214,7 @@ function toStreamTriggerV1(t: any) {
 
 
 export function protoWriteRootToPlan(rootAny: any) {
-    const root = rootAny as { child: any, spec: any, tempViewName?: string };
+    const root = rootAny as ProtoWriteRoot;
     const s = root.spec ?? {};
 
     // vistas (válido para batch y stream)
@@ -225,6 +245,55 @@ export function protoWriteRootToPlan(rootAny: any) {
 
     // --- STREAMING ---
     if (isStreamingSpec(s)) {
+        if (root.createStreamingView) {
+            // 1️⃣ Primer comando: crear la vista temporal
+            const createViewCmd = {
+                command: {
+                    create_dataframe_view: {
+                        name: root.createStreamingView,
+                        input: root.child,
+                        replace: true,
+                    }
+                }
+            };
+
+            // 2️⃣ Segundo comando: escribir usando unresolved_relation
+            const write_stream_operation: any = {
+                input: {
+                    unresolved_relation: {
+                        parts: [root.createStreamingView],
+                    }
+                },
+                source: s.format ?? "console",
+                options: s.options ?? {},
+            };
+
+            const om = toOutputModeV1(s.outputMode);
+            if (om !== 0) write_stream_operation.output_mode = om;
+
+            const trig = toStreamTriggerV1(s.trigger);
+            if (trig) write_stream_operation.trigger = trig;
+
+            if (s.queryName) write_stream_operation.query_name = s.queryName;
+            if (s.target?.path) {
+                write_stream_operation.path = s.target.path;
+            }
+            if (s.target?.table) {
+                write_stream_operation.table = {
+                    table_name: s.target.table,
+                    save_method: 1,
+                };
+            }
+            if (root.start) write_stream_operation.start = true;
+            if (root.awaitTermination) write_stream_operation.await_termination = true;
+
+            const writeCmd = { command: { write_stream_operation } };
+
+            // 🔁 Devolvés una lista de comandos
+            return [createViewCmd, writeCmd];
+        }
+
+        // 🚨 Caso sin createStreamingView: se genera normalmente
         const write_stream_operation: any = {
             input: root.child,
             source: s.format ?? "console",
@@ -238,13 +307,22 @@ export function protoWriteRootToPlan(rootAny: any) {
         if (trig) write_stream_operation.trigger = trig;
 
         if (s.queryName) write_stream_operation.query_name = s.queryName;
-
-        // destinos opcionales: path/table (para sinks file/table)
-        if (s.target?.path)  write_stream_operation.path  = s.target.path;
-        if (s.target?.table) write_stream_operation.table = { table_name: s.target.table, save_method: 1 };
+        if (s.target?.path) {
+            write_stream_operation.path = s.target.path;
+        }
+        if (s.target?.table) {
+            write_stream_operation.table = {
+                table_name: s.target.table,
+                save_method: 1,
+            };
+        }
+        if (root.start) write_stream_operation.start = true;
+        if (root.awaitTermination) write_stream_operation.await_termination = true;
 
         return { command: { write_stream_operation } };
     }
+
+
 
     // --- BATCH ---
     const write_operation: any = {

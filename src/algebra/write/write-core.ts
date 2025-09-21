@@ -39,6 +39,9 @@ export interface WriterSpec extends WriterCommonSpec {
     viewName?: string;
     asTempView?: boolean;
     registerView?: { name: string; replace: boolean };
+    outputMode?: "append" | "complete" | "update";
+    trigger?: { processingTime?: string } | { once?: boolean } | { availableNow?: boolean };
+    queryName?: string;
 }
 export interface WBatchBrand { __wflavor?: "batch" }
 export interface WStreamBrand { __wflavor?: "stream" }

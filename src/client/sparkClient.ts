@@ -2,6 +2,11 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "node:path";
 
+export interface StreamingQueryHandle {
+    awaitTermination(): Promise<void>;
+    stop(): Promise<any>;
+    name: string;
+}
 const packageDefinition = protoLoader.loadSync(
     [path.resolve(__dirname, "../../proto/spark/connect/base.proto")],
     {
@@ -63,6 +68,46 @@ export const sparkGrpcClient = {
                 }
             });
         });
+    },
+    async executePlanStreaming(request: any): Promise<StreamingQueryHandle> {
+        const call = getClient().executePlan(request);
+
+        let streamStarted = false;
+        let queryName = "";
+        let queryId = "";
+
+        call.on("data", (response: any) => {
+            if (response.writeStreamOperationStartResult) {
+                streamStarted = true;
+                queryName = response.writeStreamOperationStartResult.queryName;
+                queryId = response.writeStreamOperationStartResult.id;
+                console.log("Stream started:", response.writeStreamOperationStartResult);
+            } else {
+                console.warn("Unexpected response:", response);
+            }
+        });
+
+        call.on("error", (err: any) => {
+            console.error("Stream error:", err);
+        });
+
+        call.on("end", () => {
+            console.log("Stream ended.");
+        });
+
+        return {
+            awaitTermination: () =>
+                new Promise<void>((resolve, reject) => {
+                    call.on("end", resolve);
+                    call.on("error", reject);
+                }),
+            stop: () => {
+                // Implementación opcional si manejás cancelación vía Session
+                return getClient().cancelQuery(queryId);
+
+            },
+            name: queryName,
+        };
     }
-    ,
 };
+
