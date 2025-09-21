@@ -20,6 +20,8 @@ import { ProtoWritingAlg } from "./compilerWrite";
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
 import { TraceWriterAlg } from "../trace/traceWriterAlg";
 import {BatchWriterAlg, StreamWriterAlg} from "../algebra/write/dataframe";
+import {DFWritingExec} from "./writeDataFrame";
+import {StreamingQueryHandle} from "../client/sparkClient";
 
 // ==================== tipos base ====================
 type DefaultR = any;
@@ -42,11 +44,6 @@ function sessionOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): SparkSe
 }
 function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgram<R, E, G, CDF, CEX> {
     return (df as any).getProgram?.() ?? (df as any)._getProgram();
-}
-
-// ==================== ejecución ====================
-export interface DFWritingExec<W> {
-    run(root: W, session: SparkSession): Promise<void>;
 }
 
 // Backend requerido para ejecutar el write (parametrizado por álgebra WRALG)
@@ -245,6 +242,24 @@ export class DataFrameWriterTF<
     }
     avro(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
         return this.format("avro");
+    }
+
+    async start(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>): Promise<StreamingQueryHandle> {
+        const { DF, EX, WR, EXE } = this.defaults();
+        const wnode = this.wProgram(WR as WRALG, DF, EX);
+        const root = (WR as any).start(wnode); // opcional, podés omitir esto y no setear ningún flag
+        return EXE.runStream(root, this.session);
+    }
+
+    fromTempView(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>, name: string) {
+        return this.chain(p => (WR: WRALG, DF, EX) =>
+            (WR as any).fromTempView(p(WR, DF, EX), name)
+        );
+    }
+    awaitTermination(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>) {
+        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
+            (WR: WRALG, DF, EX) => (WR as any).awaitTermination(this.wProgram(WR, DF, EX));
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
 
     // ==================== backends por defecto ====================

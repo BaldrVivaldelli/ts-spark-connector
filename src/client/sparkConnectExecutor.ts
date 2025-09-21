@@ -1,6 +1,6 @@
 import {SparkSession} from "./session";
 import {LogicalPlan} from "../engine/logicalPlan";
-import {sparkGrpcClient} from "./sparkClient";
+import {sparkGrpcClient, StreamingQueryHandle} from "./sparkClient";
 import {ProtoWriteRoot, protoWriteRootToPlan} from "../write/compilerWrite";
 
 
@@ -19,6 +19,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<any>> 
         return new SparkConnectExecutor(session);
     }
     execute(plan: any): Promise<any> {
+        console.log("Enviando comando GRPC:", JSON.stringify({ plan }, null, 2));
         const request = this.buildBaseRequest(plan, this.session);
         return sparkGrpcClient.executePlan(request);
     }
@@ -33,6 +34,25 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<any>> 
             user_context: this.session.getUserContext(),
         })
     }
+    async runStream(root: ProtoWriteRoot): Promise<StreamingQueryHandle> {
+        const plan = protoWriteRootToPlan(root);
+        const orderedPlan = Array.isArray(plan) ? this.reorderStreamingCommands(plan) : [plan];
+
+        const session_id = this.session.getSessionId();
+        const user_context = this.session.getUserContext();
+
+        // Ejecutar todos menos el último de forma sincrónica
+        const nonStreamingCommands = orderedPlan.slice(0, -1);
+        for (const cmd of nonStreamingCommands) {
+            console.log(JSON.stringify(cmd, null, 2));
+            await sparkGrpcClient.executePlan({ plan: cmd, session_id, user_context });
+        }
+
+        // Ejecutar el último como plan de streaming
+        const finalPlan = orderedPlan[orderedPlan.length - 1];
+        console.log(JSON.stringify(finalPlan, null, 2));
+        return await sparkGrpcClient.executePlanStreaming({ plan: finalPlan, session_id, user_context });
+    }
 
     private buildBaseRequest(root: any, session: SparkSession) {
         return {
@@ -42,4 +62,10 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<any>> 
         };
     }
 
+    private reorderStreamingCommands(plan: any[]): any[] {
+        return [
+            ...plan.filter(p => p.command?.create_dataframe_view),      // primero: definiciones de vistas
+            ...plan.filter(p => p.command?.write_stream_operation),     // último: escrituras de stream
+        ];
+    }
 }

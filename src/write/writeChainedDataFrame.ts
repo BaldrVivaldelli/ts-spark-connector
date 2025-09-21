@@ -16,6 +16,7 @@ import {ProtoWritingAlg} from "./compilerWrite";
 import {TraceDFAlg, TraceExprAlg} from "../trace/trace";
 import {TraceWriterAlg} from "../trace/traceWriterAlg";
 import {BatchWriterAlg, StreamWriterAlg} from "../algebra/write/dataframe";
+import {DFWritingExec} from "./writeDataFrame";
 
 
 // ==================== tipos base ====================
@@ -41,10 +42,6 @@ function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgr
     return (df as any).getProgram?.() ?? (df as any)._getProgram();
 }
 
-// Backend requerido para ejecutar el write (parametrizado por álgebra WRALG)
-export interface DFWritingExec<W> {
-    run(root: W, session: SparkSession): Promise<void>;
-}
 type Impl<R, E, G, W, CDF, CEX, WRALG> = {
     DF: DFAlg<R, E, G, CDF>;
     EX: ExprAlg<E> & CEX;

@@ -1,5 +1,5 @@
 // Main entry point - export public API
-export { SparkSession } from "./client/session";
+export {SparkSession} from "./client/session";
 export {
     col, isNull, isNotNull, when, lit,
     explode, posexplode, split, to_json, from_json, struct
@@ -30,7 +30,6 @@ import {SparkSession} from "./client/session";
         .option("delimiter", "\t")
         .option("header", "true")
         .csv("/data/purchases.tsv");
-
 
 
     /*
@@ -194,35 +193,30 @@ import {SparkSession} from "./client/session";
             .limit(5)
             .show();
         session.sql("SELECT * FROM purchases_tbl").show();
-
-        const clicks =
-            session.readStream<any, any, any>("rate", { rowsPerSecond: "2" })
-                .select("value", "timestamp");
-
-        const clickPurchases =
-            clicks
-                .join(
-                    purchases.select("user_id", "product", "amount"),
-                    col("value").eq(col("user_id")), // ajustá si tu columna stream != user_id
-                    "LEFT"
-                )
-                .groupBy("value")
-                .agg({
-                    last_seen: "max(timestamp)",
-                    spent: "sum(amount)"
-                });
-                    const clicks =
-        session.readStream<any, any, any>("rate", { rowsPerSecond: "2" })
+    */
+    const clicks =
+        session.readStream<any, any, any>("rate", {rowsPerSecond: "2"})
             .select("value", "timestamp");
 
-    await clicks.writeStream()
+    const clickPurchases =
+        clicks
+            .join(
+                purchases.select("user_id", "product", "amount"),
+                col("value").eq(col("user_id")), // ajustá si tu columna stream != user_id
+                "LEFT"
+            )
+            .groupBy("value")
+            .agg({
+                last_seen: "max(timestamp)",
+                spent: "sum(amount)"
+            });
+
+    await clickPurchases.writeStream()
+        .fromTempView("rate_temp_view_uno")
         .format("console")
-        .outputMode("append")
-        .trigger({ processingTime: "2 seconds" })
-        .option("checkpointLocation", "/chk/test")
-        .queryName("test_console")
-        .save();
-    */
+        .outputMode("complete")
+        .start()
+
 
 
 })();
