@@ -193,7 +193,7 @@ import {SparkSession} from "./client/session";
             .limit(5)
             .show();
         session.sql("SELECT * FROM purchases_tbl").show();
-    */
+
     const clicks =
         session.readStream<any, any, any>("rate", {rowsPerSecond: "2"})
             .select("value", "timestamp");
@@ -216,7 +216,7 @@ import {SparkSession} from "./client/session";
         .format("console")
         .outputMode("complete")
         .start()
-
+*/
 
 
 })();
