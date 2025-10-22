@@ -1,36 +1,43 @@
 name: Release
+
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [ main ]
+    types: [ completed ]
 
 permissions:
-  contents: write       # push tags/commits
-  issues: write         # abrir issue si falla
-  pull-requests: write  # comentar en PRs
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # necesario para calcular versiones
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
-          registry-url: 'https://registry.npmjs.org'  # para npm publish
+          registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
       - run: npm run build --if-present
 
       - name: Semantic Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # lo provee GitHub
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}         # Automation token de npm
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}   # algunos setups lo requieren
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
