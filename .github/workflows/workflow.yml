@@ -17,6 +17,12 @@ jobs:
           node-version: 20
           cache: npm
 
+      # 👇 Asegura netcat y crea la carpeta de salida montada como /data/dest
+      - name: Prepare runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          mkdir -p example_data/dest
+
       - name: Boot Spark
         run: docker compose -f docker-compose.yml up -d spark
 
@@ -34,10 +40,17 @@ jobs:
           docker compose -f docker-compose.yml logs spark
           exit 1
 
+      # Si tu cliente Node se conecta al Spark del host, estas vars ayudan
       - run: npm ci
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
       - run: npm test
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
 
   e2e:
     needs: unit
@@ -46,11 +59,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create ivy2 directory
-        run: mkdir -p ivy2
+      # 👇 Igual que arriba: crear carpeta de salida y asegurar nc
+      - name: Prepare runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          mkdir -p example_data/dest
 
-      - name: Run E2E tests with Docker
-        run: npm run test:docker
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up -d spark
 
       - name: Wait for Spark
         run: |
@@ -66,6 +82,27 @@ jobs:
           docker compose -f docker-compose.yml logs spark
           exit 1
 
+      # ❌ Ya no hace falta ivy2 si horneaste el JAR de Avro en la imagen
+      # - name: Create ivy2 directory
+      #   run: mkdir -p ivy2
+
+      # ⬇️ Si tus E2E corren en el HOST (Node en runner):
+      - name: Run E2E tests (host)
+        run: npm run test:e2e
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
+
+      # ⬇️ O, si tus E2E corren dentro de contenedores (test:docker):
+      #    Asegúrate de que ese contenedor use spark:15002 como host.
+      # - name: Run E2E tests with Docker
+      #   run: npm run test:docker
+      #   env:
+      #     SPARK_CONNECT_HOST: spark
+      #     SPARK_CONNECT_PORT: 15002
+
       - name: Clean up (always)
         if: always()
-        run: npm run test:docker:cleanup || true
+        run: |
+          docker compose -f docker-compose.yml logs spark || true
+          docker compose -f docker-compose.yml down -v || true
