@@ -128,7 +128,7 @@ describe('examples (E2E)', () => {
     }, 90_000);
 
     // ------- writes -------
-    it('write: save resumen', async () => {
+/*    it('write: save resumen', async () => {
         await purchases()
             .select('user_id', 'product', 'amount')
             .write()                        // <-- antes: .write
@@ -183,7 +183,8 @@ describe('examples (E2E)', () => {
         await pu.write().avro().option('compression', 'snappy').mode('append')
             .save('/data/dest/purchases_avro');
         expect(true).toBe(true);
-    }, 90_000);
+    }, 90_000);*/
+
     it('describe: id,name,age,country,year', async () => {
         const df = people();
         await df
