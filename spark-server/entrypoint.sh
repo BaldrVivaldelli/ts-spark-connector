@@ -1,13 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Por si alguna imagen/base no persiste los dirs:
-mkdir -p "$HOME/.ivy2" "$HOME/.m2" "$SPARK_LOCAL_DIRS"
+export SPARK_HOME="${SPARK_HOME:-/opt/spark}"
+export PATH="$SPARK_HOME/bin:$SPARK_HOME/sbin:$PATH"
 
-/opt/bitnami/spark/bin/spark-submit \
-  --class org.apache.spark.sql.connect.service.SparkConnectServer \
-  --conf spark.sql.connect.enable=true \
-  --conf spark.sql.connect.grpc.binding=0.0.0.0:15002 \
-    /opt/bitnami/spark/jars/spark-connect_2.12-4.0.0.jar \
-  --conf spark.ui.port=4040 \
-    --conf spark.jars.ivy=$HOME/.ivy2
+mkdir -p "${HOME:-/tmp}/.m2" "${SPARK_LOCAL_DIRS:-$SPARK_HOME/tmp}" "$SPARK_HOME/logs"
+
+start_connect() {
+  local FLAGS=(--host 0.0.0.0 --port "${SPARK_CONNECT_PORT:-15002}")
+
+  if [[ -x "$SPARK_HOME/bin/spark-connect-server" ]]; then
+    # binario directo en 4.x
+    exec "$SPARK_HOME/bin/spark-connect-server" "${FLAGS[@]}"
+  elif [[ -x "$SPARK_HOME/sbin/start-connect-server.sh" ]]; then
+    # script sbin (por compatibilidad)
+    "$SPARK_HOME/sbin/start-connect-server.sh" "${FLAGS[@]}"
+    exec tail -F "$SPARK_HOME/logs/"*.out
+  else
+    echo "No encuentro Spark Connect Server en $SPARK_HOME."
+    ls -la "$SPARK_HOME/bin" "$SPARK_HOME/sbin" || true
+    exit 127
+  fi
+}
+
+case "${SPARK_ROLE:-connect}" in
+  connect) start_connect ;;
+  master)  exec start-master.sh -p "${SPARK_MASTER_PORT:-7077}" ;;
+  worker)  exec start-worker.sh "${SPARK_MASTER_URL:-spark://localhost:7077}" ;;
+  submit)  exec spark-submit ${SPARK_SUBMIT_ARGS:-} "${SPARK_APP:-$SPARK_HOME/examples/src/main/python/pi.py}" ;;
+  *)       exec "$@" ;;
+esac
