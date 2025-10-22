@@ -3,17 +3,19 @@ services:
     build:
       context: .
       dockerfile: spark-server/Dockerfile
-    ports:
-      - "15002:15002"   # Spark Connect gRPC port
-      - "4040:4040"     # Spark UI (opcional)
-    volumes:
-#      - ./ivy2:/home/spark/.ivy2
-      - ./example_data:/data
-      - ./spark-server/certs:/opt/certs
     environment:
+      - SPARK_ROLE=connect
+      - SPARK_CONNECT_PORT=15002
       - SPARK_NO_DAEMONIZE=true
+    ports:
+      - "15002:15002"   # Spark Connect gRPC
+      - "4040:4040"     # Spark UI
+    volumes:
+      - ./example_data:/data:ro          # datos de entrada
+      - ./example_data/dest:/data/dest   # salida (Parquet/CSV/JSON/ORC)
+      - ./spark-server/certs:/opt/certs:ro
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "15002"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 15002 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 30
