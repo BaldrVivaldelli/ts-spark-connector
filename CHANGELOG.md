@@ -1,3 +1,21 @@
+## [1.11.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.10.0...v1.11.0) (2025-09-21)
+
+### Features
+
+* add fromTempView syntax ([d2f5500](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/d2f55008e400b398e1b8e72abc0b7c1ff4dd536b))
+* add fromTempView syntax ([2eb9362](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/2eb9362b87d198d05fad267e01c15f18318fba78))
+* add fromTempView syntax ([fa54796](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/fa54796012a2a73fdb3ee5e4fd3aea5bc2d4f082))
+
+## [1.10.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.9.0...v1.10.0) (2025-09-20)
+
+### Features
+
+* refactor write streaming ([03a0e86](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/03a0e86d99adf3361ab1c4138e9c98e0263a5cd2))
+
+### Bug Fixes
+
+* fix workflow ([3a65441](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/3a65441d4929d2aecbb67867b3ee98585912f48a))
+
 ## [1.9.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.8.0...v1.9.0) (2025-09-15)
 
 ### Features
