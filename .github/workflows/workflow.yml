@@ -56,9 +56,13 @@ jobs:
   e2e:
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
 
       - name: Prepare runner
         run: |
@@ -71,43 +75,17 @@ jobs:
       - name: Wait for Spark
         run: |
           for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then
-              echo "✅ Spark is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for Spark... ($i/60)"
+            if nc -z 127.0.0.1 15002; then exit 0; fi
             sleep 2
           done
-          echo "❌ Spark did not start in time"
           docker compose -f docker-compose.yml logs spark
           exit 1
 
-      # If your E2E tests run on the host (Node in runner), use 127.0.0.1
+      - name: Install deps
+        run: npm ci
+
       - name: Run E2E tests (host)
         run: npm run test:e2e
         env:
           SPARK_CONNECT_HOST: 127.0.0.1
           SPARK_CONNECT_PORT: 15002
-
-      # If you instead run E2E tests inside containers (test:docker),
-      # ensure your test container uses SPARK_CONNECT_HOST=spark.
-      # - name: Run E2E tests with Docker
-      #   run: npm run test:docker
-      #   env:
-      #     SPARK_CONNECT_HOST: spark
-      #     SPARK_CONNECT_PORT: 15002
-
-      - name: Debug mount (only if failing)
-        if: failure()
-        run: |
-          docker compose -f docker-compose.yml exec -T spark bash -lc '
-            whoami; id;
-            ls -ld /data /data/dest || true;
-            touch /data/dest/_probe && echo "✅ write OK" || echo "❌ write FAIL"
-          ' || true
-
-      - name: Clean up (always)
-        if: always()
-        run: |
-          docker compose -f docker-compose.yml logs spark || true
-          docker compose -f docker-compose.yml down -v || true
