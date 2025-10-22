@@ -12,10 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
+
+      # Ensure netcat is present and create the output dir that is bind-mounted as /data/dest
+      - name: Prepare runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          mkdir -p example_data/dest
 
       - name: Boot Spark
         run: docker compose -f docker-compose.yml up -d spark
@@ -35,37 +41,51 @@ jobs:
           exit 1
 
       - run: npm ci
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
+
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
+
       - run: npm test
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
 
   e2e:
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
-      - name: Create ivy2 directory
-        run: mkdir -p ivy2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
 
-      - name: Run E2E tests with Docker
-        run: npm run test:docker
+      - name: Prepare runner
+        run: |
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          mkdir -p example_data/dest
+
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up -d spark
 
       - name: Wait for Spark
         run: |
           for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then
-              echo "✅ Spark is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for Spark... ($i/60)"
+            if nc -z 127.0.0.1 15002; then exit 0; fi
             sleep 2
           done
-          echo "❌ Spark did not start in time"
           docker compose -f docker-compose.yml logs spark
           exit 1
 
-      - name: Clean up (always)
-        if: always()
-        run: npm run test:docker:cleanup || true
+      - name: Install deps
+        run: npm ci
+
+      - name: Run E2E tests (host)
+        run: npm run test:e2e
+        env:
+          SPARK_CONNECT_HOST: 127.0.0.1
+          SPARK_CONNECT_PORT: 15002
