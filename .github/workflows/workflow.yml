@@ -17,7 +17,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      # 👇 Asegura netcat y crea la carpeta de salida montada como /data/dest
+      # Ensure netcat is present and create the output dir that is bind-mounted as /data/dest
       - name: Prepare runner
         run: |
           sudo apt-get update && sudo apt-get install -y netcat-openbsd
@@ -40,13 +40,14 @@ jobs:
           docker compose -f docker-compose.yml logs spark
           exit 1
 
-      # Si tu cliente Node se conecta al Spark del host, estas vars ayudan
       - run: npm ci
         env:
           SPARK_CONNECT_HOST: 127.0.0.1
           SPARK_CONNECT_PORT: 15002
+
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
+
       - run: npm test
         env:
           SPARK_CONNECT_HOST: 127.0.0.1
@@ -59,7 +60,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # 👇 Igual que arriba: crear carpeta de salida y asegurar nc
       - name: Prepare runner
         run: |
           sudo apt-get update && sudo apt-get install -y netcat-openbsd
@@ -82,24 +82,29 @@ jobs:
           docker compose -f docker-compose.yml logs spark
           exit 1
 
-      # ❌ Ya no hace falta ivy2 si horneaste el JAR de Avro en la imagen
-      # - name: Create ivy2 directory
-      #   run: mkdir -p ivy2
-
-      # ⬇️ Si tus E2E corren en el HOST (Node en runner):
+      # If your E2E tests run on the host (Node in runner), use 127.0.0.1
       - name: Run E2E tests (host)
         run: npm run test:e2e
         env:
           SPARK_CONNECT_HOST: 127.0.0.1
           SPARK_CONNECT_PORT: 15002
 
-      # ⬇️ O, si tus E2E corren dentro de contenedores (test:docker):
-      #    Asegúrate de que ese contenedor use spark:15002 como host.
+      # If you instead run E2E tests inside containers (test:docker),
+      # ensure your test container uses SPARK_CONNECT_HOST=spark.
       # - name: Run E2E tests with Docker
       #   run: npm run test:docker
       #   env:
       #     SPARK_CONNECT_HOST: spark
       #     SPARK_CONNECT_PORT: 15002
+
+      - name: Debug mount (only if failing)
+        if: failure()
+        run: |
+          docker compose -f docker-compose.yml exec -T spark bash -lc '
+            whoami; id;
+            ls -ld /data /data/dest || true;
+            touch /data/dest/_probe && echo "✅ write OK" || echo "❌ write FAIL"
+          ' || true
 
       - name: Clean up (always)
         if: always()
