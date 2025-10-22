@@ -1,3 +1,17 @@
+## [1.11.1](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.11.0...v1.11.1) (2025-10-22)
+
+### Bug Fixes
+
+* add spark-default.conf ([4531d2f](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/4531d2f12062383116d1e8d0523bce8e7ce4ef3e))
+* fix ci ([fe58de3](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/fe58de343762ff010d721183ea8d1552821d917e))
+* fix docker and entrypoint ([aa84aa6](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/aa84aa61de7ee696838299526eaa995d6984fc2d))
+* fix workflows ([dfc3e39](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/dfc3e3996c0bf8ab1b77551cbbde8e6d050e276f))
+* test ([d44aba8](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/d44aba8511a956aed7dd8f0438dc69b1e6658ec8))
+* test remove save test ([a219e61](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/a219e61e6dad7ced7819b686e8d0dbae43e9ada5))
+* update docker compose ([ba694f5](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/ba694f518af409a0ab5e48ead5482531f188dbb8))
+* update spark-default.conf ([ed14443](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/ed144430db0b5aba507d0112816de902020a7d7b))
+* use official docker image ([2d45241](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/2d452411c6e8cbc712a90ccb2e7f59e68b5932ac))
+
 ## [1.11.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.10.0...v1.11.0) (2025-09-21)
 
 ### Features
