@@ -11,27 +11,26 @@ import {col, from_json, isNotNull, isNull, lit, posexplode, split, struct, to_js
 import {SparkSession} from "./client/session";
 
 (async () => {
-    /*
-const session = SparkSession.builder()
-    .withAuth({type: "token", token: "my-token"}) // opcional
-    .enableTLS({
-        keyStorePath: "./spark-server/certs/keystore.p12",
-        keyStorePassword: "password",
-        trustStorePath: "./spark-server/certs/cert.crt",
-        trustStorePassword: "password"
-    })
-    .getOrCreate();
 
-const people = session.read
-    .option("delimiter", "\t")
-    .option("header", "true")
-    .csv("/data/people.tsv");
+    const session = SparkSession.builder()
+        .withAuth({type: "token", token: "my-token"}) // opcional
+        .enableTLS({
+            keyStorePath: "./spark-server/certs/keystore.p12",
+            keyStorePassword: "password",
+            trustStorePath: "./spark-server/certs/cert.crt",
+            trustStorePassword: "password"
+        })
+        .getOrCreate();
 
-const purchases = session.read
-    .option("delimiter", "\t")
-    .option("header", "true")
-    .csv("/data/purchases.tsv");
+    const people = session.read
+        .option("delimiter", "\t")
+        .option("header", "true")
+        .csv("/data/people.tsv");
 
+    const purchases = session.read
+        .option("delimiter", "\t")
+        .option("header", "true")
+        .csv("/data/purchases.tsv");
 
 
     await purchases
@@ -131,42 +130,42 @@ const purchases = session.read
 
     await purchases
         .select("user_id", "product", "amount")
-        .write
+        .write()
         .mode("overwrite")
         .save("/data/dest/purchases_summary");
 
-    await purchases.write.parquet().save("/data/dest/purchases_parquet");
-    await purchases.write
+    await purchases.write().parquet().save("/data/dest/purchases_parquet");
+    await purchases.write()
         .csv()
         .option("header", true)
         .save("/data/dest/purchases_csv");
-    await purchases.write.json().save("/data/dest/purchases_json");
-    await purchases.write.mode("overwrite").saveAsTable("purchases_tbl");
-    await purchases.write
+    await purchases.write().json().save("/data/dest/purchases_json");
+    await purchases.write().mode("overwrite").saveAsTable("purchases_tbl_vTest");
+    await purchases.write()
         .partitionBy("year")
         .parquet()
         .mode("overwrite")
         .save("/data/dest/purchases_by_year");
-    await purchases.write
+    await purchases.write()
         .bucketBy(2, "user_id")
         .sortBy("product")
         .parquet()
         .mode("overwrite")
-        .saveAsTable("purchases_bucketed");
+        .saveAsTable("purchases_bucketed_vTest");
     const topSpenders = purchases
         .groupBy("user_id")
         .agg({total_spent: "sum(amount)"})
         .orderBy(col("total_spent").descNullsLast());
 
-    await topSpenders.write
+    await topSpenders.write()
         .parquet()
         .mode("overwrite")
         .save("/data/dest/top_spenders");
-    await purchases.write
+    await purchases.write()
         .orc()
         .mode("overwrite")
         .save("/data/dest/purchases_orc");
-    await purchases.write
+    await purchases.write()
         .avro()
         .option("compression", "snappy")  // ejemplo de opción específica
         .mode("append")
@@ -193,31 +192,31 @@ const purchases = session.read
         .select("tags", "product")
         .limit(5)
         .show();
-    session.sql("SELECT * FROM purchases_tbl").show();
+    session.sql("SELECT * FROM purchases_tbl_vTest").show();
 
-const clicks =
-    session.readStream<any, any, any>("rate", {rowsPerSecond: "2"})
-        .select("value", "timestamp");
+    /*
+        const clicks =
+            session.readStream<any, any, any>("rate", {rowsPerSecond: "2"})
+                .select("value", "timestamp");
+    const clickPurchases =
+        clicks
+            .join(
+                purchases.select("user_id", "product", "amount"),
+                col("value").eq(col("user_id")), // ajustá si tu columna stream != user_id
+                "LEFT"
+            )
+            .groupBy("value")
+            .agg({
+                last_seen: "max(timestamp)",
+                spent: "sum(amount)"
+            });
 
-const clickPurchases =
-    clicks
-        .join(
-            purchases.select("user_id", "product", "amount"),
-            col("value").eq(col("user_id")), // ajustá si tu columna stream != user_id
-            "LEFT"
-        )
-        .groupBy("value")
-        .agg({
-            last_seen: "max(timestamp)",
-            spent: "sum(amount)"
-        });
-
-await clickPurchases.writeStream()
-    .fromTempView("rate_temp_view_uno")
-    .format("console")
-    .outputMode("complete")
-    .start()
-*/
+    await clickPurchases.writeStream()
+        .fromTempView("rate_temp_view_uno")
+        .format("console")
+        .outputMode("complete")
+        .start()
+    */
 
 
 })();

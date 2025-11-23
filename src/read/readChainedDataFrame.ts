@@ -425,15 +425,15 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         }
         type CDFBatch = Exclude<CDF, StreamingMark<R>>;
 
-        // Programa batch: levanta el child del DF y lo “liffea” al writer batch
         const prog: BatchWProgram<R, E, G, CDFBatch, CEX> =
             (WR, DF, EX) => {
                 const root = this.getProgram()(DF as any, EX as any);
                 return (WR as any).fromChild(root);
             };
 
-        // Adaptamos a WProgram genérico que usa DataFrameWriterTF
-        const wProgram = (WR: BatchWriterAlg<R>, DF: DFAlg<R, E, G, CDFBatch>, EX: ExprAlg<E> & CEX) =>
+        const wProgram = (WR: BatchWriterAlg<R>,
+                          DF: DFAlg<R, E, G, CDFBatch>,
+                          EX: ExprAlg<E> & CEX) =>
             prog(WR, DF, EX);
 
         return DataFrameWriterTF.fromParts<
@@ -445,8 +445,7 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         >({
             session: this.getSession(),
             dfProgram: this.getProgram() as unknown as DFProgram<R, E, G, CDFBatch, CEX>,
-            wProgram, // ← el adaptado
-            // WR/EXE/DF/EX opcionales: DataFrameWriterTF usará los defaults (Proto*)
+            wProgram,
         });
     }
 
