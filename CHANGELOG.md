@@ -1,3 +1,11 @@
+## [1.11.2](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.11.1...v1.11.2) (2025-11-23)
+
+### Bug Fixes
+
+* add dest in type test ([f969e48](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/f969e48058cbf6f379089c953bb8cd66513a30f7))
+* fix test ([6cd8029](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/6cd8029dc79e36def5f8b735541ce7d2a8a4009b))
+* typo in index ([9b8fe0b](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/9b8fe0b8a95d4bdbbf3489ee9d281408029a803a))
+
 ## [1.11.1](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.11.0...v1.11.1) (2025-10-22)
 
 ### Bug Fixes
