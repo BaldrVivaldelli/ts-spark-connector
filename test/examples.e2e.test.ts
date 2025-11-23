@@ -6,9 +6,12 @@ import {ReadChainedDataFrame} from "../src/read/readChainedDataFrame";
 let spark: any;
 let col: any, isNull: any, isNotNull: any, when: any;
 
+
+
 beforeAll(async () => {
     // si no viene del entorno, usa el local
     process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
+
 
     ({spark} = await import('../src/client/session'));
     ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
@@ -24,6 +27,12 @@ const session = SparkSession.builder()
     })
     .getOrCreate();
 // helpers para obtener DF frescos en cada test
+
+const DEST_BASE =
+    process.env.SPARK_TEST_DEST ?? '/tmp/ts-spark-connector-tests';
+
+const dest = (name: string) => `${DEST_BASE}/${name}`;
+
 const people = () =>
 
     session.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
@@ -128,21 +137,22 @@ describe('examples (E2E)', () => {
     }, 90_000);
 
     // ------- writes -------
-/*    it('write: save resumen', async () => {
+    it('write: save resumen', async () => {
         await purchases()
             .select('user_id', 'product', 'amount')
             .write()                        // <-- antes: .write
             .mode('overwrite')
-            .save('/data/dest/purchases_summary');
+            .save(dest('purchases_summary'));
         expect(true).toBe(true);
     }, 90_000);
 
     it('write: parquet / csv / json / saveAsTable', async () => {
         const pu = purchases();
-        await pu.write().parquet().save('/data/dest/purchases_parquet');
-        await pu.write().csv().option('header', true).save('/data/dest/purchases_csv');
-        await pu.write().json().save('/data/dest/purchases_json');
-        await pu.write().mode('overwrite').saveAsTable('purchases_tbl');
+        await pu.write().mode('overwrite').parquet().save(dest('purchases_parquet'));
+        await pu.write().mode('overwrite').csv().option('header', true).save(dest('purchases_csv'));
+        await pu.write().mode('overwrite').json().save(dest('purchases_tbl_vTest'));
+        await pu.write().mode('overwrite')
+            .saveAsTable('purchases_as_table_tbl');
         expect(true).toBe(true);
     }, 90_000);
 
@@ -151,7 +161,7 @@ describe('examples (E2E)', () => {
             .partitionBy('year')
             .parquet()
             .mode('overwrite')
-            .save('/data/dest/purchases_by_year');
+            .save(dest('purchases_by_year'));
         expect(true).toBe(true);
     }, 90_000);
 
@@ -162,7 +172,7 @@ describe('examples (E2E)', () => {
             .sortBy('product')
             .parquet()
             .mode('overwrite')
-            .saveAsTable('purchases_bucketed');
+            .saveAsTable('purchases_bucketed_vTest_table');
         expect(true).toBe(true);
     }, 90_000);
 
@@ -173,17 +183,17 @@ describe('examples (E2E)', () => {
             .agg({total_spent: 'sum(amount)'})
             .orderBy(col('total_spent').descNullsLast());
 
-        await topSpenders.write().parquet().mode('overwrite').save('/data/dest/top_spenders');
+        await topSpenders.write().parquet().mode('overwrite').save(dest("top_spenders"));
         expect(true).toBe(true);
     }, 90_000);
 
     it('write: orc + avro (option)', async () => {
         const pu = purchases();
-        await pu.write().orc().mode('overwrite').save('/data/dest/purchases_orc');
+        await pu.write().orc().mode('overwrite').save(dest('/purchases_orc'));
         await pu.write().avro().option('compression', 'snappy').mode('append')
-            .save('/data/dest/purchases_avro');
+            .save(dest('purchases_avro'));
         expect(true).toBe(true);
-    }, 90_000);*/
+    }, 90_000)
 
     it('describe: id,name,age,country,year', async () => {
         const df = people();
