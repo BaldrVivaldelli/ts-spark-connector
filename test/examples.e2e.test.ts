@@ -183,13 +183,13 @@ describe('examples (E2E)', () => {
             .agg({total_spent: 'sum(amount)'})
             .orderBy(col('total_spent').descNullsLast());
 
-        await topSpenders.write().parquet().mode('overwrite').save('/data/dest/top_spenders');
+        await topSpenders.write().parquet().mode('overwrite').save(dest("top_spenders"));
         expect(true).toBe(true);
     }, 90_000);
 
     it('write: orc + avro (option)', async () => {
         const pu = purchases();
-        await pu.write().orc().mode('overwrite').save('/data/dest/purchases_orc');
+        await pu.write().orc().mode('overwrite').save(dest('/purchases_orc'));
         await pu.write().avro().option('compression', 'snappy').mode('append')
             .save(dest('purchases_avro'));
         expect(true).toBe(true);
