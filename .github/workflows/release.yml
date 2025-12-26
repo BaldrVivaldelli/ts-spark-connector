@@ -1,9 +1,10 @@
 name: Release
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [ main ]
-  workflow_dispatch:
+    types: [ completed ]
 
 permissions:
   contents: write
@@ -33,7 +34,6 @@ jobs:
       - run: npm test --if-present
       - run: npm run build --if-present
       - run: npx semantic-release
-
 
       - name: Semantic Release
         env:
