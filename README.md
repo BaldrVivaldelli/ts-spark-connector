@@ -1,6 +1,6 @@
 # ts-spark-connector
 
-TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/sql-connect.html).  
+TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/spark-connect-overview.html).  
 Construct Spark logical plans entirely in TypeScript and run them against a Spark Connect server.
 
 ## 🚀 Features
@@ -21,10 +21,16 @@ Construct Spark logical plans entirely in TypeScript and run them against a Spar
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/BaldrVivaldelli/ts-spark-connector
-cd ts-spark-connector
-npm install
+npm i ts-spark-connector
+# o: yarn add / pnpm add
 ```
+
+## Start a Spark Connect server (Docker)
+cd spark-server
+docker compose up -d
+
+## Quick start
+import { SparkSession, col } from "ts-spark-connector";
 
 > You need a running **Spark Connect** server. See [`spark-server/README.md`](spark-server/README.md) for a ready-to-use Docker setup, or run your own server.
 
