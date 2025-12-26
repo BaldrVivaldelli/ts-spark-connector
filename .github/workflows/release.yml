@@ -1,10 +1,9 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: ["CI"]
+  push:
     branches: [ main ]
-    types: [ completed ]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,7 +30,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
+      - run: npm test --if-present
       - run: npm run build --if-present
+      - run: npx semantic-release
+
 
       - name: Semantic Release
         env:
