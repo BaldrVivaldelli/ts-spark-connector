@@ -1,3 +1,12 @@
+## [1.12.0](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.11.2...v1.12.0) (2025-12-26)
+
+### Features
+
+* add Agents ([e65e4aa](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/e65e4aa8a4885cac62a2d8d9c2798ec82057f5ec))
+* add Agents ([34f5c20](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/34f5c20c2aed78deef9fafafbe8b55d1a4f611a8))
+* add Agents ([705f744](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/705f74480763c5fb9a0d359a2e4705f42107407a))
+* change readme & run ([517190b](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/517190ba3640ecd8686ba400353db6621f48389e))
+
 ## [1.11.2](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.11.1...v1.11.2) (2025-11-23)
 
 ### Bug Fixes
