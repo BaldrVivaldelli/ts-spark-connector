@@ -22,6 +22,28 @@ type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
 
 type ProtoExpr = any; // ajustá al tipo real si lo tenés tipado
 
+type ProtoRel = any;
+
+function protoExprToColumnName(expr: ProtoExpr): string | undefined {
+    const unresolvedAttribute = expr?.unresolved_attribute ?? expr?.unresolvedAttribute;
+    const parts = unresolvedAttribute?.unparsed_identifier ?? unresolvedAttribute?.unparsedIdentifier;
+    if (!Array.isArray(parts) || parts.length === 0) {
+        return undefined;
+    }
+    return parts.join(".");
+}
+
+function protoExprsToColumnNames(exprs?: ProtoExpr[]): string[] | undefined {
+    if (!exprs || exprs.length === 0) {
+        return [];
+    }
+
+    const columnNames = exprs.map(protoExprToColumnName);
+    return columnNames.every((name): name is string => typeof name === "string" && name.length > 0)
+        ? columnNames
+        : undefined;
+}
+
 export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     col: (name) => ({
         unresolved_attribute: {unparsed_identifier: [name]},
@@ -175,8 +197,6 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
 
 };
 
-type ProtoRel = any;
-
 export type ProtoGroup = { __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: any } };
 
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
@@ -274,17 +294,19 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     }),
 
     dropDuplicates: (input, cols) => {
-        // Opción robusta: compilar a Aggregate (groupBy + agg vacía),
-        // así no dependemos de soporte específico de “column_names”
         if (!cols || cols.length === 0) {
-            return {deduplicate: {input, all_columns_as_keys: true}};
+            return { deduplicate: { input, all_columns_as_keys: true } };
         }
+
+        const columnNames = protoExprsToColumnNames(cols);
+        if (!columnNames) {
+            throw new Error("dropDuplicates(...) currently only supports plain column references.");
+        }
+
         return {
-            aggregate: {
+            deduplicate: {
                 input,
-                grouping_expressions: cols,
-                group_type: toProtoGroupType("groupby"),
-                aggregate_expressions: [], // sin medidas
+                column_names: columnNames,
             },
         };
     },
@@ -303,29 +325,18 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     }),
 
     withColumnRenamed: (input, oldName, newName) => ({
-        project: {
+        with_columns_renamed: {
             input,
-            expressions: [
-                {
-                    alias: {
-                        expr: {unresolved_attribute: {unparsed_identifier: [oldName]}},
-                        name: [newName]
-                    }
-                },
-                {unresolved_star: {}},
-            ],
+            rename_columns_map: {
+                [oldName]: newName,
+            },
         },
     }),
 
     withColumnsRenamed: (input, mapping) => ({
-        project: {
+        with_columns_renamed: {
             input,
-            expressions: Object.entries(mapping).map(([from, to]) => ({
-                alias: {
-                    expr: {unresolved_attribute: {unparsed_identifier: [from]}},
-                    name: [to],
-                },
-            })),
+            rename_columns_map: { ...mapping },
         },
     }),
     describe: (input, columns) => ({
@@ -416,7 +427,18 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         }
     }),
     withWatermark(input, eventTimeCol, delay) {
-        return { type: "EventTimeWatermark", input, eventTimeCol, delay };
+        const eventTimeColumn = protoExprToColumnName(eventTimeCol);
+        if (!eventTimeColumn) {
+            throw new Error("withWatermark(...) currently only supports a plain event-time column reference.");
+        }
+
+        return {
+            with_watermark: {
+                input,
+                event_time: eventTimeColumn,
+                delay_threshold: delay,
+            },
+        };
     },
     readStream: (format: string, options?: Record<string, string>) => ({
         read: {
@@ -435,8 +457,8 @@ export const ProtoExec: DFExec<ProtoRel> = {
         return SparkConnectExecutor.for(session).execute(root);
     },
 
-    async explain(root: any, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<any[]> {
-        return SparkConnectExecutor.for(session).execute(root);
+    async explain(root: ProtoRel, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<string> {
+        return SparkConnectExecutor.for(session).explain(root, mode);
     }
 };
 
