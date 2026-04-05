@@ -1,4 +1,4 @@
-import {spark} from "../../src/client/session";
+import { spark } from "../../src";
 
 (async () => {
     const people = spark.read

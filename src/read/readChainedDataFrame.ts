@@ -405,7 +405,7 @@ export class ReadChainedDataFrame<R, E, G, CDF = {}, CEX = {}> {
         printArrowResults(arrowBuffers);
     }
 
-    explain(mode: ExplainModeInput = "simple"): Promise<any[]> {
+    explain(mode: ExplainModeInput = "simple"): Promise<string> {
         const root = this.prog(ProtoDFAlg as any, ProtoExprAlg as any);
         return ProtoExec.explain(root, this.session, mode);
     }

@@ -5,237 +5,369 @@ import type {
     StreamWriterFormat,
     WriterSpec,
     WBatchBrand,
-    WStreamBrand, Trigger,
+    WStreamBrand,
+    Trigger,
 } from "../algebra/write";
 import type { BatchWriterAlg, StreamWriterAlg } from "../algebra/write/dataframe";
 
-type ProtoRel = any;
+type ProtoScalar = string | number | boolean | null;
+type ProtoMessage = Record<string, unknown>;
+type ProtoRel = ProtoMessage;
+
+type StreamTriggerShape = NonNullable<WriterSpec["trigger"]> | Trigger;
+
+export interface ProtoCreateDataFrameViewPlan {
+    command: {
+        create_dataframe_view: {
+            name: string;
+            input: ProtoRel;
+            replace?: boolean;
+            is_global?: boolean;
+        };
+    };
+}
+
+export interface ProtoWriteOperationPlan {
+    command: {
+        write_operation: ProtoMessage;
+    };
+}
+
+export interface ProtoWriteStreamOperationPlan {
+    command: {
+        write_stream_operation_start: ProtoMessage;
+    };
+}
+
+export type ProtoPlan =
+    | ProtoCreateDataFrameViewPlan
+    | ProtoWriteOperationPlan
+    | ProtoWriteStreamOperationPlan;
 
 export interface ProtoWriteRoot {
     child: ProtoRel;
     spec: WriterSpec;
     tempViewName?: string;
+    writerKind: "batch" | "stream";
 
     start?: boolean;
     awaitTermination?: boolean;
     createStreamingView?: string;
 }
 
-function asBatch(w: ProtoWriteRoot): WBatchBrand {
-    return w as unknown as WBatchBrand;
+type ProtoBatchWriteNode = ProtoWriteRoot & WBatchBrand;
+type ProtoStreamWriteNode = ProtoWriteRoot & WStreamBrand;
+type ProtoWriterNode = ProtoBatchWriteNode | ProtoStreamWriteNode;
+
+type ExtendedStreamWriterAlg = {
+    start(w: ProtoStreamWriteNode): ProtoStreamWriteNode;
+    awaitTermination(w: ProtoStreamWriteNode): ProtoStreamWriteNode;
+    fromTempView(w: ProtoStreamWriteNode, name: string): ProtoStreamWriteNode;
+};
+
+function createBaseWriter(child: ProtoRel, writerKind: ProtoWriteRoot["writerKind"]): ProtoWriteRoot {
+    return {
+        child,
+        spec: { options: {}, partitionBy: [], sortBy: [] },
+        writerKind,
+    };
 }
-function asStream(w: ProtoWriteRoot): WStreamBrand {
-    return w as unknown as WStreamBrand;
+
+function asBatch(writer: ProtoWriteRoot): ProtoBatchWriteNode {
+    return { ...writer, writerKind: "batch" } as ProtoBatchWriteNode;
 }
 
-export const ProtoWritingAlg = {
-    // ------- constructores -------
-    fromChild(child: any): any {
-        const w: ProtoWriteRoot = {
-            child,
-            spec: { options: {}, partitionBy: [], sortBy: [] } as WriterSpec,
-        };
-        return asBatch(w);
+function asStream(writer: ProtoWriteRoot): ProtoStreamWriteNode {
+    return { ...writer, writerKind: "stream" } as ProtoStreamWriteNode;
+}
+
+function preserveWriterFlavor<T extends ProtoWriterNode>(
+    writer: T,
+    patch: Partial<ProtoWriteRoot>
+): T {
+    const next = { ...writer, ...patch };
+    return (writer.writerKind === "stream" ? asStream(next) : asBatch(next)) as T;
+}
+
+function updateWriterSpec<T extends ProtoWriterNode>(
+    writer: T,
+    patch: Partial<WriterSpec>
+): T {
+    return preserveWriterFlavor(writer, {
+        spec: {
+            ...writer.spec,
+            ...patch,
+        },
+    });
+}
+
+function appendWriterOptions<T extends ProtoWriterNode>(
+    writer: T,
+    options: Record<string, string>
+): T {
+    return updateWriterSpec(writer, {
+        options: {
+            ...(writer.spec.options ?? {}),
+            ...options,
+        },
+    });
+}
+
+const protoWritingAlg = {
+    fromChild(child: ProtoRel): ProtoBatchWriteNode {
+        return asBatch(createBaseWriter(child, "batch"));
     },
 
-    writeStream(child: any): any {
-        const w: ProtoWriteRoot = {
-            child,
-            spec: { options: {}, partitionBy: [], sortBy: [] } as WriterSpec,
-        };
-        return asStream(w);
+    writeStream(child: ProtoRel): ProtoStreamWriteNode {
+        return asStream(createBaseWriter(child, "stream"));
     },
 
-    // ------- comunes (batch + stream) -------
-    format(w: any, fmt: BatchWriterFormat | StreamWriterFormat): any {
-        const root = w as unknown as ProtoWriteRoot;
-
-        // usamos un spec temporal en any para evitar el choque de tipos (Batch vs Stream)
-        const specAny: any = { ...root.spec };
-        specAny.format = fmt as any; // puede ser batch o stream; lo guardamos igual
-
-        const next: ProtoWriteRoot = { ...root, spec: specAny as WriterSpec };
-
-        // preservamos el "brand" de entrada (batch/stream)
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    option(w: any, k: string, v: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = {
-            ...root,
-            spec: { ...root.spec, options: { ...(root.spec.options ?? {}), [k]: String(v) } },
-        };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    options(w: any, o: Record<string, string>): any {
-        const norm = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = {
-            ...root,
-            spec: { ...root.spec, options: { ...(root.spec.options ?? {}), ...norm } },
-        };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    partitionBy(w: any, ...cs: string[]): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = {
-            ...root,
-            spec: { ...root.spec, partitionBy: [...(root.spec.partitionBy ?? []), ...cs] },
-        };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    targetPath(w: any, path: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, spec: { ...root.spec, target: { path } } };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    targetTable(w: any, tab: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, spec: { ...root.spec, target: { table: tab } } };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    createOrReplaceTempView(w: any, name: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, tempViewName: name };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
-    },
-    createTempView(w: any, name: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, spec: { ...root.spec, registerView: { name, replace: false } } };
-        return (w as WStreamBrand) ? asStream(next) : asBatch(next);
+    format<T extends ProtoWriterNode>(writer: T, fmt: BatchWriterFormat | StreamWriterFormat): T {
+        return updateWriterSpec(writer, { format: fmt });
     },
 
-    // ------- batch-only -------
-    mode(w: any, m: SaveMode): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asBatch({ ...root, spec: { ...root.spec, mode: m } });
-    },
-    bucketBy(w: any, n: number, c: string, ...cs: string[]): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asBatch({ ...root, spec: { ...root.spec, bucketBy: { numBuckets: n, columns: [c, ...cs] } } });
-    },
-    sortBy(w: any, c: string, ...cs: string[]): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asBatch({ ...root, spec: { ...root.spec, sortBy: [...(root.spec.sortBy ?? []), c, ...cs] } });
+    option<T extends ProtoWriterNode>(writer: T, key: string, value: string): T {
+        return appendWriterOptions(writer, { [key]: String(value) });
     },
 
-    // ------- streaming-only -------
-    outputMode(w: any, m: "append" | "complete" | "update"): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asStream({ ...root, spec: { ...root.spec, outputMode: m } as WriterSpec });
-    },
-    trigger(w: any, t: Trigger): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asStream({ ...root, spec: { ...root.spec, trigger: t } as WriterSpec });
-    },
-    queryName(w: any, name: string): any {
-        const root = w as unknown as ProtoWriteRoot;
-        return asStream({ ...root, spec: { ...root.spec, queryName: name } as WriterSpec });
-    },
-    start(w: any): any {
-        const root = w as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, start: true };
-        return asStream(next);
+    options<T extends ProtoWriterNode>(writer: T, options: Record<string, string>): T {
+        const normalized = Object.fromEntries(
+            Object.entries(options).map(([key, value]) => [key, String(value)])
+        );
+        return appendWriterOptions(writer, normalized);
     },
 
-    awaitTermination(w: any): any {
-        const root = w as ProtoWriteRoot;
-        const next: ProtoWriteRoot = { ...root, awaitTermination: true };
-        return asStream(next);
+    partitionBy<T extends ProtoWriterNode>(writer: T, ...columns: string[]): T {
+        return updateWriterSpec(writer, {
+            partitionBy: [...(writer.spec.partitionBy ?? []), ...columns],
+        });
     },
-    fromTempView(w: ProtoWriteRoot, name: string): ProtoWriteRoot {
-        return {
-            ...w,
-            createStreamingView: name
-        };
-    }
-} as unknown as BatchWriterAlg<ProtoRel> & StreamWriterAlg<ProtoRel>; // 👈 cast final, sin sobrecargas
 
+    targetPath<T extends ProtoWriterNode>(writer: T, path: string): T {
+        return updateWriterSpec(writer, { target: { path } });
+    },
 
-// (igual a tu helper previo)
+    targetTable<T extends ProtoWriterNode>(writer: T, table: string): T {
+        return updateWriterSpec(writer, { target: { table } });
+    },
+
+    createOrReplaceTempView<T extends ProtoWriterNode>(writer: T, name: string): T {
+        return preserveWriterFlavor(writer, { tempViewName: name });
+    },
+
+    createTempView<T extends ProtoWriterNode>(writer: T, name: string): T {
+        return updateWriterSpec(writer, { registerView: { name, replace: false } });
+    },
+
+    mode(writer: ProtoBatchWriteNode, mode: SaveMode): ProtoBatchWriteNode {
+        return asBatch({ ...writer, spec: { ...writer.spec, mode } });
+    },
+
+    bucketBy(writer: ProtoBatchWriteNode, numBuckets: number, col: string, ...cols: string[]): ProtoBatchWriteNode {
+        return asBatch({
+            ...writer,
+            spec: {
+                ...writer.spec,
+                bucketBy: { numBuckets, columns: [col, ...cols] },
+            },
+        });
+    },
+
+    sortBy(writer: ProtoBatchWriteNode, col: string, ...cols: string[]): ProtoBatchWriteNode {
+        return asBatch({
+            ...writer,
+            spec: {
+                ...writer.spec,
+                sortBy: [...(writer.spec.sortBy ?? []), col, ...cols],
+            },
+        });
+    },
+
+    outputMode(writer: ProtoStreamWriteNode, mode: "append" | "complete" | "update"): ProtoStreamWriteNode {
+        return asStream({ ...writer, spec: { ...writer.spec, outputMode: mode } });
+    },
+
+    trigger(writer: ProtoStreamWriteNode, trigger: Trigger): ProtoStreamWriteNode {
+        return asStream({ ...writer, spec: { ...writer.spec, trigger } });
+    },
+
+    queryName(writer: ProtoStreamWriteNode, name: string): ProtoStreamWriteNode {
+        return asStream({ ...writer, spec: { ...writer.spec, queryName: name } });
+    },
+
+    start(writer: ProtoStreamWriteNode): ProtoStreamWriteNode {
+        return asStream({ ...writer, start: true });
+    },
+
+    awaitTermination(writer: ProtoStreamWriteNode): ProtoStreamWriteNode {
+        return asStream({ ...writer, awaitTermination: true });
+    },
+
+    fromTempView(writer: ProtoStreamWriteNode, name: string): ProtoStreamWriteNode {
+        return asStream({
+            ...writer,
+            createStreamingView: name,
+        });
+    },
+};
+
+export const ProtoWritingAlg = protoWritingAlg as unknown as BatchWriterAlg<ProtoRel> & StreamWriterAlg<ProtoRel> & ExtendedStreamWriterAlg;
+
 function toSaveModeV1(
-    m?: "append" | "overwrite" | "ignore" | "error" | "errorifexists"
-) {
-    switch (m) {
-        case "append":        return 1;
-        case "overwrite":     return 2;
+    mode?: "append" | "overwrite" | "ignore" | "error" | "errorifexists"
+): number {
+    switch (mode) {
+        case "append":
+            return 1;
+        case "overwrite":
+            return 2;
         case "error":
-        case "errorifexists": return 3;
-        case "ignore":        return 4;
-        default:              return 0;
+        case "errorifexists":
+            return 3;
+        case "ignore":
+            return 4;
+        default:
+            return 0;
     }
 }
 
-function isStreamingSpec(s: any): boolean {
-    const fmt = (s?.format ?? "").toString().toLowerCase();
-    // heurística suficiente: si tiene outputMode/trigger/queryName o es un sink clásico de streaming
-    return !!(s?.outputMode || s?.trigger || s?.queryName ||
-        fmt === "console" || fmt === "kafka" || fmt === "memory");
+function isStreamingRoot(root: ProtoWriteRoot): boolean {
+    return root.writerKind === "stream";
 }
 
-// helpers para enums/oneof de streaming
-function toOutputModeV1(m?: "append" | "complete" | "update") {
-    switch ((m ?? "").toLowerCase()) {
-        case "append":   return 1; // OUTPUT_MODE_APPEND
-        case "complete": return 2; // OUTPUT_MODE_COMPLETE
-        case "update":   return 3; // OUTPUT_MODE_UPDATE
-        default:         return 0; // OUTPUT_MODE_UNSPECIFIED
-    }
+function toOutputModeV1(mode?: WriterSpec["outputMode"]): string | undefined {
+    const normalized = (mode ?? "").toLowerCase();
+    return normalized === "append" || normalized === "complete" || normalized === "update"
+        ? normalized
+        : undefined;
 }
 
-function toStreamTriggerV1(t: any) {
-    // Aceptamos tus dos estilos:
-    // 1) { processingTime: "2 seconds" }  (el que usás hoy)
-    // 2) { kind: "ProcessingTime", intervalMs: 2000 }  (si alguna vez migrás)
-    if (!t) return undefined;
+function toStreamTriggerV1(trigger?: StreamTriggerShape): ProtoMessage | undefined {
+    if (!trigger) return undefined;
 
-    // estilo #1
-    if (typeof t.processingTime === "string") {
-        // Connect acepta string con unidad, en snake_case
-        return { processing_time: t.processingTime };
+    if ("processingTime" in trigger && typeof trigger.processingTime === "string") {
+        return { processing_time_interval: trigger.processingTime };
     }
-    if (t.once) return { once: true };
-    if (t.availableNow) return { available_now: true };
+    if ("once" in trigger && trigger.once) {
+        return { once: true };
+    }
+    if ("availableNow" in trigger && trigger.availableNow) {
+        return { available_now: true };
+    }
 
-    // estilo #2 (discriminado)
-    const kind = (t.kind ?? "").toLowerCase();
+    const kind = ("kind" in trigger ? trigger.kind : undefined)?.toLowerCase();
     if (kind === "processingtime") {
-        const ms = Number(t.intervalMs ?? 0);
-        if (Number.isFinite(ms) && ms > 0) {
-            return { processing_time: `${ms} milliseconds` };
+        const intervalMs = Number((trigger as { intervalMs?: number }).intervalMs ?? 0);
+        if (Number.isFinite(intervalMs) && intervalMs > 0) {
+            return { processing_time_interval: `${intervalMs} milliseconds` };
         }
     }
-    if (kind === "once") return { once: true };
-    if (kind === "availablenow") return { available_now: true };
+    if (kind === "once") {
+        return { once: true };
+    }
+    if (kind === "continuous") {
+        const checkpointIntervalMs = Number(
+            (trigger as { checkpointIntervalMs?: number }).checkpointIntervalMs ?? 0
+        );
+        if (Number.isFinite(checkpointIntervalMs) && checkpointIntervalMs > 0) {
+            return { continuous_checkpoint_interval: `${checkpointIntervalMs} milliseconds` };
+        }
+    }
 
-    // fallback: nada
     return undefined;
 }
 
+function appendIfDefined(
+    message: ProtoMessage,
+    key: string,
+    value: ProtoScalar | ProtoMessage | string[] | undefined
+): void {
+    if (value !== undefined) {
+        message[key] = value;
+    }
+}
 
-export function protoWriteRootToPlan(rootAny: any) {
-    const root = rootAny as ProtoWriteRoot;
-    const s = root.spec ?? {};
+function buildStreamingWriteOperation(root: ProtoWriteRoot, input: ProtoRel): ProtoMessage {
+    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+    const operation: ProtoMessage = {
+        input,
+        options: spec.options ?? {},
+        partitioning_column_names: spec.partitionBy ?? [],
+    };
 
-    // vistas (válido para batch y stream)
-    if (s.registerView) {
+    appendIfDefined(operation, "format", spec.format);
+
+    const outputMode = toOutputModeV1(spec.outputMode);
+    appendIfDefined(operation, "output_mode", outputMode);
+
+    const trigger = toStreamTriggerV1(spec.trigger);
+    if (trigger) {
+        Object.assign(operation, trigger);
+    }
+
+    appendIfDefined(operation, "query_name", spec.queryName);
+    appendIfDefined(operation, "path", spec.target?.path);
+    appendIfDefined(operation, "table_name", spec.target?.table);
+
+    return operation;
+}
+
+function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
+    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+    const operation: ProtoMessage = {
+        input: root.child,
+        source: spec.format ?? "parquet",
+        mode: toSaveModeV1(spec.mode),
+        options: spec.options ?? {},
+        partitioning_columns: spec.partitionBy ?? [],
+    };
+
+    if (spec.bucketBy) {
+        operation.bucket_by = {
+            bucket_column_names: spec.bucketBy.columns,
+            num_buckets: spec.bucketBy.numBuckets,
+        };
+        if (spec.sortBy?.length) {
+            operation.sort_column_names = spec.sortBy;
+        }
+    }
+
+    if (spec.target?.path) {
+        operation.path = spec.target.path;
+    } else if (spec.target?.table) {
+        operation.table = {
+            table_name: spec.target.table,
+            save_method: 1,
+        };
+    } else {
+        throw new Error("V1 batch: falta destino path o table.");
+    }
+
+    return operation;
+}
+
+export function protoWriteRootToPlan(root: ProtoWriteRoot): ProtoPlan | ProtoPlan[] {
+    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+
+    if (spec.registerView) {
         return {
             command: {
                 create_dataframe_view: {
-                    name: s.registerView.name,
-                    is_local: false,
-                    replace: s.registerView.replace,
+                    name: spec.registerView.name,
+                    is_global: false,
+                    replace: spec.registerView.replace,
                     input: root.child,
                 },
             },
         };
     }
+
     if (root.tempViewName) {
         return {
             command: {
                 create_dataframe_view: {
                     name: root.tempViewName,
-                    is_local: false,
+                    is_global: false,
                     replace: true,
                     input: root.child,
                 },
@@ -243,111 +375,42 @@ export function protoWriteRootToPlan(rootAny: any) {
         };
     }
 
-    // --- STREAMING ---
-    if (isStreamingSpec(s)) {
+    if (isStreamingRoot(root)) {
         if (root.createStreamingView) {
-            // 1️⃣ Primer comando: crear la vista temporal
-            const createViewCmd = {
+            const createViewCmd: ProtoCreateDataFrameViewPlan = {
                 command: {
                     create_dataframe_view: {
                         name: root.createStreamingView,
                         input: root.child,
+                        is_global: false,
                         replace: true,
-                    }
-                }
-            };
-
-            // 2️⃣ Segundo comando: escribir usando unresolved_relation
-            const write_stream_operation: any = {
-                input: {
-                    unresolved_relation: {
-                        parts: [root.createStreamingView],
-                    }
+                    },
                 },
-                source: s.format ?? "console",
-                options: s.options ?? {},
             };
 
-            const om = toOutputModeV1(s.outputMode);
-            if (om !== 0) write_stream_operation.output_mode = om;
+            const writeCmd: ProtoWriteStreamOperationPlan = {
+                command: {
+                    write_stream_operation_start: buildStreamingWriteOperation(root, {
+                        unresolved_relation: {
+                            parts: [root.createStreamingView],
+                        },
+                    }),
+                },
+            };
 
-            const trig = toStreamTriggerV1(s.trigger);
-            if (trig) write_stream_operation.trigger = trig;
-
-            if (s.queryName) write_stream_operation.query_name = s.queryName;
-            if (s.target?.path) {
-                write_stream_operation.path = s.target.path;
-            }
-            if (s.target?.table) {
-                write_stream_operation.table = {
-                    table_name: s.target.table,
-                    save_method: 1,
-                };
-            }
-            if (root.start) write_stream_operation.start = true;
-            if (root.awaitTermination) write_stream_operation.await_termination = true;
-
-            const writeCmd = { command: { write_stream_operation } };
-
-            // 🔁 Devolvés una lista de comandos
             return [createViewCmd, writeCmd];
         }
 
-        // 🚨 Caso sin createStreamingView: se genera normalmente
-        const write_stream_operation: any = {
-            input: root.child,
-            source: s.format ?? "console",
-            options: s.options ?? {},
+        return {
+            command: {
+                write_stream_operation_start: buildStreamingWriteOperation(root, root.child),
+            },
         };
-
-        const om = toOutputModeV1(s.outputMode);
-        if (om !== 0) write_stream_operation.output_mode = om;
-
-        const trig = toStreamTriggerV1(s.trigger);
-        if (trig) write_stream_operation.trigger = trig;
-
-        if (s.queryName) write_stream_operation.query_name = s.queryName;
-        if (s.target?.path) {
-            write_stream_operation.path = s.target.path;
-        }
-        if (s.target?.table) {
-            write_stream_operation.table = {
-                table_name: s.target.table,
-                save_method: 1,
-            };
-        }
-        if (root.start) write_stream_operation.start = true;
-        if (root.awaitTermination) write_stream_operation.await_termination = true;
-
-        return { command: { write_stream_operation } };
     }
 
-
-
-    // --- BATCH ---
-    const write_operation: any = {
-        input: root.child,
-        source: s.format ?? "parquet",
-        mode: toSaveModeV1(s.mode),
-        options: s.options ?? {},
-        partitioning_columns: s.partitionBy ?? [],
+    return {
+        command: {
+            write_operation: buildBatchWriteOperation(root),
+        },
     };
-
-    if (s.bucketBy) {
-        write_operation.bucket_by = {
-            bucket_column_names: s.bucketBy.columns,
-            num_buckets: s.bucketBy.numBuckets,
-        };
-        if (s.sortBy?.length) write_operation.sort_column_names = s.sortBy;
-    }
-
-    if (s.target?.path) {
-        write_operation.path = s.target.path;
-    } else if (s.target?.table) {
-        write_operation.table = { table_name: s.target.table, save_method: 1 };
-    } else {
-        throw new Error("V1 batch: falta destino path o table.");
-    }
-
-    return { command: { write_operation } };
 }

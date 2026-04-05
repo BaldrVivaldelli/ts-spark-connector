@@ -2,20 +2,20 @@
 // TraceWriterAlg (shim local) — genera un árbol de traza del WR
 // ============================================================
 
-type TWKind =
+export type TWKind =
     | "batchWrite"
     | "streamingWrite";
 
-type TWTarget =
+export type TWTarget =
     | { kind: "path"; path: string }
     | { kind: "table"; table: string }
     | { kind: "tempView"; name: string; replace?: boolean }
     | { kind: "none" };
 
-type TWNode = {
+export type TWNode = {
     kind: TWKind;
     // child es el AST del DF/EX ya construido con TraceDFAlg/TraceExprAlg
-    child: any;
+    child: unknown;
 
     // comunes
     format?: string;
@@ -38,7 +38,7 @@ type TWNode = {
 
 export const TraceWriterAlg = {
     // levantar writer batch desde DF
-    fromChild(child: any): TWNode {
+    fromChild(child: unknown): TWNode {
         return {
             kind: "batchWrite",
             child,
@@ -49,7 +49,7 @@ export const TraceWriterAlg = {
     },
 
     // levantar writer streaming desde DF
-    writeStream(child: any): TWNode {
+    writeStream(child: unknown): TWNode {
         return {
             kind: "streamingWrite",
             child,
@@ -133,13 +133,10 @@ export function writerToClientAST(wn: TWNode) {
 }
 
 export function writerToClientASTJSON(wn: TWNode) {
-    // si el hijo DF ya es un árbol de trace (objeto), dejamos tal cual;
-    // si es una estructura propia, podrías envolverlo con traceToJSON(wn.child) antes
     return JSON.stringify(writerToClientAST(wn), null, 2);
 }
 
-export  function writerToClientASTMermaid(wn: TWNode) {
-    // Mermaid simple: un nodo write -> child
+export function writerToClientASTMermaid(wn: TWNode) {
     const id = wn.kind === "batchWrite" ? "Write" : "WriteStream";
     const target =
         wn.target.kind === "path"
@@ -150,15 +147,21 @@ export  function writerToClientASTMermaid(wn: TWNode) {
                     ? `${wn.target.replace ? "createOrReplace" : "create"}:${wn.target.name}`
                     : "no-target";
 
+    const trigger = wn.trigger?.processingTime
+        ?? (wn.trigger?.once
+            ? "once"
+            : wn.trigger?.availableNow
+                ? "availableNow"
+                : "-");
+
     const caption =
         `${id}\\nformat=${wn.format ?? "-"}\\nmode=${wn.mode ?? "-"}\\n` +
-        `outputMode=${wn.outputMode ?? "-"}\\ntrigger=${wn.trigger?.processingTime ?? wn.trigger?.once ? "once" : wn.trigger?.availableNow ? "availableNow" : "-"}` +
+        `outputMode=${wn.outputMode ?? "-"}\\ntrigger=${trigger}` +
         `\\ncheckpoint=${wn.options?.checkpointLocation ?? "-"}` +
         `\\nqueryName=${wn.queryName ?? "-"}` +
         `\\npartitionBy=${(wn.partitionBy ?? []).join(",") || "-"}` +
         `\\ntarget=${target}`;
 
-    // podés enriquecer usando traceToMermaid(wn.child) si tu DF ya genera diagramas
     return `flowchart TD
   W(["${caption}"])
   C["DF pipeline"]

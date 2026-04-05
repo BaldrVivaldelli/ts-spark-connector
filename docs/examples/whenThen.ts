@@ -1,5 +1,4 @@
-import { createSparkSession } from "../../src/client/session";
-import { col } from "../../src/engine/column";
+import { createSparkSession, col } from "../../src";
 
 async function main() {
     const spark = createSparkSession("example-withcolumn-session");
