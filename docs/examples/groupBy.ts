@@ -1,4 +1,4 @@
-import { createSparkSession } from "../../src/client/session";
+import { createSparkSession } from "../../src";
 
 async function main() {
     const spark = createSparkSession("example-groupby-session");

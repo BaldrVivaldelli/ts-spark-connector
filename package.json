@@ -15,6 +15,7 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "proto",
     "README.md",
     "LICENSE"
   ],
@@ -24,8 +25,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
-    "test": "vitest",
-    "test:e2e": "vitest run --testNamePattern='examples (E2E)'",
+    "test": "vitest run",
+    "test:e2e": "vitest run test/examples.e2e.test.ts",
     "test:watch": "vitest --passWithNoTests",
     "test:docker": "docker compose -f docker-compose.test.yml up --build --abort-on-container-exit test-runner",
     "test:docker:cleanup": "docker compose -f docker-compose.test.yml down -v",

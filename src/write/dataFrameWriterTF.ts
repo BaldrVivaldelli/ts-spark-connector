@@ -1,7 +1,7 @@
 // src/write/dataFrameWriterTF.ts
 import { SparkSession } from "../client/session";
 
-import { ProtoDFAlg, ProtoExprAlg, ProtoGroup } from "../engine/compilerRead";
+import { ProtoDFAlg, ProtoExprAlg } from "../engine/compilerRead";
 import { ProtoWritingExec } from "./protoWriterExec";
 
 import { DFAlg, DFProgram, ExprAlg } from "../algebra/read";
@@ -10,48 +10,83 @@ import {
     WBatch,
     WStream,
     BatchWriterFormat,
-    StreamWriterFormat, WProgram, BatchWProgram, StreamWProgram,
+    StreamWriterFormat,
+    WProgram,
+    BatchWProgram,
+    StreamWProgram,
 } from "../algebra/write";
 
-// Álgebra runtime concreta (puede implementar batch y stream)
 import { ProtoWritingAlg } from "./compilerWrite";
-
-// Intérpretes de traza para DF/Expr y álgebra de writer de traza
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
-import { TraceWriterAlg } from "../trace/traceWriterAlg";
-import {BatchWriterAlg, StreamWriterAlg} from "../algebra/write/dataframe";
-import {DFWritingExec} from "./writeDataFrame";
-import {StreamingQueryHandle} from "../client/sparkClient";
+import { TraceWriterAlg, TWNode } from "../trace/traceWriterAlg";
+import { BatchWriterAlg, StreamWriterAlg } from "../algebra/write/dataframe";
+import { DFWritingExec } from "./writeDataFrame";
+import { StreamingQueryHandle } from "../client/sparkClient";
 
 // ==================== tipos base ====================
-type DefaultR = any;
+type DefaultR = unknown;
+type WriterOptionValue = string | number | boolean | bigint | null | undefined;
+type StreamTriggerInput = { processingTime?: string; once?: true; availableNow?: true };
 
-// El dataframe "fuente" expone sesión y programa (incluye capacidades)
 export type ReadDFPublic<R, E, G, CDF = unknown, CEX = unknown> = {
     getSession(): SparkSession;
     getProgram(): DFProgram<R, E, G, CDF, CEX>;
 };
+
 export type ReadDFPrivate<R, E, G, CDF = unknown, CEX = unknown> = {
     _getSession(): SparkSession;
     _getProgram(): DFProgram<R, E, G, CDF, CEX>;
 };
+
 export type ReadDFAny<R, E, G, CDF = unknown, CEX = unknown> =
     | ReadDFPublic<R, E, G, CDF, CEX>
     | ReadDFPrivate<R, E, G, CDF, CEX>;
 
-function sessionOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): SparkSession {
-    return (df as any).getSession?.() ?? (df as any)._getSession();
-}
-function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgram<R, E, G, CDF, CEX> {
-    return (df as any).getProgram?.() ?? (df as any)._getProgram();
+function isPublicReadDF<R, E, G, CDF, CEX>(
+    df: ReadDFAny<R, E, G, CDF, CEX>
+): df is ReadDFPublic<R, E, G, CDF, CEX> {
+    return "getSession" in df && "getProgram" in df;
 }
 
-// Backend requerido para ejecutar el write (parametrizado por álgebra WRALG)
+function sessionOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): SparkSession {
+    return isPublicReadDF(df) ? df.getSession() : df._getSession();
+}
+
+function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgram<R, E, G, CDF, CEX> {
+    return isPublicReadDF(df) ? df.getProgram() : df._getProgram();
+}
+
 type Impl<R, E, G, W, CDF, CEX, WRALG> = {
     DF: DFAlg<R, E, G, CDF>;
     EX: ExprAlg<E> & CEX;
-    WR: WRALG;               // álgebra concreto (batch o stream)
+    WR: WRALG;
     EXE: DFWritingExec<W>;
+};
+
+type SharedWriterRuntimeAlg<W> = {
+    format(w: W, fmt: BatchWriterFormat | StreamWriterFormat): W;
+    option(w: W, k: string, v: string): W;
+    options(w: W, opts: Record<string, string>): W;
+    partitionBy(w: W, ...cols: string[]): W;
+    targetPath(w: W, path: string): W;
+    targetTable(w: W, table: string): W;
+    createOrReplaceTempView?(w: W, viewName: string): W;
+    createTempView?(w: W, viewName: string): W;
+};
+
+type BatchWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
+    mode(w: W, m: SaveMode): W;
+    bucketBy(w: W, n: number, col: string, ...cols: string[]): W;
+    sortBy(w: W, col: string, ...cols: string[]): W;
+};
+
+type StreamWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
+    outputMode(w: W, m: "append" | "complete" | "update"): W;
+    trigger(w: W, t: StreamTriggerInput): W;
+    queryName?(w: W, name: string): W;
+    start?(w: W): W;
+    fromTempView?(w: W, name: string): W;
+    awaitTermination?(w: W): W;
 };
 
 // ==================== Writer ====================
@@ -59,10 +94,10 @@ export class DataFrameWriterTF<
     R = DefaultR,
     E = unknown,
     G = unknown,
-    W = unknown,         // WBatch | WStream
+    W = unknown,
     CDF = unknown,
     CEX = unknown,
-    WRALG = unknown      // Álgebra concreto del writer (batch o stream)
+    WRALG = unknown
 > {
     private constructor(
         private readonly session: SparkSession,
@@ -74,7 +109,6 @@ export class DataFrameWriterTF<
         private readonly EX?: ExprAlg<E> & CEX
     ) {}
 
-    // ==================== FACTORIES por modo ====================
     static fromBatchProgram<R, E, G, CDF, CEX>(
         df: ReadDFAny<R, E, G, CDF, CEX>,
         prog: BatchWProgram<R, E, G, CDF, CEX>
@@ -97,7 +131,6 @@ export class DataFrameWriterTF<
         return new DataFrameWriterTF<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>(session, dfProgram, wProgram);
     }
 
-    // (Opcional) Factory genérico
     static fromParts<R, E, G, W, CDF, CEX, WRALG>(args: {
         session: SparkSession;
         dfProgram: DFProgram<R, E, G, CDF, CEX>;
@@ -108,87 +141,136 @@ export class DataFrameWriterTF<
         EX?: ExprAlg<E> & CEX;
     }) {
         return new DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>(
-            args.session, args.dfProgram, args.wProgram, args.WR, args.EXE, args.DF, args.EX
+            args.session,
+            args.dfProgram,
+            args.wProgram,
+            args.WR,
+            args.EXE,
+            args.DF,
+            args.EX
         );
     }
 
     withBackend(impl: Impl<R, E, G, W, CDF, CEX, WRALG>) {
         return new DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>(
-            this.session, this.dfProgram, this.wProgram, impl.WR, impl.EXE, impl.DF, impl.EX
+            this.session,
+            this.dfProgram,
+            this.wProgram,
+            impl.WR,
+            impl.EXE,
+            impl.DF,
+            impl.EX
         );
     }
 
     private chain(
-        k: (p: WProgram<R, E, G, W, CDF, CEX, WRALG>) => WProgram<R, E, G, W, CDF, CEX, WRALG>
+        nextProgram: (p: WProgram<R, E, G, W, CDF, CEX, WRALG>) => WProgram<R, E, G, W, CDF, CEX, WRALG>
     ) {
         return new DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>(
-            this.session, this.dfProgram, k(this.wProgram), this.WR, this.EXE, this.DF, this.EX
+            this.session,
+            this.dfProgram,
+            nextProgram(this.wProgram),
+            this.WR,
+            this.EXE,
+            this.DF,
+            this.EX
         );
     }
 
-    // ==================== CORE compartido (batch + streaming) ====================
-    // Overloads por modo
-    format(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>, fmt: BatchWriterFormat):
-        DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>;
-    format(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>, fmt: StreamWriterFormat):
-        DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>;
-    format(fmt: any): any {
-        return this.chain(p => (WR: WRALG, DF, EX) => (WR as any).format(p(WR, DF, EX), fmt));
+    private sharedWriterAlg(WR: WRALG): SharedWriterRuntimeAlg<W> {
+        return WR as unknown as SharedWriterRuntimeAlg<W>;
     }
 
-    option(k: string, v: any) {
-        return this.chain(p => (WR: WRALG, DF, EX) => (WR as any).option(p(WR, DF, EX), k, String(v)));
+    private batchWriterAlg(WR: WRALG): BatchWriterRuntimeAlg<WBatch> {
+        return WR as unknown as BatchWriterRuntimeAlg<WBatch>;
     }
-    options(o: Record<string, any>) {
-        const norm = Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v)]));
-        return this.chain(p => (WR: WRALG, DF, EX) => (WR as any).options(p(WR, DF, EX), norm));
+
+    private streamWriterAlg(WR: WRALG): StreamWriterRuntimeAlg<WStream> {
+        return WR as unknown as StreamWriterRuntimeAlg<WStream>;
     }
+
+    private requireWriteMethod<T>(method: T | undefined, name: string): T {
+        if (!method) {
+            throw new Error(`The configured writer backend does not implement ${name}().`);
+        }
+        return method;
+    }
+
+    format(this: DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>, fmt: BatchWriterFormat | StreamWriterFormat): DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG> {
+        return this.chain(program => (WR, DF, EX) =>
+            this.sharedWriterAlg(WR).format(program(WR, DF, EX), fmt)
+        );
+    }
+
+    option(k: string, v: WriterOptionValue) {
+        return this.chain(program => (WR, DF, EX) =>
+            this.sharedWriterAlg(WR).option(program(WR, DF, EX), k, String(v))
+        );
+    }
+
+    options(opts: Record<string, WriterOptionValue>) {
+        const normalized = Object.fromEntries(
+            Object.entries(opts).map(([key, value]) => [key, String(value)])
+        );
+        return this.chain(program => (WR, DF, EX) =>
+            this.sharedWriterAlg(WR).options(program(WR, DF, EX), normalized)
+        );
+    }
+
     partitionBy(...cols: string[]) {
-        return this.chain(p => (WR: WRALG, DF, EX) => (WR as any).partitionBy(p(WR, DF, EX), ...cols));
+        return this.chain(program => (WR, DF, EX) =>
+            this.sharedWriterAlg(WR).partitionBy(program(WR, DF, EX), ...cols)
+        );
     }
 
-    // ==================== CAPACIDADES BATCH (solo WBatch) ====================
     mode(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, m: SaveMode) {
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).mode((this as any).wProgram(WR, DF, EX), m);
+            (WR, DF, EX) => this.batchWriterAlg(WR).mode(this.wProgram(WR, DF, EX) as WBatch, m);
         return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
+
     bucketBy(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, n: number, col: string, ...cols: string[]) {
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).bucketBy((this as any).wProgram(WR, DF, EX), n, col, ...cols);
+            (WR, DF, EX) => this.batchWriterAlg(WR).bucketBy(this.wProgram(WR, DF, EX) as WBatch, n, col, ...cols);
         return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
+
     sortBy(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, col: string, ...cols: string[]) {
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).sortBy((this as any).wProgram(WR, DF, EX), col, ...cols);
+            (WR, DF, EX) => this.batchWriterAlg(WR).sortBy(this.wProgram(WR, DF, EX) as WBatch, col, ...cols);
         return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
 
-    // ==================== CAPACIDADES STREAMING (solo WStream) ====================
     outputMode(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, m: "append" | "complete" | "update") {
         const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).outputMode((this as any).wProgram(WR, DF, EX), m);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
-    }
-    trigger(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, t: { processingTime?: string; once?: true; availableNow?: true }) {
-        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).trigger((this as any).wProgram(WR, DF, EX), t);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
-    }
-    checkpoint(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, path: string) {
-        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).option((this as any).wProgram(WR, DF, EX), "checkpointLocation", path);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
-    }
-    queryName(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string) {
-        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).queryName
-                ? (WR as any).queryName((this as any).wProgram(WR, DF, EX), name)
-                : (WR as any).option((this as any).wProgram(WR, DF, EX), "queryName", name);
+            (WR, DF, EX) => this.streamWriterAlg(WR).outputMode(this.wProgram(WR, DF, EX) as WStream, m);
         return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
 
-    // ==================== EJECUCIÓN / TARGETS ====================
+    trigger(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, t: StreamTriggerInput) {
+        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
+            (WR, DF, EX) => this.streamWriterAlg(WR).trigger(this.wProgram(WR, DF, EX) as WStream, t);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+    }
+
+    checkpoint(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, path: string) {
+        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
+            (WR, DF, EX) => this.streamWriterAlg(WR).option(this.wProgram(WR, DF, EX) as WStream, "checkpointLocation", path);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+    }
+
+    queryName(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string) {
+        const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
+            (WR, DF, EX) => {
+                const writerAlg = this.streamWriterAlg(WR);
+                const queryName = writerAlg.queryName;
+                return queryName
+                    ? queryName(this.wProgram(WR, DF, EX) as WStream, name)
+                    : writerAlg.option(this.wProgram(WR, DF, EX) as WStream, "queryName", name);
+            };
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+    }
+
     async save(): Promise<void>;
     async save(path: string): Promise<void>;
     async save(impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
@@ -197,8 +279,8 @@ export class DataFrameWriterTF<
         const path = typeof a === "string" ? a : undefined;
         const impl = (typeof a === "object" ? a : b) ?? this.defaults();
         const { DF, EX, WR, EXE } = impl;
-        const w0 = this.wProgram(WR as WRALG, DF, EX);
-        const root = path ? (WR as any).targetPath(w0, path) : w0;
+        const writer = this.wProgram(WR, DF, EX);
+        const root = path ? this.sharedWriterAlg(WR).targetPath(writer, path) : writer;
         return EXE.run(root, this.session);
     }
 
@@ -206,7 +288,8 @@ export class DataFrameWriterTF<
     async createOrReplaceTempView(viewName: string, impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
     async createOrReplaceTempView(viewName: string, impl?: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void> {
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
-        const root = (WR as any).createOrReplaceTempView(this.wProgram(WR as WRALG, DF, EX), viewName);
+        const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createOrReplaceTempView, "createOrReplaceTempView");
+        const root = method(this.wProgram(WR, DF, EX), viewName);
         return EXE.run(root, this.session);
     }
 
@@ -214,7 +297,8 @@ export class DataFrameWriterTF<
     async createTempView(viewName: string, impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
     async createTempView(viewName: string, impl?: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void> {
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
-        const root = (WR as any).createTempView(this.wProgram(WR as WRALG, DF, EX), viewName);
+        const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createTempView, "createTempView");
+        const root = method(this.wProgram(WR, DF, EX), viewName);
         return EXE.run(root, this.session);
     }
 
@@ -222,125 +306,102 @@ export class DataFrameWriterTF<
     async saveAsTable(table: string, impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
     async saveAsTable(table: string, impl?: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void> {
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
-        const root = (WR as any).targetTable(this.wProgram(WR as WRALG, DF, EX), table);
+        const root = this.sharedWriterAlg(WR).targetTable(this.wProgram(WR, DF, EX), table);
         return EXE.run(root, this.session);
     }
 
-    // ==================== helpers de formato ====================
-    // (solo batch; evitamos que aparezcan en streaming)
-    parquet(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
+    parquet(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {
         return this.format("parquet");
     }
-    csv(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
+
+    csv(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {
         return this.format("csv");
     }
-    json(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
+
+    json(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {
         return this.format("json");
     }
-    orc(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
+
+    orc(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {
         return this.format("orc");
     }
-    avro(this: DataFrameWriterTF<R,E,G,WBatch,CDF,CEX,WRALG>) {
+
+    avro(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {
         return this.format("avro");
     }
 
-    async start(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>): Promise<StreamingQueryHandle> {
+    async start(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>): Promise<StreamingQueryHandle> {
         const { DF, EX, WR, EXE } = this.defaults();
-        const wnode = this.wProgram(WR as WRALG, DF, EX);
-        const root = (WR as any).start(wnode); // opcional, podés omitir esto y no setear ningún flag
-        return EXE.runStream(root, this.session);
+        const writerNode = this.wProgram(WR, DF, EX) as WStream;
+        const start = this.requireWriteMethod(this.streamWriterAlg(WR).start, "start");
+        return EXE.runStream(start(writerNode), this.session);
     }
 
-    fromTempView(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>, name: string) {
-        return this.chain(p => (WR: WRALG, DF, EX) =>
-            (WR as any).fromTempView(p(WR, DF, EX), name)
-        );
+    fromTempView(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string) {
+        return this.chain(program => (WR, DF, EX) => {
+            const method = this.requireWriteMethod(this.streamWriterAlg(WR).fromTempView, "fromTempView");
+            return method(program(WR, DF, EX) as WStream, name);
+        });
     }
-    awaitTermination(this: DataFrameWriterTF<R,E,G,WStream,CDF,CEX,WRALG>) {
+
+    awaitTermination(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>) {
         const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
-            (WR: WRALG, DF, EX) => (WR as any).awaitTermination(this.wProgram(WR, DF, EX));
+            (WR, DF, EX) => {
+                const method = this.requireWriteMethod(this.streamWriterAlg(WR).awaitTermination, "awaitTermination");
+                return method(this.wProgram(WR, DF, EX) as WStream);
+            };
         return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
     }
 
-    // ==================== backends por defecto ====================
-    private defaults(
-        this: DataFrameWriterTF<R, E, ProtoGroup, W, unknown, unknown, WRALG>
-    ): Impl<R, E, ProtoGroup, W, unknown, unknown, WRALG>;
-    private defaults(): Impl<R, E, G, W, CDF, CEX, WRALG>;
-    private defaults(): any {
+    private defaults(): Impl<R, E, G, W, CDF, CEX, WRALG> {
         if (this.DF && this.EX && this.WR && this.EXE) {
             return { DF: this.DF, EX: this.EX, WR: this.WR, EXE: this.EXE };
         }
-        // Por defecto usamos los intérpretes Proto* (siempre que el overload typed calce)
+
         return {
-            DF:  ProtoDFAlg,
-            EX:  ProtoExprAlg,
-            WR:  ProtoWritingAlg as unknown as WRALG, // implementa ambas APIs (batch/stream)
-            EXE: ProtoWritingExec,
+            DF: ProtoDFAlg as unknown as DFAlg<R, E, G, CDF>,
+            EX: ProtoExprAlg as unknown as ExprAlg<E> & CEX,
+            WR: ProtoWritingAlg as unknown as WRALG,
+            EXE: ProtoWritingExec as unknown as DFWritingExec<W>,
         };
     }
 
-    // ==================== SERIALIZACIÓN DEL WRITER (para tests) ====================
-    // Construimos el nodo de writer con trazas y lo serializamos directo.
+    private buildTraceWriterNode(): TWNode {
+        const DF = TraceDFAlg as unknown as DFAlg<unknown, unknown, unknown, unknown>;
+        const EX = TraceExprAlg as unknown as ExprAlg<unknown>;
+        const WR = TraceWriterAlg as unknown as SharedWriterRuntimeAlg<TWNode>;
+        return this.wProgram(WR as unknown as WRALG, DF as unknown as DFAlg<R, E, G, CDF>, EX as ExprAlg<E> & CEX) as unknown as TWNode;
+    }
+
     toClientASTJSON(): string {
-        const DF = TraceDFAlg as any;
-        const EX = TraceExprAlg as any;
-        const WR = TraceWriterAlg as any; // no requiere toJSON; devolvemos el nodo tal cual
-
-        const wnode = this.wProgram(WR, DF, EX) as any;
-
-        // Si preferís un shape estable, descomentá el bloque:
-        // const stable = {
-        //   node: /stream/i.test(String(wnode?.kind)) ? "writeStream" : "write",
-        //   format: wnode?.format,
-        //   options: wnode?.options ?? {},
-        //   partitionBy: wnode?.partitionBy ?? [],
-        //   mode: wnode?.mode,
-        //   outputMode: wnode?.outputMode,
-        //   trigger: wnode?.trigger,
-        //   queryName: wnode?.queryName,
-        //   target: wnode?.target ?? {},
-        //   child: wnode?.child,
-        // };
-        // return JSON.stringify(stable, null, 2);
-
-        return JSON.stringify(wnode, null, 2);
+        return JSON.stringify(this.buildTraceWriterNode(), null, 2);
     }
 
     toClientASTMermaid(): string {
-        const DF = TraceDFAlg as any;
-        const EX = TraceExprAlg as any;
-        const WR = TraceWriterAlg as any;
-
-        const wnode = this.wProgram(WR, DF, EX) as any;
-
-        const kind = wnode?.kind ?? (wnode?.node ?? "writer");
-        const isStream = /stream/i.test(String(kind));
-        const id = isStream ? "WriteStream" : "Write";
-
-        const fmt = wnode?.format ?? "-";
-        const mode = wnode?.mode ?? "-";
-        const outMode = wnode?.outputMode ?? "-";
-        const trig =
-            wnode?.trigger?.processingTime ??
-            (wnode?.trigger?.once ? "once" :
-                wnode?.trigger?.availableNow ? "availableNow" : "-");
-        const chk = wnode?.options?.checkpointLocation ?? "-";
-        const qn  = wnode?.queryName ?? "-";
-        const part = Array.isArray(wnode?.partitionBy) && wnode.partitionBy.length
-            ? wnode.partitionBy.join(",")
+        const writerNode = this.buildTraceWriterNode();
+        const id = /stream/i.test(String(writerNode.kind)) ? "WriteStream" : "Write";
+        const trigger = writerNode.trigger?.processingTime
+            ?? (writerNode.trigger?.once
+                ? "once"
+                : writerNode.trigger?.availableNow
+                    ? "availableNow"
+                    : "-");
+        const partitionBy = Array.isArray(writerNode.partitionBy) && writerNode.partitionBy.length
+            ? writerNode.partitionBy.join(",")
             : "-";
 
         let target = "no-target";
-        if (wnode?.target?.path)  target = `path:${wnode.target.path}`;
-        if (wnode?.target?.table) target = `table:${wnode.target.table}`;
-        if (wnode?.target?.name)  target = `${wnode?.target?.replace ? "createOrReplace" : "create"}:${wnode.target.name}`;
+        if (writerNode.target.kind === "path") target = `path:${writerNode.target.path}`;
+        if (writerNode.target.kind === "table") target = `table:${writerNode.target.table}`;
+        if (writerNode.target.kind === "tempView") {
+            target = `${writerNode.target.replace ? "createOrReplace" : "create"}:${writerNode.target.name}`;
+        }
 
         const caption =
-            `${id}\\nformat=${fmt}\\nmode=${mode}\\n` +
-            `outputMode=${outMode}\\ntrigger=${trig}\\n` +
-            `checkpoint=${chk}\\nqueryName=${qn}\\n` +
-            `partitionBy=${part}\\ntarget=${target}`;
+            `${id}\\nformat=${writerNode.format ?? "-"}\\nmode=${writerNode.mode ?? "-"}\\n` +
+            `outputMode=${writerNode.outputMode ?? "-"}\\ntrigger=${trigger}\\n` +
+            `checkpoint=${writerNode.options?.checkpointLocation ?? "-"}\\nqueryName=${writerNode.queryName ?? "-"}\\n` +
+            `partitionBy=${partitionBy}\\ntarget=${target}`;
 
         return `flowchart TD
   W(["${caption}"])

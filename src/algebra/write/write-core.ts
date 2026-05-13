@@ -10,7 +10,7 @@ export interface WriterTarget {
 }
 
 export interface WriterCommonSpec {
-    format?: BatchWriterFormat;
+    format?: BatchWriterFormat | StreamWriterFormat;
     options: Record<string, string>;
     partitionBy: string[];
     target?: WriterTarget;
@@ -40,7 +40,13 @@ export interface WriterSpec extends WriterCommonSpec {
     asTempView?: boolean;
     registerView?: { name: string; replace: boolean };
     outputMode?: "append" | "complete" | "update";
-    trigger?: { processingTime?: string } | { once?: boolean } | { availableNow?: boolean };
+    trigger?:
+        | { processingTime?: string }
+        | { once?: boolean }
+        | { availableNow?: boolean }
+        | { kind: "ProcessingTime"; intervalMs: number }
+        | { kind: "Once" }
+        | { kind: "Continuous"; checkpointIntervalMs: number };
     queryName?: string;
 }
 export interface WBatchBrand { __wflavor?: "batch" }
