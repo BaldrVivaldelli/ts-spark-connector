@@ -1,0 +1,14 @@
+.git
+.github
+.kiro
+node_modules
+dist
+coverage
+test-results
+example_data/dest
+*.log
+*.tsbuildinfo
+
+# The E2E client image needs the public CA, never the server private keystore.
+spark-server/certs/*
+!spark-server/certs/ca.crt

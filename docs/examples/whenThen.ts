@@ -1,11 +1,11 @@
-import { createSparkSession, col } from "../../src";
+import { col } from "ts-spark-connector";
+import { withExampleSession } from "./_session";
 
-async function main() {
-    const spark = createSparkSession("example-withcolumn-session");
-
+void withExampleSession(async spark => {
     const people = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
+        .option("inferSchema", "true")
         .csv("/data/people.tsv");
 
     const result = people
@@ -14,6 +14,4 @@ async function main() {
         .select("name", "age", "is_adult", "greeting");
 
     await result.show();
-}
-
-console.log(main())
+});

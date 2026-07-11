@@ -4,8 +4,9 @@
     "noEmit": true,
     "module": "esnext",
     "moduleResolution": "node",
-    "rootDir": "."
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "test/**/*.d.ts", "tests/**/*.ts"],
-  "exclude": []
+  "include": ["src/**/*.ts", "test/**/*.ts", "test/typed/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["src/experimental/**"]
 }

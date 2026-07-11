@@ -8,8 +8,16 @@ let _id = 0;
 const nid = (pfx: string) => `${pfx}_${++_id}`;
 
 export const TraceExprAlg = {
-    col: (name: string): TraceNode => ({id: nid("col"), label: `col(${name})`, children: []}),
-    lit: (v: any): TraceNode => ({id: nid("lit"), label: `lit(${JSON.stringify(v)})`, children: []}),
+    col: (name: string, planId?: number): TraceNode => ({
+        id: nid("col"),
+        label: `col(${name}${planId === undefined ? "" : `@${planId}`})`,
+        children: [],
+    }),
+    lit: (v: any): TraceNode => ({
+        id: nid("lit"),
+        label: `lit(${typeof v === "bigint" ? `${v}n` : JSON.stringify(v)})`,
+        children: [],
+    }),
     bin: (op: string, l: TraceNode, r: TraceNode): TraceNode =>
         ({id: nid("bin"), label: op, children: [l, r]}),
     call: (fn: string, args: TraceNode[]): TraceNode =>
@@ -23,8 +31,15 @@ export const TraceExprAlg = {
 } as const;
 
 export const TraceDFAlg = {
-    relation: (format: string, path: string | string[], opts?: Record<string, string>): TraceNode =>
-        ({id: nid("rel"), label: `relation(${format})`, children: []}),
+    relation: (
+        format: string,
+        _path: string | string[],
+        _opts?: Record<string, string>,
+        schema?: string
+    ): TraceNode =>
+        ({id: nid("rel"), label: `relation(${format}${schema ? ",schema" : ""})`, children: []}),
+
+    withPlanId: (df: TraceNode, _planId: number): TraceNode => df,
 
     select: (df: TraceNode, cols: TraceNode[]): TraceNode =>
         ({id: nid("select"), label: `select[${cols.length}]`, children: [df, ...cols]}),
@@ -66,6 +81,12 @@ export const TraceDFAlg = {
 
     union: (l: TraceNode, r: TraceNode, _opts?: any): TraceNode =>
         ({id: nid("union"), label: "union", children: [l, r]}),
+
+    intersect: (l: TraceNode, r: TraceNode, opts?: { all?: boolean }): TraceNode =>
+        ({id: nid("intersect"), label: opts?.all ? "intersectAll" : "intersect", children: [l, r]}),
+
+    except: (l: TraceNode, r: TraceNode, opts?: { all?: boolean }): TraceNode =>
+        ({id: nid("except"), label: opts?.all ? "exceptAll" : "except", children: [l, r]}),
 
     withColumnRenamed: (df: TraceNode, oldN: string, newN: string): TraceNode =>
         ({id: nid("rename"), label: `rename(${oldN}→${newN})`, children: [df]}),

@@ -1,13 +1,14 @@
-import { spark } from "../../src";
+import { withExampleSession } from "./_session";
 
-(async () => {
+void withExampleSession(async spark => {
     const people = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
+        .option("inferSchema", "true")
         .csv("/data/people.tsv");
 
-    people
+    await people
         .select("country")
         .distinct()
         .show();
-})();
+});

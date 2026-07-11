@@ -17,21 +17,27 @@
     "dist",
     "proto",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "start": "ts-node src/index.ts",
     "clean": "rimraf dist",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ext .ts",
-    "test": "vitest run",
-    "test:e2e": "vitest run test/examples.e2e.test.ts",
-    "test:watch": "vitest --passWithNoTests",
-    "test:docker": "docker compose -f docker-compose.test.yml up --build --abort-on-container-exit test-runner",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "lint": "eslint . --ext .ts --max-warnings=0",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "test:package": "node scripts/smoke-package.mjs",
+    "test:proto": "node scripts/verify-proto-manifest.mjs",
+    "benchmark": "npm run build && node scripts/benchmark-plan.mjs",
+    "test:docker": "docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner test-runner",
     "test:docker:cleanup": "docker compose -f docker-compose.test.yml down -v",
     "test:docker:logs": "docker compose -f docker-compose.test.yml logs -f",
-    "prepack": "npm run build",
+    "prepack": "npm run clean && npm run build",
     "prepare": "npm run build",
     "release": "semantic-release"
   },
@@ -74,6 +80,7 @@
     "@typescript-eslint/parser": "^8.8.0",
     "conventional-changelog-conventionalcommits": "^9.1.0",
     "eslint": "^9.33.0",
+    "fast-check": "4.8.0",
     "rimraf": "^6.0.0",
     "semantic-release": "^24.0.0",
     "ts-node": "^10.9.2",
@@ -171,7 +178,8 @@
         {
           "assets": [
             "CHANGELOG.md",
-            "package.json"
+            "package.json",
+            "package-lock.json"
           ],
           "message": "chore(release): ${nextRelease.version} [skip ci]"
         }

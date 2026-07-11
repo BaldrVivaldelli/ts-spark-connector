@@ -8,4 +8,6 @@ export type {
     ReadDFAny,
     ReadDFPrivate,
     ReadDFPublic,
+    StreamTriggerInput,
+    WriterOptionValue,
 } from "./dataFrameWriterTF";

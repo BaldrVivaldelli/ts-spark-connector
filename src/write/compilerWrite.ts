@@ -15,6 +15,7 @@ type ProtoMessage = Record<string, unknown>;
 type ProtoRel = ProtoMessage;
 
 type StreamTriggerShape = NonNullable<WriterSpec["trigger"]> | Trigger;
+type WriterFormat = BatchWriterFormat | StreamWriterFormat | (string & {});
 
 export interface ProtoCreateDataFrameViewPlan {
     command: {
@@ -122,8 +123,8 @@ const protoWritingAlg = {
         return asStream(createBaseWriter(child, "stream"));
     },
 
-    format<T extends ProtoWriterNode>(writer: T, fmt: BatchWriterFormat | StreamWriterFormat): T {
-        return updateWriterSpec(writer, { format: fmt });
+    format<T extends ProtoWriterNode>(writer: T, fmt: WriterFormat): T {
+        return updateWriterSpec(writer, { format: fmt as WriterSpec["format"] });
     },
 
     option<T extends ProtoWriterNode>(writer: T, key: string, value: string): T {
@@ -227,7 +228,10 @@ function toSaveModeV1(
         case "ignore":
             return 4;
         default:
-            return 0;
+            // DataFrameWriter.save() defaults to ErrorIfExists. Sending the
+            // UNSPECIFIED enum leaves a required proto field semantically
+            // undefined and is rejected by some Spark Connect versions.
+            return 3;
     }
 }
 
@@ -254,6 +258,9 @@ function toStreamTriggerV1(trigger?: StreamTriggerShape): ProtoMessage | undefin
     if ("availableNow" in trigger && trigger.availableNow) {
         return { available_now: true };
     }
+    if ("continuous" in trigger && typeof trigger.continuous === "string") {
+        return { continuous_checkpoint_interval: trigger.continuous };
+    }
 
     const kind = ("kind" in trigger ? trigger.kind : undefined)?.toLowerCase();
     if (kind === "processingtime") {
@@ -274,7 +281,7 @@ function toStreamTriggerV1(trigger?: StreamTriggerShape): ProtoMessage | undefin
         }
     }
 
-    return undefined;
+    throw new TypeError("Unsupported or invalid streaming trigger.");
 }
 
 function appendIfDefined(
@@ -316,20 +323,19 @@ function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
     const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
     const operation: ProtoMessage = {
         input: root.child,
-        source: spec.format ?? "parquet",
         mode: toSaveModeV1(spec.mode),
         options: spec.options ?? {},
         partitioning_columns: spec.partitionBy ?? [],
+        sort_column_names: spec.sortBy ?? [],
     };
+
+    appendIfDefined(operation, "source", spec.format);
 
     if (spec.bucketBy) {
         operation.bucket_by = {
             bucket_column_names: spec.bucketBy.columns,
             num_buckets: spec.bucketBy.numBuckets,
         };
-        if (spec.sortBy?.length) {
-            operation.sort_column_names = spec.sortBy;
-        }
     }
 
     if (spec.target?.path) {
@@ -339,8 +345,6 @@ function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
             table_name: spec.target.table,
             save_method: 1,
         };
-    } else {
-        throw new Error("V1 batch: falta destino path o table.");
     }
 
     return operation;
@@ -391,8 +395,12 @@ export function protoWriteRootToPlan(root: ProtoWriteRoot): ProtoPlan | ProtoPla
             const writeCmd: ProtoWriteStreamOperationPlan = {
                 command: {
                     write_stream_operation_start: buildStreamingWriteOperation(root, {
-                        unresolved_relation: {
-                            parts: [root.createStreamingView],
+                        read: {
+                            named_table: {
+                                unparsed_identifier: root.createStreamingView,
+                                options: {},
+                            },
+                            is_streaming: true,
                         },
                     }),
                 },

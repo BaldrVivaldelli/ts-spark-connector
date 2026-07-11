@@ -1,11 +1,10 @@
-import { createSparkSession } from "../../src";
+import { withExampleSession } from "./_session";
 
-async function main() {
-    const spark = createSparkSession("example-groupby-session");
-
+void withExampleSession(async spark => {
     const purchases = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
+        .option("inferSchema", "true")
         .csv("/data/purchases.tsv");
 
     const result = purchases
@@ -16,6 +15,4 @@ async function main() {
         });
 
     await result.show();
-}
-
-console.log(main())
+});

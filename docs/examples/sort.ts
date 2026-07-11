@@ -1,14 +1,16 @@
-import { spark, col } from "../../src";
+import { col } from "ts-spark-connector";
+import { withExampleSession } from "./_session";
 
-(async () => {
+void withExampleSession(async spark => {
     const purchases = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
+        .option("inferSchema", "true")
         .csv("/data/purchases.tsv");
 
-    purchases
+    await purchases
         .select("user_id", "amount")
         .sort("user_id", col("amount").ascNullsFirst())
         .limit(5)
         .show();
-})();
+});

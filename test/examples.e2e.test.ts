@@ -1,31 +1,33 @@
 // test/examples.e2e.test.ts
-import {describe, it, expect, beforeAll} from 'vitest';
-import {explode, lit, posexplode, split, to_json, from_json, struct} from "../src";
-import {SparkSession} from "../src";
+import {afterAll, describe, it, expect} from 'vitest';
+import {
+    SparkSession,
+    col,
+    explode,
+    from_json,
+    isNotNull,
+    isNull,
+    lit,
+    posexplode,
+    split,
+    struct,
+    to_json,
+    when,
+} from "../src";
 import {ReadChainedDataFrame} from "../src/read/readChainedDataFrame";
-let spark: any;
-let col: any, isNull: any, isNotNull: any, when: any;
 
+const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
+const sessionBuilder = SparkSession.builder().config("spark.connect.url", connectUrl);
 
+if (connectUrl.startsWith("scs://")) {
+    sessionBuilder.enableTLS({
+        trustStorePath: process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt",
+        serverNameOverride: process.env.SPARK_TLS_SERVER_NAME ?? "spark-connect",
+    });
+}
 
-beforeAll(async () => {
-    // si no viene del entorno, usa el local
-    process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
-
-
-    ({spark} = await import('../src/client/session'));
-    ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
-});
-
-const session = SparkSession.builder()
-    .withAuth({ type: "token", token: "my-token" }) // opcional
-    .enableTLS({
-        keyStorePath: "./spark-server/certs/keystore.p12",
-        keyStorePassword: "password",
-        trustStorePath: "./spark-server/certs/cert.crt",
-        trustStorePassword: "password"
-    })
-    .getOrCreate();
+const session = sessionBuilder.getOrCreate();
+afterAll(async () => session.close());
 // helpers para obtener DF frescos en cada test
 
 const DEST_BASE =
@@ -34,13 +36,64 @@ const DEST_BASE =
 const dest = (name: string) => `${DEST_BASE}/${name}`;
 
 const people = () =>
-
-    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/people.tsv');
+    session.read
+        .option('delimiter', '\t')
+        .option('header', 'true')
+        .option('inferSchema', 'true')
+        .csv('/data/people.tsv');
 
 const purchases = () =>
-    session.read.option('delimiter', '\t').option('header', 'true').csv('/data/purchases.tsv');
+    session.read
+        .option('delimiter', '\t')
+        .option('header', 'true')
+        .option('inferSchema', 'true')
+        .csv('/data/purchases.tsv');
 
 describe('examples (E2E)', () => {
+    it('uses the TLS compatibility endpoint', () => {
+        expect(connectUrl).toMatch(/^scs:\/\//);
+        expect(process.env.SPARK_TLS_CA ?? './spark-server/certs/ca.crt').toMatch(/ca\.crt$/);
+    });
+
+    it('validates join type/condition, sort/null ordering and WithColumns behaviorally', async () => {
+        const joined = await people()
+            .join(purchases(), col('id').eq(col('user_id')), 'LEFT')
+            .filter(col('product').eq('Macbook'))
+            .select('name', 'product', 'amount')
+            .collect() as Array<{ name: string; product: string; amount: number }>;
+        expect(joined).toEqual([{ name: 'Alice', product: 'Macbook', amount: 1200 }]);
+
+        const sorted = await people()
+            .select('name', 'age')
+            .orderBy(col('age').ascNullsFirst())
+            .collect() as Array<{ name: string; age: number | null }>;
+        expect(sorted[0]).toEqual({ name: 'Carol', age: null });
+
+        const replaced = await purchases()
+            .withColumn('amount', col('amount').gte(100))
+            .select('product', 'amount')
+            .orderBy('product')
+            .collect() as Array<{ product: string; amount: boolean }>;
+        expect(replaced.find(row => row.product === 'Macbook')?.amount).toBe(true);
+        expect(replaced.find(row => row.product === 'Mouse')?.amount).toBe(false);
+    }, 90_000);
+
+    it('reads every path in a multipath relation', async () => {
+        const rows = await session.read
+            .option('delimiter', '\t')
+            .option('header', 'true')
+            .csv('/data/people.tsv', '/data/people.tsv')
+            .collect();
+        expect(rows).toHaveLength(8);
+    }, 90_000);
+
+    it('round-trips a batch write through Spark', async () => {
+        const path = dest('roundtrip_parquet');
+        await purchases().write().parquet().mode('overwrite').save(path);
+        const rows = await session.read.parquet(path).collect();
+        expect(rows).toHaveLength(5);
+    }, 90_000);
+
     it('join + select + filter + groupBy + agg + show', async () => {
         const p = people();
         const pu = purchases();
@@ -390,7 +443,7 @@ describe('examples (E2E)', () => {
         expect(true).toBe(true);
     }, 90_000);
 
-    it('randomSplit([0.8, 0.2], 7) añade rand, filtra por rangos y luego dropea la col temporal', async () => {
+    it('randomSplit([0.8, 0.2], 7) usa rangos Sample disjuntos sin columna temporal', async () => {
         const df = purchases().select("user_id", "product", "amount");
         const [train, test] = df.randomSplit([0.8, 0.2], 7);
 
@@ -400,22 +453,15 @@ describe('examples (E2E)', () => {
         console.log("🔎 randomSplit train LogicalPlan:", trainJson);
         console.log("🔎 randomSplit test  LogicalPlan:", testJson);
 
-        // raíz Drop (se elimina la col temporal en la salida)
-        expect(trainJson).toMatch(/"type":\s*"Drop"/);
-        expect(testJson).toMatch(/"type":\s*"Drop"/);
-
-        // se agregó rand(seed=7) con alias __rand_split__
-        expect(trainJson).toMatch(/"type":\s*"UnresolvedFunction"[\s\S]*"name":\s*"rand"[\s\S]*"value":\s*7/);
-        expect(testJson).toMatch(/"type":\s*"UnresolvedFunction"[\s\S]*"name":\s*"rand"[\s\S]*"value":\s*7/);
-        expect(trainJson).toMatch(/"alias":\s*"__rand_split__"/);
-        expect(testJson).toMatch(/"alias":\s*"__rand_split__"/);
-
-        // rangos: train [0.0, 0.8)  /  test [0.8, 1.0]
-        expect(trainJson).toMatch(/"op":\s*">="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0(\.0+)?/);
-        expect(trainJson).toMatch(/"op":\s*"<"\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0\.8/);
-
-        expect(testJson).toMatch(/"op":\s*">="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*0\.8/);
-        expect(testJson).toMatch(/"op":\s*"<="\s*[\s\S]*"name":\s*"__rand_split__"[\s\S]*"value":\s*1(\.0+)?/);
+        expect(trainJson).toMatch(/"type":\s*"Sample"/);
+        expect(trainJson).toMatch(/"lowerBound":\s*0/);
+        expect(trainJson).toMatch(/"upperBound":\s*0\.8/);
+        expect(testJson).toMatch(/"lowerBound":\s*0\.8/);
+        expect(testJson).toMatch(/"upperBound":\s*1/);
+        expect(trainJson).toMatch(/"seed":\s*7/);
+        expect(testJson).toMatch(/"seed":\s*7/);
+        expect(trainJson).not.toContain("__rand_split__");
+        expect(testJson).not.toContain("__rand_split__");
 
         // que ejecuten sin reventar
         await train.limit(3).show();
@@ -459,6 +505,30 @@ describe('examples (E2E)', () => {
         expect(trace).toMatch(/"queryName"\s*:\s*"rate_q"/i);
 
     });
+
+    it('streaming: starts, times out, stops and exposes rows through a memory sink', async () => {
+        const queryName = `rate_e2e_${Date.now()}`;
+        const stream = ReadChainedDataFrame
+            .readStream<any, any, any>('rate', session, {
+                rowsPerSecond: '5',
+                numPartitions: '1',
+            })
+            .select('value');
+
+        const handle = await stream.writeStream()
+            .format('memory')
+            .outputMode('append')
+            .trigger({ processingTime: '500 milliseconds' })
+            .queryName(queryName)
+            .start();
+
+        expect(await handle.awaitTermination(2_000)).toBe(false);
+        await handle.stop();
+        expect(await handle.awaitTermination(30_000)).toBe(true);
+
+        const rows = await session.table(queryName).collect();
+        expect(rows.length).toBeGreaterThan(0);
+    }, 120_000);
 
 
 });

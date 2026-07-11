@@ -14,7 +14,7 @@ Thanks for considering a contribution to **ts-spark-connector**!
 
 ## Development
 
-- Code style: TypeScript + ESLint + Prettier
+- Code style: TypeScript + ESLint (`npm run lint`)
 - Tests: Vitest (`npm test` for unit tests)
 - Build: `npm run build`
 
@@ -47,13 +47,16 @@ Alternatively, you can manually start Spark and run tests:
 docker compose up -d --build spark
 
 # Run E2E tests
-npx vitest run "test/**/*.e2e.test.ts"
+npm run test:e2e
 
 # Clean up
 docker compose down
 ```
 
 📖 **For detailed testing instructions, see [TESTING.md](./TESTING.md)**
+
+The bundled server and E2E gate currently target Spark Connect 4.0.0 over TLS.
+Spark 3.5.x is not claimed as supported until it has its own green CI matrix.
 
 ## Pull Requests
 

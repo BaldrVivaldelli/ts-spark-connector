@@ -10,14 +10,14 @@ start_connect() {
   local FLAGS=(--host 0.0.0.0 --port "${SPARK_CONNECT_PORT:-15002}")
 
   if [[ -x "$SPARK_HOME/bin/spark-connect-server" ]]; then
-    # binario directo en 4.x
+    # Direct launcher provided by the pinned Spark 4.x image.
     exec "$SPARK_HOME/bin/spark-connect-server" "${FLAGS[@]}"
   elif [[ -x "$SPARK_HOME/sbin/start-connect-server.sh" ]]; then
-    # script sbin (por compatibilidad)
+    # Keep the upstream sbin launcher as a packaging-compatible fallback.
     "$SPARK_HOME/sbin/start-connect-server.sh" "${FLAGS[@]}"
     exec tail -F "$SPARK_HOME/logs/"*.out
   else
-    echo "No encuentro Spark Connect Server en $SPARK_HOME."
+    echo "Spark Connect Server launcher not found in $SPARK_HOME."
     ls -la "$SPARK_HOME/bin" "$SPARK_HOME/sbin" || true
     exit 127
   fi

@@ -1,12 +1,13 @@
-import { spark } from "../../src";
+import { withExampleSession } from "./_session";
 
-(async () => {
+void withExampleSession(async spark => {
     const purchases = spark.read
         .option("delimiter", "\t")
         .option("header", "true")
+        .option("inferSchema", "true")
         .csv("/data/purchases.tsv");
 
-    purchases
+    await purchases
         .dropDuplicates("user_id", "product")
         .show();
-})();
+});

@@ -1,9 +1,10 @@
 import { NullsOrder, SortDirection, WindowSpec } from "../../types";
 
+export type LiteralValue = string | number | boolean | bigint | null;
 
 export interface ExprAlg<E> {
-    col(name: string): E;
-    lit(v: string | number | boolean): E;
+    col(name: string, planId?: number): E;
+    lit(v: LiteralValue): E;
     bin(op: string, left: E, right: E): E;
     logical(op: "AND" | "OR", left: E, right: E): E;
     alias(input: E, ...names: string[]): E;

@@ -4,6 +4,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "lib": ["ES2020", "DOM"],
+    "types": ["node"],
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": false,
@@ -15,5 +16,5 @@
     "skipLibCheck": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "test", "tests"]
+  "exclude": ["node_modules", "dist", "test", "tests", "src/experimental/**"]
 }

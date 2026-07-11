@@ -1,120 +1,128 @@
-# spark-server (Docker)
+# Local Spark Connect server
 
-This folder contains a minimal **Spark Connect** server setup using Docker.  
-Use it to run `ts-spark-connector` locally without installing Spark on your host.
+The repository ships a Dockerized Spark Connect server for development and
+end-to-end tests. The image is pinned to **Apache Spark 4.0.0** and its matching
+Scala 2.13 Avro artifact. TLS is enabled by default on port `15002`.
 
-## 🧰 What you get
+This is the only Spark version currently covered by the repository's E2E
+setup. Spark 3.5.x and other releases may work, but are not claimed as supported
+until they have a green compatibility matrix.
 
-- A container running **Apache Spark** with the **Spark Connect** server enabled
-- gRPC bound on **`:15002`**
-- A volume mounted at `/data` for sample datasets
-- Simple build & run via `docker compose`
+## Files
 
-## 📁 Files
-
-```
+```text
 spark-server/
-├─ Dockerfile
-├─ entrypoint.sh
-└─ docker-compose.yml (example shown below – create at repo root if preferred)
+├── Dockerfile
+├── entrypoint.sh
+├── conf/spark-defaults.conf             # default TLS profile
+├── conf-plain/spark-defaults.conf       # opt-in plaintext profile
+└── certs/
+    ├── ca.crt                           # public development CA
+    ├── cert.crt                         # public server certificate
+    ├── keystore.p12                     # server key + certificate chain
+    └── generate-dev-certs.sh            # generation/validation tool
 ```
 
-## 🧩 docker-compose.yml (example)
+The root `docker-compose.yml` mounts sample data at `/data`. The image also
+installs `spark-avro_2.13:4.0.0` at build time so Avro reads do not depend on an
+Ivy download when the server starts.
 
-Create this file at the repo root (or adapt paths to your layout):
+## Start the TLS server
 
-```yaml
-services:
-  spark:
-    build: ./spark-server
-    container_name: spark-connect
-    ports:
-      - "15002:15002"
-    environment:
-      - SPARK_NO_DAEMONIZE=true
-      # optionally set Spark version for the Connect artifact in entrypoint.sh
-      - SPARK_VERSION=3.5.1
-    volumes:
-      - ./example_data:/data
-```
-
-> Mount any local folder with TSV/CSV/Parquet files to `/data` so your examples can read them, e.g. `/data/people.tsv` and `/data/purchases.tsv`.
-
-## 🐳 Dockerfile
-
-```Dockerfile
-FROM bitnami/spark:latest
-USER root
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-CMD ["/entrypoint.sh"]
-```
-
-## 🚀 Entrypoint
-
-`entrypoint.sh` starts the Spark Connect server on `0.0.0.0:15002`:
-
-```bash
-#!/bin/bash
-/opt/bitnami/spark/bin/spark-submit   --class org.apache.spark.sql.connect.service.SparkConnectServer   --conf spark.sql.connect.enable=true   --conf spark.sql.connect.grpc.binding=0.0.0.0:15002   --packages org.apache.spark:spark-connect_2.12:${SPARK_VERSION:-3.5.1}
-```
-
-> If you prefer to ship the jar yourself instead of `--packages`, adjust the command accordingly and make sure the artifact is in the container.
-
-## ▶️ Run
-
-From the repo root:
+From the repository root:
 
 ```bash
 docker compose up --build
 ```
 
-You should see logs indicating the Connect server is listening on `0.0.0.0:15002`.
-
-## 🔗 Client connection
-
-By default, `ts-spark-connector` uses the environment variable `SPARK_CONNECT_URL` or falls back to `sc://localhost:15002`:
-
-```bash
-export SPARK_CONNECT_URL=sc://localhost:15002
-```
-
-In TypeScript you can create a session like:
+Connect using the checked-in development CA:
 
 ```ts
-import { SparkSession } from "../src/client/session";
+import { SparkSession } from "ts-spark-connector";
 
 const session = SparkSession.builder()
-  // .withAuth({ type: "token", token: "my-token" }) // optional
-  .getOrCreate();
-```
-
-## 🔐 TLS (optional)
-
-This example uses **plain gRPC** for simplicity. If you need TLS, place your certificates in a secure path and enable TLS in your client:
-
-```ts
-const session = SparkSession.builder()
+  .config("spark.connect.url", "scs://localhost:15002")
   .enableTLS({
-    keyStorePath: "./certs/keystore.p12",
-    keyStorePassword: "password",
-    trustStorePath: "./certs/cert.crt",
-    trustStorePassword: "password",
+    trustStorePath: "./spark-server/certs/ca.crt",
   })
   .getOrCreate();
 ```
 
-> Enabling TLS on the **server** side requires additional Spark configuration not covered in this minimal setup.
+The certificate includes SANs for `localhost`, `127.0.0.1`, `spark`, and
+`spark-connect`, so normal local and Compose hostnames do not need a TLS name
+override.
 
-## 🧪 Sample data
+## Plain gRPC profile
 
-Place sample data under `./example_data` on your host. It will appear as `/data` in the container:
+Plaintext is available only as an explicit local-development override:
 
-- `people.tsv`
-- `purchases.tsv`
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.plain.yml \
+  up --build
+```
 
-Then you can reference them in your examples, e.g. `session.read.csv("/data/people.tsv")`.
+Use `sc://localhost:15002` with that profile. Do not send tokens, usernames, or
+passwords over it. The client rejects Basic/Bearer credentials on plaintext by
+default; `.allowInsecureAuth()` exists only for isolated, trusted development
+networks.
 
----
+The Docker E2E gate always uses the TLS profile.
 
-Happy Sparking! 🚀
+## Development certificates
+
+The committed certificates are public test fixtures, not secrets. The
+PKCS#12 password is `password` and matches `conf/spark-defaults.conf`. Never
+trust this CA or reuse this keystore in production, shared infrastructure, or
+any environment containing real data or credentials.
+
+Generate a fresh CA, server certificate, and PKCS#12 keystore with:
+
+```bash
+./spark-server/certs/generate-dev-certs.sh
+```
+
+The script uses a mode-`0700` temporary directory, removes it on exit, and
+never writes a loose private PEM key into the repository. It validates the
+chain, every required SAN, the PKCS#12 leaf certificate, and a 30-day renewal
+window before replacing the tracked artifacts. `keytool` is also used when it
+is installed; OpenSSL validation is always performed.
+
+Validate without replacing the current artifacts:
+
+```bash
+./spark-server/certs/generate-dev-certs.sh --check
+```
+
+The default lifetimes are 10 years for the development CA and 825 days for the
+server certificate. They can be changed for a renewal with
+`SPARK_DEV_CA_DAYS` and `SPARK_DEV_CERT_DAYS`. After renewal, commit
+`ca.crt`, `cert.crt`, and `keystore.p12` together and rebuild both Docker
+images. Any running container still has the previous keystore.
+
+The npm package allowlist contains only `dist`, `proto`, the root README, and
+the license, so none of these Docker test credentials are published.
+
+## Sample data and output
+
+The checked-in fixtures are available to Spark as:
+
+- `/data/people.tsv`
+- `/data/purchases.tsv`
+
+The regular Compose setup mounts the `spark-output` Docker volume at
+`/data/dest` for Parquet/CSV/JSON/ORC output. A named volume avoids host UID
+permission mismatches while Spark runs as a non-root user. While the service is
+running, use `docker compose cp spark:/data/dest ./spark-output` if you need a
+host copy. `docker compose down --volumes` deletes the stored output.
+
+## Troubleshooting
+
+- Validate certificates with `./spark-server/certs/generate-dev-certs.sh --check`.
+- Check status with `docker compose ps`.
+- Inspect the server with `docker compose logs spark`.
+- If a renewed certificate is not visible, rebuild the image rather than only
+  restarting the existing container.
+- A TCP health check proves that the gRPC port is listening; the E2E suite is
+  the protocol/TLS behavior check.

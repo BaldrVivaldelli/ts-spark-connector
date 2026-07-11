@@ -1,0 +1,6 @@
+# Development-only override. Use together with docker-compose.yml; do not send
+# credentials over this plaintext endpoint.
+services:
+  spark:
+    environment:
+      SPARK_CONF_DIR: /opt/spark/conf-plain

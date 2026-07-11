@@ -4,15 +4,14 @@ import {
     DEFAULT_JOIN_TYPE,
     toProtoGroupType,
     toProtoSortDirection,
-    // toProtoNullsOrder, // si tu proto lo necesita explícito en vez de boolean
-    toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
-    JoinHintName,
+    toProtoNullsOrder,
+    toProtoSetOpType, ExplainModeInput, GroupTypeInput,
 } from "./sparkConnectEnums";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
 import {SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
-import {DFAlg, ExprAlg} from "../algebra/read";
+import {DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
 
 type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
@@ -20,17 +19,114 @@ type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
 
 // ======================== EXPRESIONES (E = ProtoExpr) ========================
 
-type ProtoExpr = any; // ajustá al tipo real si lo tenés tipado
+/**
+ * Minimal structural protobuf representation used by the direct compiler.
+ *
+ * The runtime objects are plain values consumed by `@grpc/proto-loader`; they
+ * are not generated message classes. Keeping the recursive shape explicit
+ * prevents `any` from leaking through the interpreter while still allowing
+ * every Spark Connect message field emitted below.
+ */
+export type ProtoScalar = string | number | boolean | null;
+export type ProtoValue = ProtoScalar | ProtoMessage | ProtoValue[];
 
-type ProtoRel = any;
+export interface ProtoMessage {
+    [field: string]: ProtoValue | undefined;
+}
+
+interface ProtoUnresolvedAttribute extends ProtoMessage {
+    unparsed_identifier?: string | string[];
+    unparsedIdentifier?: string | string[];
+    plan_id?: number;
+}
+
+interface ProtoSortKeyMarker extends ProtoMessage {
+    input: ProtoExpr;
+    direction: "asc" | "desc";
+    nulls?: "nullsFirst" | "nullsLast";
+}
+
+export interface ProtoExpr extends ProtoMessage {
+    unresolved_attribute?: ProtoUnresolvedAttribute;
+    unresolvedAttribute?: ProtoUnresolvedAttribute;
+    sort_key_marker?: ProtoSortKeyMarker;
+}
+
+export interface ProtoRel extends ProtoMessage {
+    common?: ProtoMessage;
+}
+
+export type ProtoAnalyzeAction =
+    | { kind: "persist"; relation: ProtoRel; level: string }
+    | { kind: "unpersist"; relation: ProtoRel; blocking?: boolean };
+
+const PENDING_ANALYZE_ACTIONS = Symbol("ts-spark-connector.pendingAnalyzeActions");
+
+function withAnalyzeAction(relation: ProtoRel, action: ProtoAnalyzeAction): ProtoRel {
+    const next = { ...relation };
+    Object.defineProperty(next, PENDING_ANALYZE_ACTIONS, {
+        value: [
+            ...((relation as { [PENDING_ANALYZE_ACTIONS]?: ProtoAnalyzeAction[] })[PENDING_ANALYZE_ACTIONS] ?? []),
+            action,
+        ],
+        enumerable: false,
+        configurable: false,
+        writable: false,
+    });
+    return next;
+}
+
+function preserveAnalyzeActions(source: ProtoRel, target: ProtoRel): ProtoRel {
+    const actions = (source as { [PENDING_ANALYZE_ACTIONS]?: ProtoAnalyzeAction[] })[
+        PENDING_ANALYZE_ACTIONS
+    ];
+    if (!actions) return target;
+    Object.defineProperty(target, PENDING_ANALYZE_ACTIONS, {
+        value: actions,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+    });
+    return target;
+}
+
+/** Returns deferred AnalyzePlan actions embedded in a proto relation tree. */
+export function getPendingAnalyzeActions(root: unknown): ProtoAnalyzeAction[] {
+    const actions: ProtoAnalyzeAction[] = [];
+    const visited = new Set<object>();
+    const visit = (value: unknown) => {
+        if (!value || typeof value !== "object" || visited.has(value)) return;
+        visited.add(value);
+        const carrier = value as { [PENDING_ANALYZE_ACTIONS]?: ProtoAnalyzeAction[] };
+        for (const child of Object.values(value)) visit(child);
+        if (carrier[PENDING_ANALYZE_ACTIONS]) actions.push(...carrier[PENDING_ANALYZE_ACTIONS]!);
+    };
+    visit(root);
+    return actions;
+}
+
+/** Applies deferred cache/persist/unpersist actions before any execution path. */
+export async function applyPendingAnalyzeActions(
+    root: unknown,
+    session: SparkSession,
+): Promise<SparkConnectExecutor> {
+    const executor = SparkConnectExecutor.for(session);
+    for (const action of getPendingAnalyzeActions(root)) {
+        await executor.runAnalyzeAction(action);
+    }
+    return executor;
+}
 
 function protoExprToColumnName(expr: ProtoExpr): string | undefined {
     const unresolvedAttribute = expr?.unresolved_attribute ?? expr?.unresolvedAttribute;
     const parts = unresolvedAttribute?.unparsed_identifier ?? unresolvedAttribute?.unparsedIdentifier;
-    if (!Array.isArray(parts) || parts.length === 0) {
-        return undefined;
+    if (typeof parts === "string") {
+        return parts.length > 0 ? parts : undefined;
     }
-    return parts.join(".");
+
+    // Accept the legacy in-memory representation while plans created after
+    // this change use the proto-correct scalar string.
+    return Array.isArray(parts) && parts.length > 0 ? parts.join(".") : undefined;
 }
 
 function protoExprsToColumnNames(exprs?: ProtoExpr[]): string[] | undefined {
@@ -44,19 +140,122 @@ function protoExprsToColumnNames(exprs?: ProtoExpr[]): string[] | undefined {
         : undefined;
 }
 
-export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
-    col: (name) => ({
-        unresolved_attribute: {unparsed_identifier: [name]},
-    }),
-    lit: (v) => {
-        if (typeof v === "number") {
-            return Number.isInteger(v)
-                ? {literal: {integer: v}}
-                : {literal: {double: v}};
+const INT32_MIN = -2_147_483_648;
+const INT32_MAX = 2_147_483_647;
+const INT64_MIN = -9_223_372_036_854_775_808n;
+const INT64_MAX = 9_223_372_036_854_775_807n;
+
+function protoLiteral(value: LiteralValue): ProtoExpr {
+    if (value === null) {
+        // Expression.Literal.null contains a DataType, whose own `null` oneof
+        // selects DataType.NULL. An empty DataType would leave the kind unset.
+        return {literal: {null: {null: {}}}};
+    }
+
+    if (typeof value === "bigint") {
+        if (value < INT64_MIN || value > INT64_MAX) {
+            throw new RangeError(`BigInt literal ${value} is outside Spark's signed int64 range.`);
         }
-        if (typeof v === "boolean") return {literal: {boolean: v}};
-        return {literal: {string: String(v)}};
-    },
+        return {literal: {long: value.toString()}};
+    }
+
+    if (typeof value === "number") {
+        if (!Number.isInteger(value)) {
+            return {literal: {double: value}};
+        }
+        if (!Number.isSafeInteger(value)) {
+            throw new RangeError(
+                `Integer literal ${value} is not exactly representable as a JavaScript number; use a bigint instead.`,
+            );
+        }
+        if (value >= INT32_MIN && value <= INT32_MAX) {
+            return {literal: {integer: value}};
+        }
+        return {literal: {long: String(value)}};
+    }
+
+    if (typeof value === "boolean") return {literal: {boolean: value}};
+    return {literal: {string: value}};
+}
+
+function protoHintParameter(value: unknown): ProtoExpr {
+    if (value !== null && typeof value === "object") return value as ProtoExpr;
+    if (["string", "number", "boolean", "bigint"].includes(typeof value) || value === null) {
+        return protoLiteral(value as LiteralValue);
+    }
+    throw new TypeError(`Unsupported hint parameter type: ${typeof value}.`);
+}
+
+function protoSortOrder(
+    child: ProtoExpr,
+    direction: "asc" | "desc",
+    nulls?: "nullsFirst" | "nullsLast",
+) {
+    return {
+        child,
+        direction: toProtoSortDirection(direction),
+        null_ordering: toProtoNullsOrder(nulls, direction),
+    };
+}
+
+type ProtoWindowFrame = NonNullable<WindowSpec<ProtoExpr>["frame"]>;
+type ProtoWindowBoundary = ProtoWindowFrame["start"];
+
+function protoWindowValue(
+    frameType: ProtoWindowFrame["type"],
+    value: number,
+    preceding: boolean,
+): ProtoExpr {
+    const signedValue = preceding ? -Math.abs(value) : Math.abs(value);
+    if (!Number.isSafeInteger(signedValue)) {
+        throw new RangeError("Window frame boundaries must be safe integers.");
+    }
+
+    if (frameType === "rows") {
+        if (signedValue < INT32_MIN || signedValue > INT32_MAX) {
+            throw new RangeError("Row window frame boundaries must fit in a signed int32.");
+        }
+        return {literal: {integer: signedValue}};
+    }
+
+    // Spark Connect represents finite range-frame offsets as long literals,
+    // even when the value would also fit in int32.
+    return {literal: {long: String(signedValue)}};
+}
+
+function protoWindowBoundary(
+    boundary: ProtoWindowBoundary,
+    frameType: ProtoWindowFrame["type"],
+): ProtoExpr {
+    switch (boundary.type) {
+        case "UnboundedPreceding":
+        case "UnboundedFollowing":
+            return {unbounded: true};
+        case "CurrentRow":
+            return {current_row: true};
+        case "ValuePreceding":
+            return {value: protoWindowValue(frameType, boundary.value, true)};
+        case "ValueFollowing":
+            return {value: protoWindowValue(frameType, boundary.value, false)};
+    }
+}
+
+function protoWindowFrame(frame: ProtoWindowFrame) {
+    return {
+        frame_type: frame.type === "rows" ? "FRAME_TYPE_ROW" : "FRAME_TYPE_RANGE",
+        lower: protoWindowBoundary(frame.start, frame.type),
+        upper: protoWindowBoundary(frame.end, frame.type),
+    };
+}
+
+export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
+    col: (name, planId) => ({
+        unresolved_attribute: {
+            unparsed_identifier: name,
+            ...(planId === undefined ? {} : { plan_id: planId }),
+        },
+    }),
+    lit: protoLiteral,
     bin: (op, left, right) => ({
         unresolved_function: {function_name: op, arguments: [left, right]},
     }),
@@ -76,10 +275,10 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     star: () => ({unresolved_star: {}}),
     caseWhen: (branches, otherwise) => {
         if (otherwise == null) {
-            throw new Error("caseWhen requiere 'otherwise' para generar if anidados.");
+            throw new Error("caseWhen requires an 'otherwise' branch to generate nested ifs.");
         }
         // arranca por el else y va envolviendo: if(whenN, thenN, acc)
-        let acc: any = otherwise;
+        let acc: ProtoExpr = otherwise;
         for (let i = branches.length - 1; i >= 0; i--) {
             const b = branches[i];
             acc = {
@@ -91,8 +290,15 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
         }
         return acc;
     },
-    win: (func, _spec: WindowSpec<ProtoExpr>) => ({
-        win: {func},
+    win: (func, spec: WindowSpec<ProtoExpr>) => ({
+        window: {
+            window_function: func,
+            partition_spec: spec.partitionBy,
+            order_spec: spec.orderBy.map(order =>
+                protoSortOrder(order.input, order.direction, order.nulls)
+            ),
+            ...(spec.frame ? {frame_spec: protoWindowFrame(spec.frame)} : {}),
+        },
     }),
     isNull: (input) => ({
         unresolved_function: {
@@ -136,13 +342,13 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             ]
         }
     }),
-    map_keys: (mapExpr: any) => ({
+    map_keys: (mapExpr) => ({
         unresolved_function: {
             function_name: "map_keys",
             arguments: [mapExpr]
         }
     }),
-    map_values: (mapExpr: any) => ({
+    map_values: (mapExpr) => ({
         unresolved_function: {
             function_name: "map_values",
             arguments: [mapExpr]
@@ -162,7 +368,7 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
                 typeof key === "object"
                     ? key
                     : typeof key === "number"
-                        ? {literal: {integer: key}}
+                        ? protoLiteral(key)
                         : {literal: {string: String(key)}}
             ]
         }
@@ -197,16 +403,62 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
 
 };
 
-export type ProtoGroup = { __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: any } };
+export type ProtoGroup = {
+    __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: GroupTypeInput };
+};
+
+function protoSortedRelation(
+    input: ProtoRel,
+    orders: SortOrder<ProtoExpr>[],
+): ProtoRel {
+    return {
+        sort: {
+            input,
+            order: orders.map(order => {
+                const marker = order.expr.sort_key_marker;
+                return protoSortOrder(
+                    marker?.input ?? order.expr,
+                    marker?.direction ?? order.direction,
+                    marker?.nulls ?? order.nulls,
+                );
+            }),
+        },
+    };
+}
 
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
-    relation: (format, path, options) => ({
-        read: {
-            data_source: {
-                format,
-                paths: [path],
-                options: options ?? {},
+    relation: (format, path, options, schema) => {
+        if (format === "table") {
+            if (Array.isArray(path)) throw new TypeError("table reads accept exactly one identifier.");
+            return {
+                read: {
+                    named_table: {
+                        unparsed_identifier: path,
+                        options: options ?? {},
+                    },
+                },
+            };
+        }
+        if (format === "sql") {
+            if (Array.isArray(path)) throw new TypeError("SQL reads accept exactly one query.");
+            return { sql: { query: path } };
+        }
+        return {
+            read: {
+                data_source: {
+                    format,
+                    paths: Array.isArray(path) ? path : [path],
+                    options: options ?? {},
+                    ...(schema ? { schema } : {}),
+                },
             },
+        };
+    },
+    withPlanId: (input, planId) => preserveAnalyzeActions(input, {
+        ...input,
+        common: {
+            ...(input.common ?? {}),
+            plan_id: planId,
         },
     }),
     select: (input, columns) => ({
@@ -224,12 +476,10 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     }),
 
     withColumn: (input, name, column) => ({
-        project: {
+        with_columns: {
             input,
-            // Alias primero + star (o al revés, según cómo lo quieras)
-            expressions: [
-                {alias: {expr: column, name: [name]}},
-                {unresolved_star: {}},
+            aliases: [
+                {expr: column, name: [name]},
             ],
         },
     }),
@@ -238,7 +488,7 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         join: {
             left,
             right,
-            condition: on,
+            join_condition: on,
             join_type: toProtoJoinType(joinType ?? DEFAULT_JOIN_TYPE),
         },
     }),
@@ -256,31 +506,9 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         },
     }),
 
-    orderBy: (input, orders: SortOrder<ProtoExpr>[]) => ({
-        sort: {
-            input,
-            order: orders.map(o => {
-                // “desenvolvé” sortKey si vino de EX.sortKey(...)
-                const expr = o.expr && o.expr.sort_key_marker ? o.expr.sort_key_marker.input : o.expr;
-                return {
-                    child: expr,
-                    direction: toProtoSortDirection(o.direction), // "ASCENDING" | "DESCENDING"
+    orderBy: protoSortedRelation,
 
-
-                    // En tu compiler usabas boolean nulls_first; mantenemos ese contrato:
-                    nulls_first: o.nulls === "nullsFirst"
-                        ? true
-                        : o.nulls === "nullsLast"
-                            ? false
-                            : undefined,
-                };
-            }),
-        },
-    }),
-
-    sort: (input, orders) =>
-        // mismo mapping que orderBy
-        (ProtoDFAlg.orderBy as any)(input, orders),
+    sort: protoSortedRelation,
 
     limit: (input, n) => ({
         limit: {input, limit: n},
@@ -324,6 +552,24 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         },
     }),
 
+    intersect: (left, right, opts) => ({
+        set_op: {
+            left_input: left,
+            right_input: right,
+            set_op_type: toProtoSetOpType("intersect"),
+            is_all: !!opts?.all,
+        },
+    }),
+
+    except: (left, right, opts) => ({
+        set_op: {
+            left_input: left,
+            right_input: right,
+            set_op_type: toProtoSetOpType("except"),
+            is_all: !!opts?.all,
+        },
+    }),
+
     withColumnRenamed: (input, oldName, newName) => ({
         with_columns_renamed: {
             input,
@@ -339,45 +585,37 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             rename_columns_map: { ...mapping },
         },
     }),
-    describe: (input, columns) => ({
-        project: {
+    describe: (input, columns) => {
+        const names = protoExprsToColumnNames(columns);
+        if (!names) throw new TypeError("describe() only accepts plain column references.");
+        return { describe: { input, cols: names } };
+    },
+    summary: (input, metrics, _columns) => ({
+        summary: {
             input,
-            expressions: columns,
+            statistics: metrics.map(metric => {
+                const name = protoExprToColumnName(metric);
+                if (!name) throw new TypeError("summary() metrics must be plain names.");
+                return name;
+            }),
         },
     }),
-    summary: (input, metrics, columns) => ({
-        extension: {
-            value: {
-                input: input,
-                metrics,
-                columns,
-            },
-        }
-    }),
-    cache: (input) => ({
-        extension: {
-            cache: {
-                input
-            }
-        }
+    cache: input => withAnalyzeAction(input, {
+        kind: "persist",
+        relation: input,
+        level: "MEMORY_AND_DISK",
     }),
 
-    persist: (input, level) => ({
-        extension: {
-            persist: {
-                input,
-                ...(level ? {storage_level: level} : {})
-            }
-        }
+    persist: (input, level) => withAnalyzeAction(input, {
+        kind: "persist",
+        relation: input,
+        level: level ?? "MEMORY_AND_DISK",
     }),
 
-    unpersist: (input, blocking) => ({
-        extension: {
-            unpersist: {
-                input,
-                ...(blocking !== undefined ? {blocking} : {})
-            }
-        }
+    unpersist: (input, blocking) => withAnalyzeAction(input, {
+        kind: "unpersist",
+        relation: input,
+        blocking,
     }),
     repartition: (
         input,
@@ -403,11 +641,11 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             query
         }
     }),
-    hint: (input: ProtoRel, name: string, params?: any[]) => ({
+    hint: (input: ProtoRel, name: string, params?: unknown[]) => ({
         hint: {
-            input: input,
-            name: name,
-            parameters: params ,
+            input,
+            name,
+            parameters: (params ?? []).map(protoHintParameter),
         }
     }),
     sample: (input, lower, upper, withReplacement, seed, deterministicOrder) => ({
@@ -452,16 +690,26 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     }),
 };
 
-export const ProtoExec: DFExec<ProtoRel> = {
+export const ProtoExec: DFExec<unknown> = {
     async collect(root, session) {
-        return SparkConnectExecutor.for(session).execute(root);
+        const executor = await applyPendingAnalyzeActions(root, session);
+        // SparkConnectExecutor is shared with the client-side LogicalPlan
+        // interpreter, but at this boundary it transports an already-compiled
+        // protobuf relation. The executor never inspects the plan shape.
+        return executor.execute(
+            root as unknown as Parameters<SparkConnectExecutor["execute"]>[0]
+        );
     },
 
     async explain(root: ProtoRel, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<string> {
-        return SparkConnectExecutor.for(session).explain(root, mode);
+        const executor = await applyPendingAnalyzeActions(root, session);
+        return executor.explain(
+            root as unknown as Parameters<SparkConnectExecutor["explain"]>[0],
+            mode,
+        );
     }
 };
 
-export function programToProtobufRoot(root: ProtoRel) {
+export function programToProtobufRoot(root: unknown) {
     return {plan: {root}};
 }

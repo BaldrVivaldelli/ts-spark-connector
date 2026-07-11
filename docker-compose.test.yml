@@ -6,8 +6,10 @@ services:
     ports:
       - "15002:15002"   # Spark Connect gRPC port
       - "4040:4040"     # Spark UI (optional)
+    # The E2E compatibility gate intentionally exercises the default TLS
+    # profile on the pinned Spark 4.0.0 image.
     environment:
-      - SPARK_NO_DAEMONIZE=true
+      SPARK_NO_DAEMONIZE: "true"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "15002"]
       interval: 5s
@@ -25,7 +27,10 @@ services:
       spark:
         condition: service_healthy
     environment:
-      - SPARK_CONNECT_URL=sc://spark:15002
+      SPARK_CONNECT_URL: scs://spark:15002
+      SPARK_TLS_CA: /app/spark-server/certs/ca.crt
+      SPARK_TLS_SERVER_NAME: spark-connect
+      SPARK_TEST_DEST: /data/dest/e2e
     networks:
       - test-network
 

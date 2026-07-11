@@ -16,12 +16,13 @@ RUN npm ci --ignore-scripts
 # Copy source code and tests
 COPY . .
 
-# Copy data files and certificates for tests
+# Copy data and only the public development CA needed by the E2E client. The
+# server's PKCS#12 private key remains in the Spark image.
 COPY ./example_data /data
-COPY ./spark-server/certs /app/spark-server/certs
+COPY ./spark-server/certs/ca.crt /app/spark-server/certs/ca.crt
 
 # Build the TypeScript code
 RUN npm run build
 
-# Default command runs tests
-CMD ["npm", "test"]
+# Spark is provided by docker-compose.test.yml, so this image runs only E2E.
+CMD ["npm", "run", "test:e2e"]
