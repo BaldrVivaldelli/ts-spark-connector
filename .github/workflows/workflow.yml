@@ -2,58 +2,49 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   unit:
+    name: Unit / Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22, 24]
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
-      # Ensure netcat is present and create the output dir that is bind-mounted as /data/dest
-      - name: Prepare runner
-        run: |
-          sudo apt-get update && sudo apt-get install -y netcat-openbsd
-          mkdir -p example_data/dest
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Boot Spark
-        run: docker compose -f docker-compose.yml up -d spark
+      - name: Typecheck source
+        run: npm run typecheck
 
-      - name: Wait for Spark
-        run: |
-          for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then
-              echo "✅ Spark is up!"
-              exit 0
-            fi
-            echo "⏳ Waiting for Spark... ($i/60)"
-            sleep 2
-          done
-          echo "❌ Spark did not start in time"
-          docker compose -f docker-compose.yml logs spark
-          exit 1
+      - name: Typecheck tests
+        run: npm run typecheck:test
 
-      - run: npm ci
-        env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+      - name: Lint
+        run: npm run lint
 
-      - run: npm run typecheck --if-present
-      - run: npm run lint --if-present
+      - name: Unit tests
+        run: npm run test:unit
 
-      - run: npm test
-        env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+      - name: Verify Spark protocol manifest
+        run: npm run test:proto
 
-  e2e:
+  package:
+    name: Publishable tarball
     needs: unit
     runs-on: ubuntu-latest
     steps:
@@ -64,28 +55,57 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Prepare runner
-        run: |
-          sudo apt-get update && sudo apt-get install -y netcat-openbsd
-          mkdir -p example_data/dest
-
-      - name: Boot Spark
-        run: docker compose -f docker-compose.yml up -d spark
-
-      - name: Wait for Spark
-        run: |
-          for i in {1..60}; do
-            if nc -z 127.0.0.1 15002; then exit 0; fi
-            sleep 2
-          done
-          docker compose -f docker-compose.yml logs spark
-          exit 1
-
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
-      - name: Run E2E tests (host)
+      - name: Test packed CJS, ESM, and type consumers
+        run: npm run test:package
+
+      - name: Smoke plan-compilation benchmark
+        run: npm run benchmark
+        env:
+          SPARK_PLAN_BENCH_ITERATIONS: 1000
+
+  e2e:
+    name: E2E / Spark 4.0.0
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare writable Spark output
+        run: mkdir -p example_data/dest
+
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up --build --detach --wait spark
+
+      - name: Run E2E tests
         run: npm run test:e2e
         env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+          SPARK_CONNECT_URL: scs://127.0.0.1:15002
+          SPARK_TLS_CA: ./spark-server/certs/ca.crt
+          SPARK_TLS_SERVER_NAME: spark-connect
+          SPARK_TEST_DEST: /data/dest/ci
+
+      - name: Run an installed-package example
+        run: node -r ts-node/register docs/examples/join.ts
+        env:
+          SPARK_CONNECT_URL: scs://127.0.0.1:15002
+          SPARK_TLS_CA: ./spark-server/certs/ca.crt
+          SPARK_TLS_SERVER_NAME: spark-connect
+
+      - name: Show Spark logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs spark
+
+      - name: Stop Spark
+        if: always()
+        run: docker compose -f docker-compose.yml down --volumes

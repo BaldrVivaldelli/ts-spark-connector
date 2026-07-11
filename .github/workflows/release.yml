@@ -2,9 +2,9 @@ name: Release
 
 on:
   workflow_run:
-    workflows: ["CI"]
-    branches: [ main ]
-    types: [ completed ]
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
 
 permissions:
   contents: write
@@ -12,28 +12,56 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: release
+  group: release-main
   cancel-in-progress: false
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out the tested commit
+        uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
+      - name: Verify tested SHA is still main
+        id: tested-sha
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$TESTED_SHA" ]; then
+            echo "Checkout does not match the SHA tested by CI" >&2
+            exit 1
+          fi
+
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          if [ "$(git rev-parse origin/main)" != "$TESTED_SHA" ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "main advanced after this CI run; a newer workflow_run will release it"
+            exit 0
+          fi
+
+          git switch --force-create main "$TESTED_SHA"
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@v6
+        if: steps.tested-sha.outputs.eligible == 'true'
         with:
           node-version: 20
           cache: npm
-          registry-url: 'https://registry.npmjs.org'
+          registry-url: https://registry.npmjs.org
 
-      - run: npm ci
-      - run: npm run build --if-present
+      - name: Install the tested source tree
+        if: steps.tested-sha.outputs.eligible == 'true'
+        run: npm ci
 
       - name: Semantic Release
+        if: steps.tested-sha.outputs.eligible == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
