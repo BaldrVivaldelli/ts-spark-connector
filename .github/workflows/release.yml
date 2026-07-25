@@ -2,38 +2,72 @@ name: Release
 
 on:
   workflow_run:
-    workflows: ["CI"]
-    branches: [ main ]
-    types: [ completed ]
+    workflows: [CI]
+    branches: [next]
+    types: [completed]
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+  id-token: write
 
 concurrency:
-  group: release
+  group: release-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'next'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out the tested commit
+        uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          registry-url: 'https://registry.npmjs.org'
+      - name: Verify tested SHA is still next
+        id: tested-sha
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$TESTED_SHA" ]; then
+            echo "Checkout does not match the SHA tested by CI" >&2
+            exit 1
+          fi
 
-      - run: npm ci
-      - run: npm run build --if-present
+          git fetch origin "refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$TESTED_SHA" ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "$RELEASE_BRANCH advanced after this CI run; a newer workflow_run will release it"
+            exit 0
+          fi
+
+          git switch --force-create "$RELEASE_BRANCH" "$TESTED_SHA"
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        if: steps.tested-sha.outputs.eligible == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install the tested source tree
+        if: steps.tested-sha.outputs.eligible == 'true'
+        run: npm ci
+
+      - name: Generate production SBOM
+        if: steps.tested-sha.outputs.eligible == 'true'
+        run: npm run --silent sbom > sbom.cdx.json
 
       - name: Semantic Release
+        if: steps.tested-sha.outputs.eligible == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -43,3 +77,18 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: npx semantic-release
+
+      - name: Observe the published canary
+        if: steps.tested-sha.outputs.eligible == 'true'
+        run: node scripts/observe-canary.mjs
+
+      - name: Upload canary observation
+        if: >-
+          always() &&
+          steps.tested-sha.outputs.eligible == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-observation-${{ github.event.workflow_run.head_sha }}
+          path: artifacts/canary
+          if-no-files-found: warn
+          retention-days: 30
