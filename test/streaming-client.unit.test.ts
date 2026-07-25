@@ -82,7 +82,23 @@ describe("streaming query handles", () => {
         });
     });
 
-    it("rejects a missing exception status after a query terminates", async () => {
+    it("accepts an omitted exception status after a clean query termination", async () => {
+        vi.spyOn(sparkGrpcClient, "executePlan")
+            .mockResolvedValueOnce([startResponse])
+            .mockResolvedValueOnce([{
+                streaming_query_command_result: {
+                    await_termination: { terminated: true },
+                },
+            }])
+            .mockResolvedValueOnce([{
+                streaming_query_command_result: {},
+            }]);
+
+        const handle = await sparkGrpcClient.executePlanStreaming(startRequest);
+        await expect(handle.awaitTermination()).resolves.toBeUndefined();
+    });
+
+    it("rejects a missing query command result after a query terminates", async () => {
         vi.spyOn(sparkGrpcClient, "executePlan")
             .mockResolvedValueOnce([startResponse])
             .mockResolvedValueOnce([{
@@ -93,7 +109,7 @@ describe("streaming query handles", () => {
             .mockResolvedValueOnce([{ result_complete: {} }]);
 
         const handle = await sparkGrpcClient.executePlanStreaming(startRequest);
-        await expect(handle.awaitTermination()).rejects.toThrow(/missing exception result/i);
+        await expect(handle.awaitTermination()).rejects.toThrow(/missing query command result/i);
     });
 
     it("validates timeout values before issuing the command", async () => {

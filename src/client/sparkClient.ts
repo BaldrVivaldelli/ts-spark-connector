@@ -720,15 +720,18 @@ export const sparkGrpcClient = {
 
         const fetchQueryException = async (): Promise<void> => {
             const exceptionResponses = await executeQueryCommand({ exception: true });
-            const exceptionResult = exceptionResponses
+            const exceptionCommandResult = exceptionResponses
                 .map(extractStreamingQueryCommandResult)
-                .map(extractStreamingException)
-                .find((value): value is NonNullable<StreamingQueryCommandResult["exception"]> =>
+                .find((value): value is StreamingQueryCommandResult =>
                     value !== undefined
                 );
-            if (!exceptionResult) {
-                throw new Error("Invalid streaming exception response: missing exception result.");
+            if (!exceptionCommandResult) {
+                throw new Error(
+                    "Invalid streaming exception response: missing query command result.",
+                );
             }
+            const exceptionResult = extractStreamingException(exceptionCommandResult);
+            if (!exceptionResult) return;
             const message = exceptionResult?.exception_message ?? exceptionResult?.exceptionMessage;
             if (!message) return;
             const error = new Error(message) as Error & {
