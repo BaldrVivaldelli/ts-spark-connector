@@ -130,7 +130,6 @@ jobs:
 
       - name: Run E2E tests
         id: e2e
-        continue-on-error: true
         run: >-
           npm run test:e2e --
           --reporter=default
@@ -145,7 +144,6 @@ jobs:
       - name: Run an installed-package example
         id: example
         if: always()
-        continue-on-error: true
         run: npm run examples:run -- join
         env:
           SPARK_CONNECT_URL: scs://127.0.0.1:15002
@@ -153,7 +151,7 @@ jobs:
           SPARK_TLS_SERVER_NAME: spark-connect
 
       - name: Capture Spark logs on failure
-        if: always() && (steps.e2e.outcome != 'success' || steps.example.outcome != 'success')
+        if: failure()
         continue-on-error: true
         run: >-
           docker compose -f docker-compose.yml logs --no-color spark
@@ -179,7 +177,3 @@ jobs:
       - name: Stop Spark
         if: always()
         run: docker compose -f docker-compose.yml down --volumes
-
-      - name: Enforce E2E result
-        if: always() && (steps.e2e.outcome != 'success' || steps.example.outcome != 'success')
-        run: exit 1
