@@ -13,8 +13,9 @@ If applicable.
 
 ## Checklist
 
-- [ ] Tests pass locally (`npm test` / `vitest`)
+- [ ] PR title follows Conventional Commits
+- [ ] Quality checks pass locally (`npm run check`)
 - [ ] E2E passes against Spark Connect (Docker)
 - [ ] Docs updated (README / examples / API)
-- [ ] Changelog updated
+- [ ] `CHANGELOG.md` and package versions were not edited manually
 - [ ] No breaking changes (or documented in PR description)

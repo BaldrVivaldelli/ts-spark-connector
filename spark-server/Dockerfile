@@ -1,4 +1,7 @@
-FROM apache/spark:4.0.0
+ARG SPARK_VERSION=4.0.4
+FROM apache/spark:${SPARK_VERSION}
+
+ARG SPARK_VERSION
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -13,12 +16,12 @@ RUN id -u spark >/dev/null 2>&1 || (groupadd -g 1001 spark && useradd -u 1001 -g
     mkdir -p "$SPARK_HOME/conf" "$SPARK_HOME/jars" "$SPARK_HOME/tmp" "$SPARK_HOME/logs" /opt/spark/conf-plain /data/dest /opt/certs && \
     chown -R spark:spark "$SPARK_HOME" /opt/spark/conf-plain /data /opt/certs
 
-# Pin the Spark 4.0.0 / Scala 2.13 Avro artifact and avoid runtime downloads.
-ARG SPARK_AVRO_SHA256=083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709
+# Pin the version-matched Scala 2.13 Avro artifact and avoid runtime downloads.
+ARG SPARK_AVRO_SHA256=f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55
 RUN curl --fail --show-error --location \
-      https://repo1.maven.org/maven2/org/apache/spark/spark-avro_2.13/4.0.0/spark-avro_2.13-4.0.0.jar \
-      --output /opt/spark/jars/spark-avro_2.13-4.0.0.jar \
- && echo "$SPARK_AVRO_SHA256  /opt/spark/jars/spark-avro_2.13-4.0.0.jar" | sha256sum --check --strict
+      "https://repo1.maven.org/maven2/org/apache/spark/spark-avro_2.13/${SPARK_VERSION}/spark-avro_2.13-${SPARK_VERSION}.jar" \
+      --output "/opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" \
+ && echo "$SPARK_AVRO_SHA256  /opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" | sha256sum --check --strict
 
 # TLS is the default profile. docker-compose.plain.yml selects conf-plain.
 COPY --chown=spark:spark ./spark-server/conf/spark-defaults.conf $SPARK_HOME/conf/spark-defaults.conf

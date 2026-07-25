@@ -2,10 +2,8 @@
  * Funciones escalares tipadas + `caseWhen` (`when().otherwise()`),
  * **agnósticas del intérprete**.
  *
- * Promueven y reescriben las funciones del prototipo experimental
- * (`src/experimental/functions.ts`), que construían proto directamente vía
- * `ProtoExprAlg`, para que ahora construyan su expresión `E` a través de
- * `ExprAlg<E>` (Requirement 8.7, 3.2). Cada función declara el/los tipo(s) de
+ * Construyen su expresión `E` a través de `ExprAlg<E>`. Cada función declara
+ * el/los tipo(s) de
  * columna de entrada y el tipo de salida, de modo que el tipo (y su
  * nullabilidad) fluye por `withColumn`/`select` igual que en el prototipo
  * (Requirement 8.4).
@@ -103,7 +101,7 @@ export function round<T extends NumericValue | null, E>(
  * `number`), de modo que `when(cond, "high")` produzca una cadena de `string`
  * (no de `"high"`) y las ramas siguientes admitan otros valores del mismo tipo.
  */
-type Widen<V> = V extends string
+export type Widen<V> = V extends string
     ? string
     : V extends number
       ? number
@@ -114,7 +112,7 @@ type Widen<V> = V extends string
         : V;
 
 /** Una rama `when(cond) -> value` aún sin interpretar. */
-interface Branch<T extends ScalarType, E> {
+export interface Branch<T extends ScalarType, E> {
     readonly cond: Condition<E>;
     readonly value: T | TypedColumn<T, E>;
 }
@@ -139,7 +137,7 @@ export function when<V extends ScalarType, E>(
  * agregado devuelve una nueva cadena. Solo al llamar `otherwise` se materializa
  * el `TypedColumn` con su *thunk*.
  */
-class CaseChain<T extends ScalarType, E> {
+export class CaseChain<T extends ScalarType, E> {
     /** @internal Las cadenas se obtienen de `when(...)`, no se construyen a mano. */
     constructor(private readonly branches: ReadonlyArray<Branch<T, E>>) {}
 

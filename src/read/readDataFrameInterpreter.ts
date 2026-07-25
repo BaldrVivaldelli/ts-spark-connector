@@ -8,11 +8,7 @@ function exprToColumnName(expr: Expression): string | undefined {
     return expr.type === "Column" ? expr.name : undefined;
 }
 
-function exprsToColumnNames(exprs?: Expression[]): string[] | undefined {
-    if (!exprs || exprs.length === 0) {
-        return [];
-    }
-
+function exprsToColumnNames(exprs: Expression[]): string[] | undefined {
     const columnNames = exprs.map(exprToColumnName);
     return columnNames.every((name): name is string => typeof name === "string" && name.length > 0)
         ? columnNames

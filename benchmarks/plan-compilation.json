@@ -1,0 +1,6 @@
+{
+  "benchmark": "logical-plan-to-proto-json",
+  "plansPerSecond": 10000,
+  "maxRegressionPercent": 15,
+  "maxHeapGrowthBytes": 67108864
+}

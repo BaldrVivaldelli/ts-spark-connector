@@ -2,8 +2,7 @@
  * Decodificación de filas tipadas — convierte los batches Arrow de Spark
  * Connect en objetos fila planos.
  *
- * Promovido desde `src/experimental/arrow-rows.ts` a la API pública (`src/typed/`)
- * como parte de la unificación del DataFrame con schema tipado.
+ * Forma parte de la API pública unificada del DataFrame con schema tipado.
  *
  * La API no tipada solo dispone de `printArrowResults` (display) y `collectRaw`
  * (respuestas crudas). Para que `collect()` en el camino tipado devuelva filas
@@ -23,6 +22,14 @@ function arrow(): typeof import("apache-arrow") {
     // Arrow is comparatively large; keep the normal plan-building import path
     // light and load it only when rows are actually decoded.
     return arrowModule ??= require("apache-arrow") as typeof import("apache-arrow");
+}
+
+function requiredAt<T>(values: readonly T[], index: number, context: string): T {
+    const value = values[index];
+    if (value === undefined) {
+        throw new TypeError(`Malformed Arrow schema: missing ${context} at index ${index}.`);
+    }
+    return value;
 }
 
 /** Forma de una respuesta de Spark Connect que transporta un batch Arrow. */
@@ -59,7 +66,10 @@ export function rowsFromArrowBuffers<Row>(buffers: Buffer[], expectedSchema?: Sc
         for (let r = 0; r < table.numRows; r++) {
             const row: Record<string, unknown> = {};
             for (let c = 0; c < names.length; c++) {
-                row[names[c]] = normalizeValue(vectors[c].get(r), fields[c].type);
+                const name = requiredAt(names, c, "field name");
+                const vector = requiredAt(vectors, c, "column vector");
+                const field = requiredAt(fields, c, "field");
+                row[name] = normalizeValue(vector.get(r), field.type);
             }
             rows.push(row as Row);
         }
@@ -90,7 +100,7 @@ function normalizeValue(value: unknown, type: DataType): unknown {
         return decimalString(String(value), type.scale);
     }
     if (DataType.isList(type) || DataType.isFixedSizeList(type)) {
-        const childType = type.children[0].type;
+        const childType = requiredAt(type.children, 0, "list child").type;
         return Array.from(value as Iterable<unknown>, item => normalizeValue(item, childType));
     }
     if (DataType.isStruct(type)) {
@@ -101,9 +111,9 @@ function normalizeValue(value: unknown, type: DataType): unknown {
         ]));
     }
     if (DataType.isMap(type)) {
-        const entry = type.children[0].type;
-        const keyType = entry.children[0].type;
-        const valueType = entry.children[1].type;
+        const entry = requiredAt(type.children, 0, "map entry").type;
+        const keyType = requiredAt(entry.children, 0, "map key").type;
+        const valueType = requiredAt(entry.children, 1, "map value").type;
         return new Map(Array.from(
             value as Iterable<[unknown, unknown]>,
             ([key, item]) => [normalizeValue(key, keyType), normalizeValue(item, valueType)],
@@ -138,7 +148,7 @@ function assertExpectedSchema(fields: readonly Field<DataType>[], expected: Sche
     }
 
     entries.forEach(([name, spec], index) => {
-        const field = fields[index];
+        const field = requiredAt(fields, index, "expected field");
         if (!isNullableSpec(spec) && field.nullable) {
             throw new TypeError(
                 `Spark schema mismatch at ${name}: TypeScript expects a non-null column, ` +
@@ -189,7 +199,7 @@ function assertFieldType(actualInput: DataType, spec: FieldSpec, path: string): 
             if (!(DataTypeRuntime.isList(actual) || DataTypeRuntime.isFixedSizeList(actual))) {
                 schemaTypeMismatch(path, "ARRAY", actual);
             }
-            assertFieldType(actual.children[0].type, spec.element, `${path}[]`);
+            assertFieldType(requiredAt(actual.children, 0, `${path} array child`).type, spec.element, `${path}[]`);
             return;
         }
         case "map": {
@@ -202,12 +212,13 @@ function assertFieldType(actualInput: DataType, spec: FieldSpec, path: string): 
             if (!DataTypeRuntime.isStruct(actual)) schemaTypeMismatch(path, "STRUCT", actual);
             const expectedFields = Object.entries(spec.fields);
             if (actual.children.length !== expectedFields.length ||
-                actual.children.some((field, index) => field.name !== expectedFields[index][0])) {
+                actual.children.some((field, index) => field.name !== expectedFields[index]?.[0])) {
                 throw new TypeError(`Spark schema mismatch at ${path}: nested struct fields differ.`);
             }
-            expectedFields.forEach(([name, child], index) =>
-                assertFieldType(actual.children[index].type, child, `${path}.${name}`)
-            );
+            expectedFields.forEach(([name, child], index) => {
+                const actualChild = requiredAt(actual.children, index, `${path} struct child`);
+                assertFieldType(actualChild.type, child, `${path}.${name}`);
+            });
             return;
         }
     }

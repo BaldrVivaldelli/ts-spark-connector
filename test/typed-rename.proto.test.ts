@@ -21,9 +21,13 @@ describe("typed withColumnRenamed (runtime plan)", () => {
   });
 
   it("rejects rename targets that would create duplicate row keys", () => {
-    expect(() => (people() as any).withColumnRenamed("name", "id"))
+    const runtime = people() as unknown as {
+      withColumnRenamed(from: string, to: string): unknown;
+      withColumnsRenamed(mapping: Record<string, string>): unknown;
+    };
+    expect(() => runtime.withColumnRenamed("name", "id"))
       .toThrow(/duplicate column/i);
-    expect(() => (people() as any).withColumnsRenamed({ id: "same", name: "same" }))
+    expect(() => runtime.withColumnsRenamed({ id: "same", name: "same" }))
       .toThrow(/multiple columns/i);
   });
 });

@@ -1,9 +1,7 @@
 /**
  * Agregaciones tipadas para `groupBy().agg()`, **agnósticas del intérprete**.
  *
- * Promueve y reescribe el prototipo experimental
- * (`src/experimental/aggregations.ts`), que construía proto directamente vía
- * `ProtoExprAlg`, a builders **parametrizados por el álgebra `E`**: cada
+ * Implementa builders **parametrizados por el álgebra `E`**: cada
  * agregación guarda un *thunk* `(EX: ExprAlg<E>) => E` y solo lo evalúa cuando
  * se la interpreta, conservando la parametricidad tagless-final
  * (Requirement 3.2) y la equivalencia de plan con el camino laxo, igual que los
@@ -38,7 +36,7 @@ import type { Aggregation as AggregationShape } from "../schema/schema-transform
 import { Columns, makeColumns, NumericValue } from "./typed-column";
 
 /** Un *thunk* que construye la expresión `E` del intérprete a partir del álgebra. */
-type ExprThunk<E> = (EX: ExprAlg<E>) => E;
+export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
 
 // ---------------------------------------------------------------------------
 // Aggregation<Alias, T, E>
@@ -108,23 +106,23 @@ export class PendingAggregation<T extends ColumnType, E> {
  * (validado contra `keyof S`), o bien una `TypedColumn<T, E>` ya construida
  * (p. ej. la que produce el accesor `Columns<S, E>` del camino tipado).
  */
-type BuildableColumn<E> = { build(EX: ExprAlg<E>): E };
+export type BuildableColumn<E> = { build(EX: ExprAlg<E>): E };
 
-type NumericColumnKey<S extends SchemaShape> = {
+export type NumericColumnKey<S extends SchemaShape> = {
     [K in UsableColumnKey<S>]: NonNull<UsableColumnType<S, K>> extends NumericValue
         ? K
         : never;
 }[UsableColumnKey<S>];
 
-type NumericResult<S extends SchemaShape, K extends NumericColumnKey<S>> = Extract<
+export type NumericResult<S extends SchemaShape, K extends NumericColumnKey<S>> = Extract<
     NonNull<UsableColumnType<S, K>>,
     NumericValue
 >;
 
-type SumResult<S extends SchemaShape, K extends NumericColumnKey<S>> =
+export type SumResult<S extends SchemaShape, K extends NumericColumnKey<S>> =
     NumericResult<S, K> extends bigint ? bigint : number | bigint;
 
-type ColRef<
+export type ColRef<
     S extends SchemaShape,
     E,
     K extends UsableColumnKey<S> = UsableColumnKey<S>,

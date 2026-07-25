@@ -10,7 +10,8 @@ export interface WriterTarget {
 }
 
 export interface WriterCommonSpec {
-    format?: BatchWriterFormat | StreamWriterFormat;
+    /** Spark data source provider name, including third-party providers. */
+    format?: string;
     options: Record<string, string>;
     partitionBy: string[];
     target?: WriterTarget;
@@ -22,7 +23,7 @@ export interface WriteCore<R, W> {
     fromChild(child: R): W;
 
     // comunes a ambos mundos
-    format(w: W, fmt: BatchWriterFormat): W;
+    format(w: W, fmt: string): W;
     option(w: W, k: string, v: string): W;
     options(w: W, opts: Record<string, string>): W;
     partitionBy(w: W, ...cols: string[]): W;
@@ -44,6 +45,7 @@ export interface WriterSpec extends WriterCommonSpec {
         | { processingTime?: string }
         | { once?: boolean }
         | { availableNow?: boolean }
+        | { continuous?: string }
         | { kind: "ProcessingTime"; intervalMs: number }
         | { kind: "Once" }
         | { kind: "Continuous"; checkpointIntervalMs: number };

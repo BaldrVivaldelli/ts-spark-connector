@@ -1,5 +1,5 @@
 import { col } from "ts-spark-connector";
-import { withExampleSession } from "./_session";
+import { withExampleSession } from "./_session.js";
 
 void withExampleSession(async spark => {
     const people = spark.read

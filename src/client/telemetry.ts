@@ -1,4 +1,8 @@
-import type { SparkConnectionConfig, SparkTelemetryEvent } from "./session";
+import type {
+    SparkConnectionConfig,
+    SparkMetric,
+    SparkTelemetryEvent,
+} from "./session";
 
 const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY = /(?:auth(?:orization)?|token|password|secret|credential|private.?key|api.?key)/i;
@@ -28,6 +32,21 @@ function redactValue(value: unknown, seen: WeakSet<object>): unknown {
     return output;
 }
 
+function observeSafely<T>(
+    observer: ((value: T) => unknown) | undefined,
+    value: T,
+): void {
+    if (!observer) return;
+    try {
+        const result = observer(value);
+        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+            Promise.resolve(result).catch(() => undefined);
+        }
+    } catch {
+        // Observability is intentionally isolated from transport control flow.
+    }
+}
+
 /** @internal Recursively removes credentials before an object reaches a logger. */
 export function redactForTelemetry(value: unknown): unknown {
     return redactValue(value, new WeakSet<object>());
@@ -40,19 +59,39 @@ export function emitTelemetry(
     level: SparkTelemetryEvent["level"],
     attributes: Record<string, unknown> = {}
 ): void {
-    if (!config?.logger) return;
+    if (!config?.logger && !config?.metrics) return;
+    const timestamp = new Date().toISOString();
+    const redactedAttributes = redactForTelemetry(attributes) as Record<string, unknown>;
     const event: SparkTelemetryEvent = {
         name,
         level,
-        timestamp: new Date().toISOString(),
-        attributes: redactForTelemetry(attributes) as Record<string, unknown>,
+        timestamp,
+        attributes: redactedAttributes,
     };
-    try {
-        const result = (config.logger as (entry: Readonly<SparkTelemetryEvent>) => unknown)(event);
-        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
-            Promise.resolve(result).catch(() => undefined);
+
+    observeSafely(config.logger, event);
+    if (config.metrics) {
+        const counter: SparkMetric = {
+            name: `${name}.count`,
+            kind: "counter",
+            value: 1,
+            unit: "count",
+            timestamp,
+            attributes: redactedAttributes,
+        };
+        observeSafely(config.metrics, counter);
+
+        const durationMs = redactedAttributes.durationMs;
+        if (typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0) {
+            const duration: SparkMetric = {
+                name: `${name}.duration`,
+                kind: "histogram",
+                value: durationMs,
+                unit: "milliseconds",
+                timestamp,
+                attributes: redactedAttributes,
+            };
+            observeSafely(config.metrics, duration);
         }
-    } catch {
-        // Observability is intentionally isolated from transport control flow.
     }
 }

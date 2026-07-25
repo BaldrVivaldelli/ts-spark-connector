@@ -16,13 +16,17 @@ import {
 
 import { ProtoWritingAlg } from "./compilerWrite";
 import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
-import { TraceWriterAlg, TWNode } from "../trace/traceWriterAlg";
+import {
+    TraceWriterAlg,
+    TWNode,
+    writerToClientASTMermaid,
+} from "../trace/traceWriterAlg";
 import { BatchWriterAlg, StreamWriterAlg } from "../algebra/write/dataframe";
 import { DFWritingExec } from "./writeDataFrame";
 import { StreamingQueryHandle } from "../client/sparkClient";
 
 // ==================== tipos base ====================
-type DefaultR = unknown;
+export type DefaultR = unknown;
 const PROTO_INT32_MAX = 2_147_483_647;
 export type WriterOptionValue = string | number | boolean | bigint;
 export type StreamTriggerInput =
@@ -121,7 +125,7 @@ function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgr
     return isPublicReadDF(df) ? df.getProgram() : df._getProgram();
 }
 
-type Impl<R, E, G, W, CDF, CEX, WRALG> = {
+export type Impl<R, E, G, W, CDF, CEX, WRALG> = {
     DF: DFAlg<R, E, G, CDF>;
     EX: ExprAlg<E> & CEX;
     WR: WRALG;
@@ -521,35 +525,6 @@ export class DataFrameWriterTF<
     }
 
     toClientASTMermaid(): string {
-        const writerNode = this.buildTraceWriterNode();
-        const id = /stream/i.test(String(writerNode.kind)) ? "WriteStream" : "Write";
-        const trigger = writerNode.trigger?.processingTime
-            ?? (writerNode.trigger?.once
-                ? "once"
-                : writerNode.trigger?.availableNow
-                    ? "availableNow"
-                    : "-");
-        const partitionBy = Array.isArray(writerNode.partitionBy) && writerNode.partitionBy.length
-            ? writerNode.partitionBy.join(",")
-            : "-";
-
-        let target = "no-target";
-        if (writerNode.target.kind === "path") target = `path:${writerNode.target.path}`;
-        if (writerNode.target.kind === "table") target = `table:${writerNode.target.table}`;
-        if (writerNode.target.kind === "tempView") {
-            target = `${writerNode.target.replace ? "createOrReplace" : "create"}:${writerNode.target.name}`;
-        }
-
-        const caption =
-            `${id}\\nformat=${writerNode.format ?? "-"}\\nmode=${writerNode.mode ?? "-"}\\n` +
-            `outputMode=${writerNode.outputMode ?? "-"}\\ntrigger=${trigger}\\n` +
-            `checkpoint=${writerNode.options?.checkpointLocation ?? "-"}\\nqueryName=${writerNode.queryName ?? "-"}\\n` +
-            `partitionBy=${partitionBy}\\ntarget=${target}`;
-
-        return `flowchart TD
-  W(["${caption}"])
-  C["DF pipeline"]
-  W --> C
-`;
+        return writerToClientASTMermaid(this.buildTraceWriterNode());
     }
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import {
     existsSync,
     copyFileSync,
@@ -22,11 +22,12 @@ const workspace = mkdtempSync(join(tmpdir(), "ts-spark-connector-package-"));
 const staleMarker = join(root, "dist", "__stale_package_smoke__.js");
 
 const run = (command, args, options = {}) => {
-    execFileSync(command, args, {
+    const result = spawnSync(command, args, {
         cwd: root,
         stdio: "inherit",
         ...options,
     });
+    assert.equal(result.status, 0, result.error?.message ?? `${command} failed`);
 };
 
 try {
@@ -60,6 +61,8 @@ try {
     assert.ok(existsSync(join(extractedPackage, "dist", "index.js")), "tarball is missing dist/index.js");
     assert.ok(existsSync(join(extractedPackage, "dist", "index.d.ts")), "tarball is missing dist/index.d.ts");
     assert.ok(existsSync(join(extractedPackage, "proto", "spark", "connect", "base.proto")), "tarball is missing Spark proto files");
+    assert.ok(existsSync(join(extractedPackage, "MIGRATION.md")), "tarball is missing the migration guide");
+    assert.ok(existsSync(join(extractedPackage, "docs", "examples", "join.ts")), "tarball is missing executable examples");
     assert.ok(existsSync(join(extractedPackage, "NOTICE")), "tarball is missing NOTICE for vendored Spark protocol files");
     assert.ok(!existsSync(join(extractedPackage, "dist", "__stale_package_smoke__.js")), "prepack did not clean stale dist output");
     assert.ok(!existsSync(join(extractedPackage, "src")), "tarball must not include source files");
@@ -134,7 +137,7 @@ void col("id");
     run(process.execPath, [join(consumerDir, "consumer.cjs")], { cwd: consumerDir });
     run(process.execPath, [join(consumerDir, "consumer.mjs")], { cwd: consumerDir });
     run(process.execPath, [
-        join(root, "node_modules", "typescript", "bin", "tsc"),
+        join(root, "node_modules", "@typescript", "native", "bin", "tsc"),
         "--project",
         join(consumerDir, "tsconfig.json"),
     ], { cwd: consumerDir });

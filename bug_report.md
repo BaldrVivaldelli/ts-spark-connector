@@ -21,8 +21,8 @@ Paste relevant logs or stack traces.
 
 **Environment (please complete the following information):**
 - OS: [e.g. Ubuntu 22.04]
-- Node.js: [e.g. 20.x]
-- Spark Connect: [e.g. 4.0.0]
+- Node.js: [e.g. 22.x]
+- Spark Connect: [e.g. 4.0.4]
 - Package version: [e.g. 1.5.0]
 
 **Additional context**

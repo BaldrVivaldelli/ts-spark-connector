@@ -50,7 +50,7 @@ const toE =
                 ? x.build(EX)
                 : typeof x === "string"
                     ? EX.col(x)
-                    : EX.lit(x as any);
+                    : EX.lit(x);
 
 export type SortKeyBuilder = <E>(EX: ExprAlg<E>) => { expr: E; direction: SortDirection; nulls?: NullsOrder };
 
@@ -58,7 +58,7 @@ const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
     // Coerces the right-hand side of a comparison: a bare string is treated as a
     // LITERAL (PySpark semantics, e.g. col("a").eq("x") compares against the value "x").
     const toCmpE = (x: EBuilder | string | number | boolean) =>
-        <E>(EX: ExprAlg<E>) => (typeof x === "object" && "build" in x) ? x.build(EX) : EX.lit(x as any);
+        <E>(EX: ExprAlg<E>) => (typeof x === "object" && "build" in x) ? x.build(EX) : EX.lit(x);
 
     return {
         build: f,
@@ -125,7 +125,7 @@ export function getItem(collection: EBuilder, key: EBuilder | string | number): 
             collection.build(EX),
             typeof key === "object" && "build" in key
                 ? key.build(EX)
-                : EX.lit(key as any)
+                : EX.lit(key)
         )
     );
 }
@@ -152,7 +152,7 @@ export function coalesce(...xs: Array<EBuilder | string | number | boolean>): EB
 export const col = (name: string): EBuilder => EB(EX => EX.col(name));
 export const lit = (v: LiteralValue): EBuilder => EB(EX => EX.lit(v));
 
-type CaseChain = {
+export type CaseChain = {
     when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain;
     otherwise(val: EBuilder | string | number | boolean): EBuilder;
 };
@@ -201,4 +201,4 @@ export const Window = {
 
 // util
 const asE = (x: EBuilder | string | number | boolean): EBuilder =>
-    (typeof x === "object" && "build" in x) ? x as EBuilder : lit(x as any);
+    (typeof x === "object" && "build" in x) ? x : lit(x);

@@ -63,7 +63,7 @@ describe("Spark Connect write protobuf wire conformance", () => {
       child,
       writerKind: "batch",
       spec: {
-        format: "delta" as any,
+        format: "delta",
         mode: "overwrite",
         options: { compression: "snappy" },
         partitionBy: ["date"],
@@ -111,7 +111,7 @@ describe("Spark Connect write protobuf wire conformance", () => {
       child,
       writerKind: "batch",
       spec: {
-        format: "jdbc" as any,
+        format: "jdbc",
         options: { url: "jdbc:postgresql://db/app", dbtable: "events" },
         partitionBy: [],
         sortBy: [],
@@ -140,7 +140,7 @@ describe("Spark Connect write protobuf wire conformance", () => {
         options: {},
         partitionBy: [],
         sortBy: [],
-        trigger: trigger as any,
+        trigger,
       },
     });
     const operation = wireRoundTrip(plan).command.write_stream_operation_start;

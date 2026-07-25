@@ -1,10 +1,10 @@
 # Vendored Spark Connect protocol
 
-These files are an exact copy of Apache Spark tag `v4.0.0` from:
+These files are an exact copy of Apache Spark tag `v4.0.4` from:
 
 `sql/connect/common/src/main/protobuf/spark/connect/`
 
-Source: <https://github.com/apache/spark/tree/v4.0.0/sql/connect/common/src/main/protobuf/spark/connect>
+Source: <https://github.com/apache/spark/tree/v4.0.4/sql/connect/common/src/main/protobuf/spark/connect>
 
 Run `npm run test:proto` to verify the complete file set and SHA-256 manifest.
 Wire-conformance tests load this descriptor with `@grpc/proto-loader` and

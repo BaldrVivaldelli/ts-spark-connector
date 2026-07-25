@@ -88,9 +88,13 @@ describe("Phase 2 groupBy().agg() (runtime plan)", () => {
       .agg(a => [a.count().as(" ")])
       .toProtoJSON()).toThrow(/non-empty/i);
 
-    expect(() => purchases()
-      .groupBy("country")
-      .agg(a => [a.count().as("same"), a.avg(c => c.amount).as("same")] as any)
+    const runtimeGrouped = purchases().groupBy("country") as unknown as {
+      agg(build: (factory: {
+        count(): { as(alias: string): unknown };
+      }) => readonly unknown[]): { toProtoJSON(): string };
+    };
+    expect(() => runtimeGrouped
+      .agg(a => [a.count().as("same"), a.count().as("same")])
       .toProtoJSON()).toThrow(/duplicate column/i);
 
     expect(() => purchases()

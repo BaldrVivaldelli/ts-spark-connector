@@ -191,8 +191,6 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
     );
     let consecutiveFailures = 0;
     let emptyReattachments = 0;
-    let primaryError: unknown;
-    let releaseError: unknown;
 
     const reattachRequest = (): RpcMessage => ({
         session_id: sessionId,
@@ -283,9 +281,6 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
                 });
             }
         }
-    } catch (error) {
-        primaryError = error;
-        throw error;
     } finally {
         if (initialSent) {
             try {
@@ -309,12 +304,8 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
                         // A cleanup observer is diagnostic only and can never
                         // turn a confirmed execution into a failed one.
                     }
-                } else if (primaryError === undefined) {
-                    // Defer until after finally so cleanup cannot mask control flow.
-                    releaseError = cleanupError;
                 }
             }
         }
     }
-    if (releaseError !== undefined) throw releaseError;
 }

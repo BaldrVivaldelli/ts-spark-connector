@@ -41,7 +41,10 @@ describe("read ergonomics and validation", () => {
     expect(() => session().read.csv()).toThrow(/at least one non-empty path/);
     expect(() => session().read.option(" ", "x")).toThrow(/key.*non-empty/);
     expect(() => session().read.option("x", Number.NaN)).toThrow(RangeError);
-    expect(() => session().read.option("x", undefined as any)).toThrow(/null or undefined/);
+    const runtimeReader = session().read as unknown as {
+      option(key: string, value: unknown): unknown;
+    };
+    expect(() => runtimeReader.option("x", undefined)).toThrow(/null or undefined/);
   });
 
   it("supports Spark-style coalesce(partitions) while retaining column coalesce", () => {
@@ -134,7 +137,10 @@ describe("write ergonomics and validation", () => {
     expect(() => batch().option("x", Number.POSITIVE_INFINITY)).toThrow(RangeError);
     expect(() => stream().checkpoint(" ")).toThrow(/non-empty/);
     expect(() => stream().queryName(" ")).toThrow(/non-empty/);
-    expect(() => stream().trigger({ processingTime: "", once: true } as any)).toThrow(/exactly one/);
+    const runtimeStream = stream() as unknown as {
+      trigger(input: unknown): unknown;
+    };
+    expect(() => runtimeStream.trigger({ processingTime: "", once: true })).toThrow(/exactly one/);
     expect(() => stream().trigger({ kind: "Continuous", checkpointIntervalMs: 0 })).toThrow(RangeError);
     await expect(batch().save(" ")).rejects.toThrow(/non-empty/);
     await expect(batch().saveAsTable(" ")).rejects.toThrow(/non-empty/);
@@ -157,8 +163,8 @@ describe("write ergonomics and validation", () => {
     }, fakeSession)).rejects.toThrow(/Batch writes.*save/);
 
     const streamingDf = ReadChainedDataFrame.readStream<any, any, any>("rate", fakeSession);
-    expect(() => (streamingDf as any).write()).toThrow(/batch.*streaming/i);
+    expect(() => (streamingDf as unknown as { write(): unknown }).write()).toThrow(/batch.*streaming/i);
     const batchDf = fakeSession.read.parquet("/input.parquet");
-    expect(() => (batchDf as any).writeStream()).toThrow(/writeStream.*batch/i);
+    expect(() => (batchDf as unknown as { writeStream(): unknown }).writeStream()).toThrow(/writeStream.*batch/i);
   });
 });

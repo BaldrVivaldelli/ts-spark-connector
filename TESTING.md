@@ -1,9 +1,8 @@
 # Testing with Docker
 
-This project includes Docker configuration for the behavioral E2E gate. The
-server image is pinned to Apache Spark Connect 4.0.0 and uses TLS by default.
-Spark 4.0.0 is the only server version currently claimed as supported; Spark
-3.5.x is unverified until a full CI matrix is green.
+This project includes Docker configuration for the behavioral E2E gate. CI
+tests Apache Spark Connect 4.0.0 and 4.0.4 over TLS. The vendored protocol
+descriptor remains the exact Apache Spark 4.0.4 set.
 
 ## Prerequisites
 
@@ -18,6 +17,10 @@ Unit and protocol-shape tests do not need Spark and explicitly exclude E2E tests
 ```bash
 npm test
 npm run typecheck:test
+npm run test:coverage
+npm run api:check
+npm run package:lint
+npm run typecheck:examples
 ```
 
 The E2E suite has a separate Vitest configuration. It includes only
@@ -67,7 +70,8 @@ docker compose -f docker-compose.test.yml down -v
 
 The Docker test setup includes:
 
-1. **Spark server container**: runs Spark Connect 4.0.0 with TLS on port 15002.
+1. **Spark server container**: runs the selected Spark 4.0.x version with TLS
+   on port 15002.
 2. **Test runner container**: trusts only the public development CA and runs
    the E2E suite against Spark.
 
@@ -76,6 +80,16 @@ E2E assertions, rather than the health check, prove the TLS handshake, protocol
 compatibility, rows, ordering, joins, multipath reads, and writes. The
 containers communicate over the Compose network using the `spark` hostname.
 
+Each CI matrix job also runs the executable `join` example and publishes:
+
+- the Vitest JUnit document;
+- a JSON result containing version, commit and outcomes;
+- a Markdown report in the GitHub job summary;
+- Spark logs when the suite or example fails.
+
+The downloadable `e2e-spark-4.0.0` and `e2e-spark-4.0.4` artifacts are retained
+for 30 days.
+
 ## Environment Variables
 
 - `SPARK_CONNECT_URL`: `scs://spark:15002` in the Docker E2E environment.
@@ -83,6 +97,16 @@ containers communicate over the Compose network using the `spark` hostname.
 - `SPARK_TLS_SERVER_NAME`: `spark-connect`; this and `spark` are both present
   in the certificate SANs.
 - `SPARK_TEST_DEST`: server-visible output root for write/read round trips.
+- `SPARK_VERSION`: server/image version; defaults to `4.0.4`.
+- `SPARK_AVRO_SHA256`: checksum for the matching Scala 2.13 Avro artifact.
+
+To run the default CI matrix target locally:
+
+```bash
+SPARK_VERSION=4.0.4 \
+SPARK_AVRO_SHA256=f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55 \
+npm run test:docker
+```
 
 ## Data and Certificates
 

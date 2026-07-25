@@ -1,8 +1,7 @@
 /**
  * Declaración única de schema (`schema({...})`) con inferencia de tipos.
  *
- * Promovido desde `src/experimental/schema.ts` a un módulo público (Requirement
- * 4.6: la declaración y sus utilidades deben residir fuera de `src/experimental/`).
+ * Declaraciones públicas de schema y sus utilidades de inferencia.
  *
  * Una sola declaración `schema({...})` cumple dos propósitos a la vez, a partir
  * de la **misma fuente de verdad** token→tipo (`TokenToTs`) y token→DDL
@@ -116,7 +115,7 @@ export interface SchemaDef {
  * Infiere el tipo TS de un campo, agregando `| null` para los tokens nullables
  * (sufijo `?`). El `?` final marca nullabilidad y se propaga al tipo.
  */
-type InferNonNullable<F extends FieldSpec> = F extends `${infer B}?`
+export type InferNonNullable<F extends FieldSpec> = F extends `${infer B}?`
     ? B extends TypeToken
         ? TokenToTs[B]
         : never
@@ -147,7 +146,7 @@ export type InferField<F extends FieldSpec> = F extends `${TypeToken}?`
  * Model nested values conservatively so the TypeScript row contract never
  * promises non-null where Spark's parsed DDL defaults to nullable.
  */
-type InferNestedSchema<D extends SchemaDef> = {
+export type InferNestedSchema<D extends SchemaDef> = {
     [K in keyof D]: InferField<D[K]> | null;
 };
 
@@ -202,7 +201,7 @@ export function schema<D extends SchemaDef>(def: D): DeclaredSchema<D> {
 }
 
 /** Crea un descriptor DECIMAL exacto, validando los límites de Spark. */
-type NullableFlag<N extends boolean> = N extends true ? { readonly nullable: true } : object;
+export type NullableFlag<N extends boolean> = N extends true ? { readonly nullable: true } : object;
 
 export function decimalType<
     const P extends number,

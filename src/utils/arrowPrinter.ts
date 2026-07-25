@@ -58,11 +58,11 @@ export function printArrowResults(
     }
 
     const colWidths = columns.map((column, columnIndex) =>
-        Math.max(column.length, ...rows.map(row => row[columnIndex]?.length ?? 0))
+        Math.max(column.length, ...rows.map(row => row[columnIndex]!.length))
     );
-    console.log(columns.map((name, index) => name.padEnd(colWidths[index])).join(" | "));
+    console.log(columns.map((name, index) => name.padEnd(colWidths[index]!)).join(" | "));
     console.log(colWidths.map(width => "-".repeat(width)).join("-+-"));
     for (const row of rows) {
-        console.log(row.map((value, index) => value.padEnd(colWidths[index])).join(" | "));
+        console.log(row.map((value, index) => value.padEnd(colWidths[index]!)).join(" | "));
     }
 }

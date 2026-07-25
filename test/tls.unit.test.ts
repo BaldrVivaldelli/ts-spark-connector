@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
-import { describe, expect, it } from "vitest";
+import tls from "node:tls";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildChannelCredentials } from "../src/client/sparkClient";
 
 // grpc-js cannot consume PKCS#12 keystores via createSsl, but the client now
@@ -9,6 +10,9 @@ import { buildChannelCredentials } from "../src/client/sparkClient";
 // construction directly (no network), which is where the keystore is parsed.
 const KEYSTORE = path.resolve(__dirname, "../spark-server/certs/keystore.p12");
 const hasKeystore = fs.existsSync(KEYSTORE);
+const CA = path.resolve(__dirname, "../spark-server/certs/ca.crt");
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("buildChannelCredentials - PKCS#12", () => {
   it.runIf(hasKeystore)("loads a real .p12 keystore and builds secure credentials", () => {
@@ -45,6 +49,26 @@ describe("buildChannelCredentials - PKCS#12", () => {
         },
       })
     ).toThrow(/PKCS#12/i);
+  });
+
+  it.runIf(hasKeystore)("loads a PKCS#12 key together with a PEM trust root", () => {
+    const creds = buildChannelCredentials({
+      tls: {
+        keyStorePath: KEYSTORE,
+        keyStorePassword: "password",
+        trustStorePath: CA,
+      },
+    });
+    expect(creds._isSecure()).toBe(true);
+  });
+
+  it.runIf(hasKeystore)("formats non-Error PKCS#12 parser failures", () => {
+    vi.spyOn(tls, "createSecureContext").mockImplementation(() => {
+      throw "primitive failure";
+    });
+    expect(() => buildChannelCredentials({
+      tls: { keyStorePath: KEYSTORE, keyStorePassword: "password" },
+    })).toThrow(/Underlying error: primitive failure/);
   });
 
   it.each([

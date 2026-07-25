@@ -77,7 +77,8 @@ function readVarint(buffer: Buffer, start: number): [bigint, number] {
     let shift = 0n;
     let offset = start;
     while (offset < buffer.length && shift <= 63n) {
-        const byte = buffer[offset++];
+        const byte = buffer[offset]!;
+        offset += 1;
         value |= BigInt(byte & 0x7f) << shift;
         if ((byte & 0x80) === 0) return [value, offset];
         shift += 7n;

@@ -5,14 +5,35 @@ import path from "node:path";
 import tls from "node:tls";
 import type { AuthConfig, SessionConfigMap, SparkConnectionConfig, TLSConfig } from "./session";
 import { resolveRetryConfig, withRetry } from "./retry";
-import { asSparkConnectError, attachSparkErrorDetails, SparkConnectError } from "./errors";
 import {
     executeReattachable,
     RpcMessage,
     RpcReadable,
-    ReattachableResponse,
 } from "./reattachableExecution";
 import { emitTelemetry } from "./telemetry";
+import {
+    buildCallOptions,
+    callUnary,
+    callUnaryWithRetry,
+    emitExecuteCleanupTelemetry,
+    enrichSparkConnectError,
+} from "./rpcLifecycle";
+export {
+    assertRpcResponseSessionIntegrity,
+    emitExecuteCleanupTelemetry,
+} from "./rpcLifecycle";
+import {
+    ExecutePlanResponse,
+    StreamStartResult,
+    StreamingQueryCommandResult,
+    buildStreamingQueryCommandRequest,
+    extractAwaitTerminationResult,
+    extractStreamStart,
+    extractStreamingException,
+    extractStreamingQueryCommandResult,
+    extractStreamingQueryId,
+    validateTerminationTimeout,
+} from "./streamingProtocol";
 
 export interface StreamingQueryHandle {
     awaitTermination(): Promise<void>;
@@ -22,52 +43,6 @@ export interface StreamingQueryHandle {
     /** @internal Latest server identity observed while controlling the query. */
     readonly serverSideSessionId?: string;
 }
-
-type StreamingQueryInstanceId = {
-    id?: string;
-    run_id?: string;
-    runId?: string;
-};
-
-type NormalizedStreamingQueryInstanceId = {
-    id: string;
-    run_id: string;
-};
-
-type QueryIdCarrier = {
-    query_id?: StreamingQueryInstanceId;
-    queryId?: StreamingQueryInstanceId;
-};
-
-type StreamStartResult = QueryIdCarrier & {
-    name?: string;
-    query_name?: string;
-    queryName?: string;
-};
-
-type StreamingQueryCommandResult = QueryIdCarrier & {
-    await_termination?: {
-        terminated?: boolean;
-    };
-    awaitTermination?: {
-        terminated?: boolean;
-    };
-    exception?: {
-        exception_message?: string;
-        exceptionMessage?: string;
-        error_class?: string;
-        errorClass?: string;
-        stack_trace?: string;
-        stackTrace?: string;
-    };
-};
-
-type ExecutePlanResponse = ReattachableResponse & {
-    write_stream_operation_start_result?: StreamStartResult;
-    writeStreamOperationStartResult?: StreamStartResult;
-    streaming_query_command_result?: StreamingQueryCommandResult;
-    streamingQueryCommandResult?: StreamingQueryCommandResult;
-};
 
 type AnalyzePlanResponse = RpcMessage & {
     explain?: {
@@ -79,12 +54,6 @@ type AnalyzePlanResponse = RpcMessage & {
 };
 
 type UnaryCallback<T> = (error: Error | null, response: T) => void;
-type UnaryMethod<T> = (
-    request: RpcMessage,
-    metadata: Grpc.Metadata,
-    options: Grpc.CallOptions,
-    callback: UnaryCallback<T>
-) => Grpc.ClientUnaryCall;
 
 interface SparkConnectServiceClient {
     executePlan(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions): RpcReadable<ExecutePlanResponse>;
@@ -232,10 +201,9 @@ function validateTlsStoreFormats(tlsConfig?: TLSConfig): void {
 // from a SecureContext. Chaining the two lets us support PKCS#12 keystores
 // without any extra dependency.
 function buildPkcs12Credentials(tlsConfig: TLSConfig): Grpc.ChannelCredentials {
-    const pfx = readFileIfPresent(tlsConfig.keyStorePath);
-    if (!pfx) {
-        throw new Error(`TLS keyStorePath not found: ${tlsConfig.keyStorePath}`);
-    }
+    // Called only after isPkcs12Keystore(keyStorePath) succeeds; the reader
+    // either returns the file or throws a precise not-found error.
+    const pfx = readFileIfPresent(tlsConfig.keyStorePath)!;
 
     // The CA used to verify the server. trustStorePath is expected to be a PEM
     // certificate; a PKCS#12 truststore is not supported here.
@@ -253,7 +221,8 @@ function buildPkcs12Credentials(tlsConfig: TLSConfig): Grpc.ChannelCredentials {
         throw new Error(
             `Failed to load PKCS#12 keystore "${tlsConfig.keyStorePath}". ` +
             "Check that keyStorePassword is correct and the file is a valid .p12/.pfx. " +
-            `Underlying error: ${reason}`
+            `Underlying error: ${reason}`,
+            { cause: error },
         );
     }
 
@@ -414,18 +383,6 @@ export function buildChannelOptions(config?: SparkConnectionConfig): Grpc.Channe
     };
 }
 
-function buildCallOptions(config?: SparkConnectionConfig): Grpc.CallOptions {
-    return config?.rpcTimeoutMs === undefined
-        ? {}
-        : { deadline: Date.now() + config.rpcTimeoutMs };
-}
-
-function createAbortError(reason?: unknown): Error {
-    const error = new Error(reason === undefined ? "The Spark Connect operation was aborted." : String(reason));
-    error.name = "AbortError";
-    return error;
-}
-
 /** @internal Stable channel identity; authentication metadata is intentionally excluded. */
 export function getClientCacheKey(config?: SparkConnectionConfig): string {
     const pinnedIdentity = (config as SparkConnectionConfig & {
@@ -536,277 +493,6 @@ function extractExplainString(response: AnalyzePlanResponse): string | undefined
         ?? response.explain?.explainString
         ?? response.explain_string
         ?? response.explainString;
-}
-
-function extractStreamStart(response: ExecutePlanResponse): StreamStartResult | undefined {
-    return response.write_stream_operation_start_result ?? response.writeStreamOperationStartResult;
-}
-
-function extractStreamingQueryCommandResult(response: ExecutePlanResponse): StreamingQueryCommandResult | undefined {
-    return response.streaming_query_command_result ?? response.streamingQueryCommandResult;
-}
-
-function normalizeStreamingQueryId(
-    queryId?: StreamingQueryInstanceId
-): NormalizedStreamingQueryInstanceId | undefined {
-    if (!queryId) return undefined;
-
-    const id = typeof queryId.id === "string" && queryId.id.trim()
-        ? queryId.id
-        : undefined;
-    const runId = typeof queryId.run_id === "string" && queryId.run_id.trim()
-        ? queryId.run_id
-        : (typeof queryId.runId === "string" && queryId.runId.trim()
-            ? queryId.runId
-            : undefined);
-
-    return id && runId
-        ? { id, run_id: runId }
-        : undefined;
-}
-
-function extractStreamingQueryId(
-    carrier?: QueryIdCarrier
-): NormalizedStreamingQueryInstanceId | undefined {
-    return normalizeStreamingQueryId(carrier?.query_id ?? carrier?.queryId);
-}
-
-function extractAwaitTerminationResult(
-    result?: StreamingQueryCommandResult
-): boolean | undefined {
-    const awaitTermination = result?.await_termination ?? result?.awaitTermination;
-    return typeof awaitTermination?.terminated === "boolean"
-        ? awaitTermination.terminated
-        : undefined;
-}
-
-function extractStreamingException(
-    result?: StreamingQueryCommandResult
-): NonNullable<StreamingQueryCommandResult["exception"]> | undefined {
-    return result?.exception;
-}
-
-function validateTerminationTimeout(timeoutMs: number): void {
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) {
-        throw new RangeError("Streaming query timeoutMs must be a non-negative safe integer.");
-    }
-}
-
-function buildStreamingQueryCommandRequest(
-    request: RpcMessage,
-    queryId: NormalizedStreamingQueryInstanceId,
-    command: RpcMessage
-): RpcMessage {
-    const commandRequest: RpcMessage = {
-        session_id: request.session_id,
-        user_context: request.user_context,
-        operation_id: crypto.randomUUID(),
-        ...(request.client_observed_server_side_session_id
-            ? {
-                client_observed_server_side_session_id:
-                    request.client_observed_server_side_session_id,
-            }
-            : {}),
-        plan: {
-            command: {
-                streaming_query_command: {
-                    query_id: queryId,
-                    ...command,
-                },
-            },
-        },
-    };
-
-    const clientType = request.client_type;
-    if (typeof clientType === "string" && clientType) {
-        commandRequest.client_type = clientType;
-    }
-
-    return commandRequest;
-}
-
-function sessionIdentityError(operation: string, message: string): SparkConnectError {
-    const error = new SparkConnectError(`${operation} failed: ${message}`, {
-        operation,
-        errorClass: "INVALID_HANDLE.SESSION_CHANGED",
-    });
-    (error as SparkConnectError & { __noRetry?: boolean }).__noRetry = true;
-    return error;
-}
-
-/** @internal Rejects cross-session or stale-server responses before callers consume them. */
-export function assertRpcResponseSessionIntegrity(
-    request: RpcMessage,
-    response: unknown,
-    operation: string
-): void {
-    const carrier = response as {
-        session_id?: unknown;
-        sessionId?: unknown;
-        server_side_session_id?: unknown;
-        serverSideSessionId?: unknown;
-    } | null;
-    const expectedSessionId = request.session_id;
-    const actualSessionId = carrier?.session_id ?? carrier?.sessionId;
-    if (actualSessionId !== undefined
-        && typeof expectedSessionId === "string"
-        && actualSessionId !== expectedSessionId) {
-        throw sessionIdentityError(
-            operation,
-            `response session_id ${String(actualSessionId)} does not match ${expectedSessionId}`
-        );
-    }
-
-    const expectedServerId = request.client_observed_server_side_session_id;
-    const actualServerId = carrier?.server_side_session_id ?? carrier?.serverSideSessionId;
-    if (typeof expectedServerId === "string" && expectedServerId
-        && typeof actualServerId === "string" && actualServerId
-        && actualServerId !== expectedServerId) {
-        throw sessionIdentityError(
-            operation,
-            `server_side_session_id changed from ${expectedServerId} to ${actualServerId}`
-        );
-    }
-}
-
-/** @internal Emits a distinct warning when only post-completion cleanup failed. */
-export function emitExecuteCleanupTelemetry(
-    config: SparkConnectionConfig | undefined,
-    operationId: unknown,
-    cleanupError: unknown
-): void {
-    emitTelemetry(config, "spark.execute.cleanup_error", "warn", {
-        operationId,
-        code: (cleanupError as { code?: unknown } | null)?.code,
-        errorClass: (cleanupError as { errorClass?: unknown } | null)?.errorClass,
-    });
-}
-
-function callUnary<TResponse>(
-    method: UnaryMethod<TResponse>,
-    request: RpcMessage,
-    metadata: Grpc.Metadata,
-    config?: SparkConnectionConfig,
-    operation = "Spark Connect unary RPC"
-): Promise<TResponse> {
-    return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
-        emitTelemetry(config, "spark.rpc.start", "debug", { rpc: operation });
-        const signal = config?.signal;
-        if (signal?.aborted) {
-            emitTelemetry(config, "spark.rpc.cancelled", "info", { rpc: operation, durationMs: 0 });
-            reject(createAbortError(signal.reason));
-            return;
-        }
-
-        let settled = false;
-        let call: Grpc.ClientUnaryCall | undefined;
-        const cleanup = () => signal?.removeEventListener("abort", onAbort);
-        const onAbort = () => {
-            if (settled) return;
-            settled = true;
-            call?.cancel();
-            cleanup();
-            emitTelemetry(config, "spark.rpc.cancelled", "info", {
-                rpc: operation,
-                durationMs: Date.now() - startedAt,
-            });
-            reject(createAbortError(signal?.reason));
-        };
-
-        call = method(request, metadata, buildCallOptions(config), (error, response) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            if (error) {
-                emitTelemetry(config, "spark.rpc.error", "error", {
-                    rpc: operation,
-                    durationMs: Date.now() - startedAt,
-                    code: (error as Error & { code?: number }).code,
-                });
-                reject(asSparkConnectError(error, operation));
-                return;
-            }
-            try {
-                assertRpcResponseSessionIntegrity(request, response, operation);
-            } catch (integrityError) {
-                emitTelemetry(config, "spark.rpc.error", "error", {
-                    rpc: operation,
-                    durationMs: Date.now() - startedAt,
-                    errorClass: "INVALID_HANDLE.SESSION_CHANGED",
-                });
-                reject(integrityError);
-                return;
-            }
-            emitTelemetry(config, "spark.rpc.end", "debug", {
-                rpc: operation,
-                durationMs: Date.now() - startedAt,
-            });
-            resolve(response);
-        });
-        signal?.addEventListener("abort", onAbort, { once: true });
-    });
-}
-
-async function enrichSparkConnectError(
-    error: unknown,
-    operation: string,
-    request: RpcMessage,
-    client: SparkConnectServiceClient,
-    metadata: Grpc.Metadata,
-    config?: SparkConnectionConfig
-): Promise<Error> {
-    const wrapped = asSparkConnectError(error, operation);
-    if (!(wrapped instanceof SparkConnectError) || !wrapped.errorId) return wrapped;
-
-    const detailRequest: RpcMessage = {
-        session_id: request.session_id,
-        user_context: request.user_context,
-        error_id: wrapped.errorId,
-        client_type: request.client_type,
-        ...(request.client_observed_server_side_session_id
-            ? {
-                client_observed_server_side_session_id:
-                    request.client_observed_server_side_session_id,
-            }
-            : {}),
-    };
-    const cleanupConfig = config ? { ...config, signal: undefined } : undefined;
-    try {
-        const details = await withRetry(
-            () => callUnary(
-                client.fetchErrorDetails.bind(client),
-                detailRequest,
-                metadata,
-                cleanupConfig,
-                "FetchErrorDetails"
-            ),
-            resolveRetryConfig(cleanupConfig)
-        );
-        return attachSparkErrorDetails(wrapped, details);
-    } catch {
-        // Error enrichment must never hide the original RPC failure.
-        return wrapped;
-    }
-}
-
-async function callUnaryWithRetry<TResponse>(
-    client: SparkConnectServiceClient,
-    method: UnaryMethod<TResponse>,
-    request: RpcMessage,
-    metadata: Grpc.Metadata,
-    config: SparkConnectionConfig | undefined,
-    operation: string
-): Promise<TResponse> {
-    try {
-        return await withRetry(
-            () => callUnary(method, request, metadata, config, operation),
-            resolveRetryConfig(config),
-            { signal: config?.signal }
-        );
-    } catch (error) {
-        throw await enrichSparkConnectError(error, operation, request, client, metadata, config);
-    }
 }
 
 export const sparkGrpcClient = {

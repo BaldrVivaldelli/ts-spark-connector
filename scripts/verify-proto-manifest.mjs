@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const directory = join(root, "proto", "spark", "connect");
+const sparkVersion = "4.0.4";
 const expected = {
     "base.proto": "e523f95a4124fed8129e3f082aae20befe12db10170426880a165b160e7b1996",
     "catalog.proto": "f4e4211e4b1b0905c7b1e1b05bb008e2c0354b1dec971188cb2d76ab654699da",
@@ -22,11 +23,11 @@ const expected = {
 
 const actualFiles = readdirSync(directory).filter(name => name.endsWith(".proto")).sort();
 assert.deepEqual(actualFiles, Object.keys(expected).sort(),
-    "Vendored proto file set differs from Apache Spark v4.0.0");
+    `Vendored proto file set differs from Apache Spark v${sparkVersion}`);
 
 for (const [name, digest] of Object.entries(expected)) {
     const actual = createHash("sha256").update(readFileSync(join(directory, name))).digest("hex");
-    assert.equal(actual, digest, `${name} differs from Apache Spark v4.0.0`);
+    assert.equal(actual, digest, `${name} differs from Apache Spark v${sparkVersion}`);
 }
 
-process.stdout.write("Spark Connect v4.0.0 proto manifest verified.\n");
+process.stdout.write(`Spark Connect v${sparkVersion} proto manifest verified.\n`);

@@ -1,12 +1,12 @@
 # Local Spark Connect server
 
 The repository ships a Dockerized Spark Connect server for development and
-end-to-end tests. The image is pinned to **Apache Spark 4.0.0** and its matching
-Scala 2.13 Avro artifact. TLS is enabled by default on port `15002`.
+end-to-end tests. It defaults to **Apache Spark 4.0.4** and CI also exercises
+**4.0.0** for backwards compatibility, always with the matching Scala 2.13
+Avro artifact. TLS is enabled by default on port `15002`.
 
-This is the only Spark version currently covered by the repository's E2E
-setup. Spark 3.5.x and other releases may work, but are not claimed as supported
-until they have a green compatibility matrix.
+Other releases may work, but are not claimed as supported until they have a
+green compatibility matrix.
 
 ## Files
 
@@ -23,15 +23,24 @@ spark-server/
     └── generate-dev-certs.sh            # generation/validation tool
 ```
 
-The root `docker-compose.yml` mounts sample data at `/data`. The image also
-installs `spark-avro_2.13:4.0.0` at build time so Avro reads do not depend on an
-Ivy download when the server starts.
+The root `docker-compose.yml` mounts sample data at `/data`. The image installs
+the version-matched `spark-avro_2.13` artifact at build time so Avro reads do
+not depend on an Ivy download when the server starts.
 
 ## Start the TLS server
 
 From the repository root:
 
 ```bash
+docker compose up --build
+```
+
+The default uses Spark 4.0.4. To select the backwards-compatibility matrix
+entry instead:
+
+```bash
+SPARK_VERSION=4.0.0 \
+SPARK_AVRO_SHA256=083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709 \
 docker compose up --build
 ```
 

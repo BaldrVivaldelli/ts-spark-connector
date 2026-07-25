@@ -1,17 +1,15 @@
 /**
  * Builders de columna tipados, **agnósticos del intérprete**.
  *
- * Reemplazan a las columnas tipadas del prototipo experimental
- * (`src/experimental/typed-dataframe.ts`), que construían proto directamente,
- * por builders **parametrizados por el álgebra `E`**. Cada builder lleva el tipo
- * de valor `T` en el tipo (igual que el prototipo) **y** construye su expresión
- * `E` a través de `ExprAlg<E>` (a diferencia del prototipo), de modo que
+ * Son builders **parametrizados por el álgebra `E`**. Cada builder lleva el tipo
+ * de valor `T` en el tipo y construye su expresión `E` a través de
+ * `ExprAlg<E>`, de modo que
  * funcionan con cualquier intérprete (`SparkDFAlg`, `ProtoExprAlg`,
  * `TraceExprAlg`, …) — exactamente el mismo patrón que el `EBuilder` no tipado
  * de `src/engine/column.ts` (`build<E>(EX): E`).
  *
- * Esta es la diferencia clave con el prototipo: aquí **no** se toca proto. La
- * columna guarda un *thunk* `(EX: ExprAlg<E>) => E` y solo lo evalúa cuando se
+ * Aquí **no** se toca proto. La columna guarda un *thunk*
+ * `(EX: ExprAlg<E>) => E` y solo lo evalúa cuando se
  * la interpreta, conservando así la parametricidad tagless-final
  * (Requirement 3.2) y garantizando la equivalencia de plan con el camino laxo.
  *
@@ -35,7 +33,7 @@ import {
 import { NullsOrder, SortDirection, SortOrder } from "../types";
 
 /** Un *thunk* que construye la expresión `E` del intérprete a partir del álgebra. */
-type ExprThunk<E> = (EX: ExprAlg<E>) => E;
+export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
 
 /**
  * Accesor de columnas de un schema conocido. Las marcas de ambigüedad creadas
@@ -50,11 +48,11 @@ export type Columns<S extends SchemaShape, E> = {
 };
 
 export type NumericValue = number | bigint;
-type NumericBase<T> = Extract<NonNull<T>, NumericValue>;
+export type NumericBase<T> = Extract<NonNull<T>, NumericValue>;
 
-type NumericOperand<E> = NumericValue | TypedColumn<NumericValue | null, E>;
+export type NumericOperand<E> = NumericValue | TypedColumn<NumericValue | null, E>;
 
-type NumericOperandValue<O> = O extends TypedColumn<infer V, infer _E>
+export type NumericOperandValue<O> = O extends TypedColumn<infer V, infer _E>
     ? Extract<NonNull<V>, NumericValue>
     : O extends bigint
       ? bigint
@@ -66,7 +64,7 @@ type NumericOperandValue<O> = O extends TypedColumn<infer V, infer _E>
               : number
         : never;
 
-type PromotedNumeric<L, O> = number extends NumericBase<L>
+export type PromotedNumeric<L, O> = number extends NumericBase<L>
     ? number
     : NumericOperandValue<O> extends bigint
       ? bigint
@@ -74,7 +72,7 @@ type PromotedNumeric<L, O> = number extends NumericBase<L>
         ? number
         : number | bigint;
 
-type Coalesced<T extends ColumnType, U extends ColumnType> = null extends T
+export type Coalesced<T extends ColumnType, U extends ColumnType> = null extends T
     ? null extends U
         ? NonNull<T> | null
         : NonNull<T>

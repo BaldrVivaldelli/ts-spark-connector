@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import os from "node:os";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
@@ -12,6 +11,22 @@ import { StreamWriterAlg } from "../algebra/write/dataframe";
 import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
+import {
+    AuthDraft,
+    LEGACY_AUTH_KEYS,
+    LEGACY_TLS_KEYS,
+    TlsDraft,
+    cloneAuth,
+    cloneSessionConfig,
+    cloneTls,
+    defaultUserContext,
+    isEnabledConfigValue,
+    isRemoteSparkConfig,
+    normalizeConnectionConfig,
+    syncAuthFromDraft,
+    syncTlsFromDraft,
+    validateSessionId,
+} from "./sessionConfig";
 
 export type TLSConfig = {
     keyStorePath?: string;
@@ -59,6 +74,18 @@ export type SparkTelemetryEvent = {
 /** Opt-in sink for structured, redacted Spark Connect lifecycle events. */
 export type SparkLogger = (event: Readonly<SparkTelemetryEvent>) => void;
 
+export type SparkMetric = {
+    name: string;
+    kind: "counter" | "histogram";
+    value: number;
+    unit: "count" | "milliseconds";
+    timestamp: string;
+    attributes: Record<string, unknown>;
+};
+
+/** Opt-in metrics sink. Observer failures never affect Spark operations. */
+export type SparkMetricObserver = (metric: Readonly<SparkMetric>) => void | PromiseLike<void>;
+
 export type SparkUserContext = {
     user_id: string;
     user_name?: string;
@@ -86,233 +113,9 @@ export type SparkConnectionConfig = {
     tls?: TLSConfig;
     retry?: RetryConfig;
     logger?: SparkLogger;
+    metrics?: SparkMetricObserver;
     sessionConfig?: SessionConfigMap;
 };
-
-type AuthDraft = {
-    type?: AuthConfig["type"];
-    username?: string;
-    password?: string;
-    token?: string;
-};
-
-type TlsDraft = TLSConfig & {
-    enabled?: boolean;
-};
-
-const LEGACY_AUTH_KEYS = new Set<string>([
-    "spark.auth.type",
-    "spark.auth.username",
-    "spark.auth.password",
-    "spark.auth.token",
-]);
-
-const LEGACY_TLS_KEYS = new Set<string>([
-    "spark.ssl.enabled",
-    "spark.connect.grpc.ssl.enabled",
-    "spark.ssl.keyStore",
-    "spark.ssl.keyStorePassword",
-    "spark.ssl.trustStore",
-    "spark.ssl.trustStorePassword",
-    "spark.ssl.certChain",
-    "spark.ssl.privateKey",
-    "spark.ssl.serverNameOverride",
-]);
-
-const STRIPPED_SESSION_CONFIG_KEYS = new Set<string>([
-    ...LEGACY_AUTH_KEYS,
-    "spark.ssl.keyStore",
-    "spark.ssl.keyStorePassword",
-    "spark.ssl.trustStore",
-    "spark.ssl.trustStorePassword",
-    "spark.ssl.certChain",
-    "spark.ssl.privateKey",
-    "spark.ssl.serverNameOverride",
-]);
-
-const CONNECTION_ONLY_SESSION_KEYS = new Set<string>([
-    "spark.connect.url",
-    "spark.connect.address",
-    "SPARK_CONNECT_URL",
-    "spark.connect.userId",
-    "spark.connect.userName",
-    "user_id",
-    "user_name",
-    ...LEGACY_AUTH_KEYS,
-    ...LEGACY_TLS_KEYS,
-]);
-
-function isRemoteSparkConfig(key: string): boolean {
-    return !CONNECTION_ONLY_SESSION_KEYS.has(key)
-        && !key.startsWith("spark.connect.header.");
-}
-
-const DEFAULT_SPARK_CONNECT_ADDRESS = "sc://localhost:15002";
-const MAX_GRPC_MESSAGE_BYTES = 2_147_483_647;
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function configuredAddress(config: SparkConnectionConfig | undefined, sessionConfig: SessionConfigMap): string {
-    if (config?.address?.trim()) return config.address.trim();
-    for (const key of ["spark.connect.url", "spark.connect.address", "SPARK_CONNECT_URL"]) {
-        const value = sessionConfig[key];
-        if (value != null && String(value).trim()) return String(value).trim();
-    }
-    return process.env.SPARK_CONNECT_URL?.trim() || DEFAULT_SPARK_CONNECT_ADDRESS;
-}
-
-function validateGrpcMessageLimit(name: string, value?: number): void {
-    if (value !== undefined
-        && (!Number.isSafeInteger(value) || value <= 0 || value > MAX_GRPC_MESSAGE_BYTES)) {
-        throw new RangeError(`${name} must be a positive integer no greater than ${MAX_GRPC_MESSAGE_BYTES}.`);
-    }
-}
-
-function validateSessionId(sessionId: string): string {
-    if (!CANONICAL_UUID.test(sessionId)) {
-        throw new TypeError("sessionId must be a canonical UUID string.");
-    }
-    return sessionId;
-}
-
-function defaultUserContext(): SparkUserContext {
-    let username = process.env.USER ?? process.env.USERNAME ?? "ts-spark-connector";
-    try {
-        username = os.userInfo().username || username;
-    } catch {
-        // noop: dejamos el fallback de env o constante.
-    }
-
-    return {
-        user_id: username,
-        user_name: username,
-    };
-}
-
-function cloneSessionConfig(sessionConfig?: SessionConfigMap): SessionConfigMap {
-    return { ...(sessionConfig ?? {}) };
-}
-
-function cloneAuth(auth?: AuthConfig): AuthConfig | undefined {
-    if (!auth) return undefined;
-    return auth.type === "basic" ? { ...auth } : { ...auth };
-}
-
-function cloneTls(tls?: TLSConfig): TLSConfig | undefined {
-    return tls ? { ...tls } : undefined;
-}
-
-function getTrimmedConfigString(sessionConfig: SessionConfigMap, key: string): string | undefined {
-    const value = sessionConfig[key];
-    if (value == null) return undefined;
-
-    const text = String(value).trim();
-    return text ? text : undefined;
-}
-
-function isEnabledConfigValue(value: SessionConfigValue | undefined): boolean {
-    return String(value).toLowerCase() === "true";
-}
-
-function readLegacyAuthConfigFromSessionConfig(sessionConfig: SessionConfigMap): AuthConfig | undefined {
-    const authType = getTrimmedConfigString(sessionConfig, "spark.auth.type");
-    if (authType === "token") {
-        const token = getTrimmedConfigString(sessionConfig, "spark.auth.token");
-        return token ? { type: "token", token } : undefined;
-    }
-
-    if (authType === "basic") {
-        const username = getTrimmedConfigString(sessionConfig, "spark.auth.username");
-        const password = getTrimmedConfigString(sessionConfig, "spark.auth.password");
-        return username && password
-            ? { type: "basic", username, password }
-            : undefined;
-    }
-
-    return undefined;
-}
-
-function readLegacyTlsConfigFromSessionConfig(sessionConfig: SessionConfigMap): TLSConfig | undefined {
-    const enabled =
-        isEnabledConfigValue(sessionConfig["spark.ssl.enabled"]) ||
-        isEnabledConfigValue(sessionConfig["spark.connect.grpc.ssl.enabled"]);
-
-    const tls: TLSConfig = {
-        keyStorePath: getTrimmedConfigString(sessionConfig, "spark.ssl.keyStore"),
-        keyStorePassword: getTrimmedConfigString(sessionConfig, "spark.ssl.keyStorePassword"),
-        trustStorePath: getTrimmedConfigString(sessionConfig, "spark.ssl.trustStore"),
-        trustStorePassword: getTrimmedConfigString(sessionConfig, "spark.ssl.trustStorePassword"),
-        certChainPath: getTrimmedConfigString(sessionConfig, "spark.ssl.certChain"),
-        privateKeyPath: getTrimmedConfigString(sessionConfig, "spark.ssl.privateKey"),
-        serverNameOverride: getTrimmedConfigString(sessionConfig, "spark.ssl.serverNameOverride"),
-    };
-
-    const hasAnyTlsField = Object.values(tls).some(value => typeof value === "string" && value.length > 0);
-    if (!enabled && !hasAnyTlsField) {
-        return undefined;
-    }
-
-    return tls;
-}
-
-function stripSensitiveConnectionConfig(sessionConfig: SessionConfigMap): SessionConfigMap {
-    const sanitized = cloneSessionConfig(sessionConfig);
-    for (const key of STRIPPED_SESSION_CONFIG_KEYS) {
-        delete sanitized[key];
-    }
-    return sanitized;
-}
-
-function normalizeConnectionConfig(config?: SparkConnectionConfig): SparkConnectionConfig {
-    validateRetryConfig(config?.retry);
-    if (config?.logger !== undefined && typeof config.logger !== "function") {
-        throw new TypeError("logger must be a function.");
-    }
-    if (config?.rpcTimeoutMs !== undefined
-        && (!Number.isSafeInteger(config.rpcTimeoutMs) || config.rpcTimeoutMs <= 0)) {
-        throw new RangeError("rpcTimeoutMs must be a positive safe integer.");
-    }
-    validateGrpcMessageLimit("grpcMaxReceiveMessageBytes", config?.grpcMaxReceiveMessageBytes);
-    validateGrpcMessageLimit("grpcMaxSendMessageBytes", config?.grpcMaxSendMessageBytes);
-    const rawSessionConfig = cloneSessionConfig(config?.sessionConfig);
-    const auth = cloneAuth(config?.auth) ?? readLegacyAuthConfigFromSessionConfig(rawSessionConfig);
-    const tls = cloneTls(config?.tls) ?? readLegacyTlsConfigFromSessionConfig(rawSessionConfig);
-
-    return {
-        ...(config ?? {}),
-        // Resolve environment/default connection state once. A live session must
-        // not jump to another server (or leak a cached channel) if process.env
-        // changes between retain, RPC, and close.
-        address: configuredAddress(config, rawSessionConfig),
-        auth,
-        tls,
-        sessionConfig: stripSensitiveConnectionConfig(rawSessionConfig),
-    };
-}
-
-function syncAuthFromDraft(authDraft: AuthDraft): AuthConfig | undefined {
-    if (authDraft.type === "token") {
-        return authDraft.token ? { type: "token", token: authDraft.token } : undefined;
-    }
-
-    if (authDraft.type === "basic" && authDraft.username && authDraft.password) {
-        return {
-            type: "basic",
-            username: authDraft.username,
-            password: authDraft.password,
-        };
-    }
-
-    return undefined;
-}
-
-function syncTlsFromDraft(tlsDraft: TlsDraft): TLSConfig | undefined {
-    const { enabled, ...tls } = tlsDraft;
-    const hasAnyTlsField = Object.values(tls).some(value => typeof value === "string" && value.length > 0);
-    if (!enabled && !hasAnyTlsField) {
-        return undefined;
-    }
-    return tls;
-}
 
 export class SparkSession implements SessionAlgebra {
     private readonly sessionId: string;
@@ -730,7 +533,7 @@ export function createSparkSession(sessionId?: string): SparkSession {
     return new SparkSession(sessionId);
 }
 
-class SparkSessionBuilder {
+export class SparkSessionBuilder {
     private configMap: SessionConfigMap = {};
     private auth?: AuthConfig;
     private insecureAuthAllowed = false;
@@ -741,6 +544,7 @@ class SparkSessionBuilder {
     private readonly tlsDraft: TlsDraft = {};
     private retry?: RetryConfig;
     private logger?: SparkLogger;
+    private metrics?: SparkMetricObserver;
     private userContext: Partial<SparkUserContext> = {};
 
     config(key: string, value: SessionConfigValue): this {
@@ -824,6 +628,13 @@ class SparkSessionBuilder {
         return this;
     }
 
+    /** Enables redacted RPC counters and duration histograms. */
+    withMetrics(observer: SparkMetricObserver): this {
+        if (typeof observer !== "function") throw new TypeError("metrics observer must be a function.");
+        this.metrics = observer;
+        return this;
+    }
+
     withAuthAndTLS(auth: AuthConfig, tls: TLSConfig): this {
         return this.withAuth(auth).enableTLS(tls);
     }
@@ -845,6 +656,7 @@ class SparkSessionBuilder {
                 tls: this.tls,
                 retry: this.retry,
                 logger: this.logger,
+                metrics: this.metrics,
                 sessionConfig: { ...this.configMap },
             },
         });

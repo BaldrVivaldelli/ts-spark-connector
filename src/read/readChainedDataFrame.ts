@@ -16,7 +16,7 @@ import {
 import { printArrowResults } from "../utils/arrowPrinter";
 import {DataFrameWriterTF} from "../write/dataFrameWriterTF";
 import { toJSON, toMermaid } from "../trace/traceSerializers";
-import { TraceDFAlg, TraceExprAlg } from "../trace/trace";
+import { TraceDFAlg, TraceExprAlg, TraceNode } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
 import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, LiteralValue, StreamingMark, StreamingReadCap} from "../algebra/read";
 import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/read/batch-capabilities";
@@ -29,7 +29,7 @@ import {
     UnknownSchema,
     UsableColumnKey,
 } from "../schema/schema-model";
-import type { FieldSpec, SchemaDef } from "../schema/schema";
+import type { SchemaDef } from "../schema/schema";
 import {
     Aggregated,
     Dropped,
@@ -51,6 +51,29 @@ import {
     Aggregation as TypedAggregation,
     makeAggFactory,
 } from "../typed/aggregations";
+import {
+    assertInteger,
+    assertNonEmptyString,
+    assertOptionalSeed,
+    freshRelationPlanId,
+    freshSparkSeed,
+} from "./dataframeValidation";
+import { resolveOrderInput } from "./orderResolver";
+import {
+    assertStatisticsColumns,
+    buildDescribePlan,
+    buildSummaryPlan,
+} from "./statistics";
+import {
+    assertRenameMapping,
+    assertUniqueColumnNames,
+    dropRuntimeSchema,
+    joinRuntimeSchema,
+    renameRuntimeSchema,
+    schemaDefsEqual,
+    selectRuntimeSchema,
+    statisticsRuntimeSchema,
+} from "./runtimeSchema";
 
 export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 export type SortKeyInput =
@@ -58,43 +81,43 @@ export type SortKeyInput =
     | EBuilder
     | ((EX: ExprAlg<any>) => SortOrder<any>);
 
-type ColumnName<S> = [S] extends [UnknownSchema]
+export type ColumnName<S> = [S] extends [UnknownSchema]
     ? string
     : S extends SchemaShape
       ? UsableColumnKey<S>
       : string;
 
-type SelectedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
+export type SelectedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Selected<S, Extract<K, keyof S>>
       : UnknownSchema;
 
-type DroppedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
+export type DroppedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Dropped<S, Extract<K, keyof S>>
       : UnknownSchema;
 
-type RenamedSchema<S, From extends PropertyKey, To extends string> = [S] extends [UnknownSchema]
+export type RenamedSchema<S, From extends PropertyKey, To extends string> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Renamed<S, Extract<From, keyof S>, To>
       : UnknownSchema;
 
-type AddedColumnSchema<S, Name extends string, T extends ColumnType> = [S] extends [UnknownSchema]
+export type AddedColumnSchema<S, Name extends string, T extends ColumnType> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? WithColumn<S, Name, T>
       : UnknownSchema;
 
-type RenamedColumnsSchema<S, M extends Record<string, string>> = [S] extends [UnknownSchema]
+export type RenamedColumnsSchema<S, M extends Record<string, string>> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? { [K in keyof S as K extends keyof M ? Extract<M[K], string> : K]: S[K] }
       : UnknownSchema;
 
-type DuplicateRenameTargets<M extends Record<string, string>> = {
+export type DuplicateRenameTargets<M extends Record<string, string>> = {
     [K in keyof M]: {
         [P in Exclude<keyof M, K>]: M[P] extends M[K]
             ? M[K] extends M[P]
@@ -104,7 +127,7 @@ type DuplicateRenameTargets<M extends Record<string, string>> = {
     }[Exclude<keyof M, K>];
 }[keyof M];
 
-type ValidRenameMap<S, M extends Record<string, string>> =
+export type ValidRenameMap<S, M extends Record<string, string>> =
     DuplicateRenameTargets<M> extends never
         ? [S] extends [UnknownSchema]
             ? M
@@ -118,40 +141,40 @@ type ValidRenameMap<S, M extends Record<string, string>> =
               : never
         : never;
 
-type ValidRenameTarget<S, From extends PropertyKey, To extends string> =
+export type ValidRenameTarget<S, From extends PropertyKey, To extends string> =
     [S] extends [UnknownSchema]
         ? To
         : To extends Extract<Exclude<keyof Extract<S, SchemaShape>, From>, string>
           ? never
           : To;
 
-type StatisticsSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
+export type StatisticsSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? { summary: string } & { [P in Extract<K, keyof S>]: string | null }
       : UnknownSchema;
 
-type JoinSchema<S, RS extends SchemaShape, JT extends JoinTypeInput> = S extends SchemaShape
+export type JoinSchema<S, RS extends SchemaShape, JT extends JoinTypeInput> = S extends SchemaShape
     ? JoinedFor<S, RS, JT>
     : UnknownSchema;
 
-type TypedPredicate<S, E> = S extends SchemaShape
+export type TypedPredicate<S, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => Condition<E>
     : never;
 
-type TypedColumnFactory<S, T extends ColumnType, E> = S extends SchemaShape
+export type TypedColumnFactory<S, T extends ColumnType, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => TypedColumn<T, E>
     : never;
 
-type TypedJoinPredicate<S, RS extends SchemaShape, E> = S extends SchemaShape
+export type TypedJoinPredicate<S, RS extends SchemaShape, E> = S extends SchemaShape
     ? (left: Columns<S, E>, right: Columns<RS, E>) => Condition<E>
     : never;
 
-type TypedOrderFactory<S, E> = S extends SchemaShape
+export type TypedOrderFactory<S, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => SortKey<E> | TypedColumn<ColumnType, E>
     : never;
 
-type TypedAggBuilder<
+export type TypedAggBuilder<
     S,
     E,
     A extends readonly TypedAggregation<string, ColumnType, E>[],
@@ -159,7 +182,7 @@ type TypedAggBuilder<
     ? (factory: AggFactory<S, E>) => readonly [...A] & UniqueAggregationTuple<A>
     : never;
 
-type UniqueAggregationTuple<
+export type UniqueAggregationTuple<
     A extends readonly { readonly alias: string }[],
     Seen extends string = never,
 > = A extends readonly [infer Head, ...infer Tail]
@@ -172,7 +195,7 @@ type UniqueAggregationTuple<
         : unknown
     : unknown;
 
-type AggregatedSchema<
+export type AggregatedSchema<
     S,
     K extends PropertyKey,
     A extends readonly { readonly __out: object }[],
@@ -191,196 +214,10 @@ export type RowOf<S> = [S] extends [UnknownSchema]
       ? { [K in keyof S]: S[K] extends ColumnType ? S[K] : unknown }
       : Record<string, unknown>;
 
-function schemaDefsEqual(left?: SchemaDef, right?: SchemaDef): boolean {
-    if (!left || !right) return left === right;
-    return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function nullableFieldSpec(spec: FieldSpec): FieldSpec {
-    if (typeof spec === "string") {
-        return spec.endsWith("?") ? spec : `${spec}?` as FieldSpec;
-    }
-    return { ...spec, nullable: true } as FieldSpec;
-}
-
-function joinRuntimeSchema(
-    left: SchemaDef | undefined,
-    right: SchemaDef | undefined,
-    joinType: JoinTypeInput,
-): SchemaDef | undefined {
-    if (!left || !right) return undefined;
-    const normalized = String(joinType).toUpperCase();
-    if (normalized === "LEFT_SEMI" || normalized === "LEFT_ANTI") return left;
-
-    // A JavaScript row object cannot represent two output fields with the same
-    // name. Keep the descriptor absent here; the Arrow boundary independently
-    // rejects the duplicate fields with a precise error.
-    if (Object.keys(left).some(name => Object.prototype.hasOwnProperty.call(right, name))) {
-        return undefined;
-    }
-
-    const leftNullable = normalized === "RIGHT" || normalized === "RIGHT_OUTER" ||
-        normalized === "OUTER" || normalized === "FULL" || normalized === "FULL_OUTER";
-    const rightNullable = normalized === "LEFT" || normalized === "LEFT_OUTER" ||
-        normalized === "OUTER" || normalized === "FULL" || normalized === "FULL_OUTER";
-
-    return {
-        ...Object.fromEntries(Object.entries(left).map(([name, spec]) => [
-            name,
-            leftNullable ? nullableFieldSpec(spec) : spec,
-        ])),
-        ...Object.fromEntries(Object.entries(right).map(([name, spec]) => [
-            name,
-            rightNullable ? nullableFieldSpec(spec) : spec,
-        ])),
-    };
-}
-
-function selectRuntimeSchema(
-    schema: SchemaDef | undefined,
-    names: readonly string[],
-): SchemaDef | undefined {
-    if (!schema) return undefined;
-    const selected: Record<string, FieldSpec> = {};
-    for (const name of names) {
-        if (!Object.prototype.hasOwnProperty.call(schema, name) ||
-            Object.prototype.hasOwnProperty.call(selected, name)) {
-            return undefined;
-        }
-        selected[name] = schema[name];
-    }
-    return selected;
-}
-
-function dropRuntimeSchema(
-    schema: SchemaDef | undefined,
-    names: readonly string[],
-): SchemaDef | undefined {
-    if (!schema) return undefined;
-    const removed = new Set(names);
-    return Object.fromEntries(Object.entries(schema).filter(([name]) => !removed.has(name)));
-}
-
-function statisticsRuntimeSchema(
-    schema: SchemaDef | undefined,
-    names: readonly string[],
-): SchemaDef | undefined {
-    if (!selectRuntimeSchema(schema, names)) return undefined;
-    return {
-        summary: "string",
-        ...Object.fromEntries(names.map(name => [name, "string?"] as const)),
-    };
-}
-
-function assertRenameMapping(mapping: Record<string, string>): void {
-    const targets = new Set<string>();
-    for (const [source, target] of Object.entries(mapping)) {
-        assertNonEmptyString("rename source", source);
-        assertNonEmptyString("rename target", target);
-        if (targets.has(target)) {
-            throw new TypeError(`Multiple columns cannot be renamed to ${JSON.stringify(target)}.`);
-        }
-        targets.add(target);
-    }
-}
-
-function assertUniqueColumnNames(label: string, names: readonly string[]): void {
-    const seen = new Set<string>();
-    for (const name of names) {
-        if (seen.has(name)) {
-            throw new TypeError(`${label} does not allow duplicate column ${JSON.stringify(name)}.`);
-        }
-        seen.add(name);
-    }
-}
-
-function renameRuntimeSchema(
-    schema: SchemaDef | undefined,
-    mapping: Record<string, string>,
-): SchemaDef | undefined {
-    if (!schema) return undefined;
-    for (const source of Object.keys(mapping)) {
-        if (!Object.prototype.hasOwnProperty.call(schema, source)) {
-            throw new TypeError(`Cannot rename missing column ${JSON.stringify(source)}.`);
-        }
-    }
-    const renamed: Record<string, FieldSpec> = {};
-    for (const [name, spec] of Object.entries(schema)) {
-        const target = mapping[name] ?? name;
-        if (Object.prototype.hasOwnProperty.call(renamed, target)) {
-            throw new TypeError(
-                `Rename would create duplicate column ${JSON.stringify(target)}.`
-            );
-        }
-        renamed[target] = spec;
-    }
-    return renamed;
-}
-
-function resolveOrderInput<E>(input: unknown, EX: ExprAlg<E>): SortOrder<E> {
-    if (typeof input === "string") {
-        return { expr: EX.col(input), direction: "asc" };
-    }
-    if (typeof input !== "function") {
-        return { expr: (input as EBuilder).build(EX), direction: "asc" };
-    }
-
-    // Typed order callbacks and legacy SortKeyBuilder are both functions. Try
-    // the typed accessor first; legacy builders require ExprAlg and therefore
-    // fall back to the existing invocation below.
-    try {
-        const typed = (input as TypedOrderFactory<Schema, E>)(makeColumns<Schema, E>());
-        if (typed instanceof SortKey) return typed.toSortOrder(EX);
-        if (typed instanceof TypedColumn) {
-            return { expr: typed.build(EX), direction: "asc" };
-        }
-    } catch {
-        // Legacy builder: evaluate it with the real expression algebra.
-    }
-    return (input as (algebra: ExprAlg<E>) => SortOrder<E>)(EX);
-}
-
-const PROTO_INT32_MAX = 2_147_483_647;
-
-function assertInteger(name: string, value: number, minimum: number): void {
-    if (!Number.isSafeInteger(value) || value < minimum || value > PROTO_INT32_MAX) {
-        throw new RangeError(
-            `${name} must be an integer between ${minimum} and ${PROTO_INT32_MAX}.`
-        );
-    }
-}
-
-function assertOptionalSeed(name: string, seed?: number): void {
-    if (seed !== undefined && !Number.isSafeInteger(seed)) {
-        throw new RangeError(`${name} seed must be a safe integer.`);
-    }
-}
-
-function assertNonEmptyString(name: string, value: string): void {
-    if (typeof value !== "string" || !value.trim()) {
-        throw new TypeError(`${name} must be a non-empty string.`);
-    }
-}
-
-function freshSparkSeed(): number {
-    // Spark Connect accepts int64 here, but a positive int32 is exactly
-    // representable by JavaScript, protobufjs and Spark on every supported
-    // runtime. Generate it when the lazy DataFrame is created so repeated
-    // interpretations of the same DataFrame remain immutable.
-    return Math.floor(Math.random() * 2_147_483_647);
-}
-
-let nextRelationPlanId = 1;
-function freshRelationPlanId(): number {
-    const planId = nextRelationPlanId;
-    nextRelationPlanId = nextRelationPlanId >= 2_147_483_647 ? 1 : nextRelationPlanId + 1;
-    return planId;
-}
-
 export const col = (name: string): EBuilder => ({ build: EX => EX.col(name) });
 export const lit = (v: LiteralValue): EBuilder => ({ build: EX => EX.lit(v) });
 export const eq = (l: EBuilder, r: EBuilder | string | number | boolean): EBuilder => ({
-    build: EX => EX.bin("=", l.build(EX), typeof r === "object" ? (r as EBuilder).build(EX) : EX.lit(r as any))
+    build: EX => EX.bin("=", l.build(EX), typeof r === "object" ? r.build(EX) : EX.lit(r))
 });
 export const asc = (e: EBuilder, nulls?: NullsOrder) =>
     (EX: ExprAlg<any>): SortOrder<any> => ({ expr: e.build(EX), direction: "asc", nulls });
@@ -741,7 +578,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                         ? EX.col(x)
                         : typeof x === "object" && x !== null && "build" in x
                             ? (x as EBuilder).build(EX)
-                            : EX.lit(x as any);
+                            : EX.lit(x);
 
                 const coalesced = EX.coalesce(exprs.map(toE));
                 return DF.withColumn(df, nameOrPartitions, coalesced);
@@ -753,140 +590,24 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     describe<K extends ColumnName<S>>(
         colNames: readonly K[],
     ): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX> {
-        if ((colNames as readonly string[]).includes("summary")) {
-            throw new TypeError("describe() cannot describe a column named 'summary'.");
-        }
-        return this.chainAs<StatisticsSchema<S, K>>((df, EX, DF) => {
-            const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
-            const stats = ["count", "mean", "stddev", "min", "max"] as const;
-            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]);
-            const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
-            const toDoubleIfNumeric = (name: string) =>
-                EX.caseWhen(
-                    [{
-                        when: EX.call("rlike", [
-                            EX.call("concat", [EX.lit(""), EX.col(name)]),
-                            EX.lit(NUMERIC_RX),
-                        ]),
-                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),
-                    }],
-                    NULL_D
-                );
-
-            const pruned = DF.select(df, colNames.map(n => EX.col(n)));
-
-            const numExpr: Record<string, any> = Object.fromEntries(
-                colNames.map(n => [n, toDoubleIfNumeric(n)])
-            );
-
-            const measures = Object.fromEntries(
-                colNames.flatMap(n => ([
-                    [`__${n}_count`, EX.call("count", [EX.col(n)])],
-                    [`__${n}_mean`,   EX.call("avg", [numExpr[n]])],
-                    [`__${n}_stddev`, EX.call("stddev_samp", [numExpr[n]])],
-                    [`__${n}_min`, EX.call("min", [EX.col(n)])],
-                    [`__${n}_max`, EX.call("max", [EX.col(n)])],
-                ]))
-            );
-
-            const aggregated = DF.agg(DF.groupBy(pruned, [] as E[]), measures);
-
-            const projectFor = (stat: typeof stats[number]) =>
-                DF.select(aggregated, [
-                    EX.alias(EX.lit(stat), "summary"),
-                    ...colNames.map(n =>
-                        EX.alias(toString(EX.col(`__${n}_${stat}`)), n)
-                    ),
-                ]);
-
-            return stats.slice(1).reduce(
-                (acc, s) => DF.union(acc, projectFor(s), { byName: true }),
-                projectFor(stats[0])
-            );
-        }, schema => statisticsRuntimeSchema(schema, colNames as readonly string[]));
+        const names = colNames as readonly string[];
+        assertStatisticsColumns("describe", names);
+        return this.chainAs<StatisticsSchema<S, K>>(
+            (df, EX, DF) => buildDescribePlan(DF, EX, df, names),
+            schema => statisticsRuntimeSchema(schema, names),
+        );
     }
 
     summary<K extends ColumnName<S>>(
         metrics: readonly string[] | undefined,
         colNames: readonly K[],
     ): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX> {
-        if ((colNames as readonly string[]).includes("summary")) {
-            throw new TypeError("summary() cannot summarize a column named 'summary'.");
-        }
-        return this.chainAs<StatisticsSchema<S, K>>((df, EX, DF) => {
-            const DEFAULTS = ["count", "mean", "stddev", "min", "25%", "50%", "75%", "max"] as const;
-            const req = (metrics?.length ? metrics : DEFAULTS).map(m => m.toLowerCase());
-
-            type Parsed =
-                | { kind: "builtin"; name: "count" | "mean" | "stddev" | "min" | "max"; label: string; suffix: string }
-                | { kind: "pct"; p: number; label: string; suffix: string };
-
-            const norm = (m: string): Parsed => {
-                if (m === "median") m = "50%";
-                if (/%$/.test(m)) {
-                    const p = parseFloat(m) / 100;
-                    if (!(p >= 0 && p <= 1)) throw new Error(`summary(): invalid percentile '${m}'`);
-                    const pct = Math.round(p * 100);
-                    return { kind: "pct", p, label: `${pct}%`, suffix: `p${pct}` };
-                }
-                if (m === "std") m = "stddev";
-                const ok = ["count", "mean", "stddev", "min", "max"] as const;
-                if ((ok as readonly string[]).includes(m)) {
-                    return { kind: "builtin", name: m as any, label: m, suffix: (m === "stddev" ? "stddev" : m) };
-                }
-                throw new Error(`summary(): unsupported metric '${m}'`);
-            };
-            const parsed: Parsed[] = req.map(norm);
-
-            const toString = (e: any) => EX.call("concat", [EX.lit(""), e]);
-            const NULL_D = EX.call("nullif", [EX.lit(1.0), EX.lit(1.0)]);
-            const NUMERIC_RX = "^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$";
-            const toDoubleIfNumeric = (name: string) =>
-                EX.caseWhen(
-                    [{
-                        when: EX.call("rlike", [
-                            EX.call("concat", [EX.lit(""), EX.col(name)]),
-                            EX.lit(NUMERIC_RX),
-                        ]),
-                        then: EX.bin("*", EX.lit(1.0), EX.col(name)),
-                    }],
-                    NULL_D
-                );
-
-            const pruned = DF.select(df, colNames.map(n => EX.col(n)));
-
-            const pairs: [string, any][] = [];
-            for (const n of colNames) {
-                const numArg = toDoubleIfNumeric(n);
-                for (const m of parsed) {
-                    if (m.kind === "builtin") {
-                        if (m.name === "count") pairs.push([`__${n}_count`, EX.call("count", [EX.col(n)])]);
-                        if (m.name === "mean") pairs.push([`__${n}_mean`, EX.call("avg", [numArg])]);
-                        if (m.name === "stddev") pairs.push([`__${n}_stddev`, EX.call("stddev_samp", [numArg])]);
-                        if (m.name === "min") pairs.push([`__${n}_min`, EX.call("min", [EX.col(n)])]);
-                        if (m.name === "max") pairs.push([`__${n}_max`, EX.call("max", [EX.col(n)])]);
-                    } else {
-                        pairs.push([`__${n}_${m.suffix}`, EX.call("percentile_approx", [numArg, EX.lit(m.p)])]);
-                    }
-                }
-            }
-            const measures = Object.fromEntries(pairs);
-            const aggregated = DF.agg(DF.groupBy(pruned, [] as E[]), measures);
-
-            const projectFor = (m: Parsed) =>
-                DF.select(aggregated, [
-                    EX.alias(EX.lit(m.label), "summary"),
-                    ...colNames.map(n =>
-                        EX.alias(toString(EX.col(`__${n}_${m.suffix}`)), n)
-                    ),
-                ]);
-
-            const rows = parsed.map(projectFor);
-            return rows.slice(1).reduce(
-                (acc, r) => DF.union(acc, r, { byName: true }),
-                rows[0]
-            );
-        }, schema => statisticsRuntimeSchema(schema, colNames as readonly string[]));
+        const names = colNames as readonly string[];
+        assertStatisticsColumns("summary", names);
+        return this.chainAs<StatisticsSchema<S, K>>(
+            (df, EX, DF) => buildSummaryPlan(DF, EX, df, metrics, names),
+            schema => statisticsRuntimeSchema(schema, names),
+        );
     }
 
     repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX> {
@@ -974,8 +695,8 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
      * `prog` is written generically over the algebra (it works for any R/E/G),
      * but this class fixes R/E/G as type parameters. Each concrete interpreter
      * (Spark logical plan, proto, trace) carries its own representation types,
-     * so feeding one in requires a single cast. Confining it here keeps the rest
-     * of the class free of `as any` and documents why the cast is sound: the
+     * so feeding one in requires a single representation-boundary cast. Keeping
+     * it here documents why the cast is sound: the
      * program never inspects R/E/G, it only forwards algebra calls.
      */
     private interpretWith<Out>(DF: unknown, EX: unknown): Out {
@@ -1059,11 +780,9 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         }
         type CDFBatch = Exclude<CDF, StreamingMark<R>>;
 
+        const dfProgram = this.getProgram() as unknown as DFProgram<R, E, G, CDFBatch, CEX>;
         const prog: BatchWProgram<R, E, G, CDFBatch, CEX> =
-            (WR, DF, EX) => {
-                const root = this.getProgram()(DF as any, EX as any);
-                return (WR as any).fromChild(root);
-            };
+            (WR, DF, EX) => WR.fromChild(dfProgram(DF, EX));
 
         const wProgram = (WR: BatchWriterAlg<R>,
                           DF: DFAlg<R, E, G, CDFBatch>,
@@ -1078,13 +797,13 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             BatchWriterAlg<R>
         >({
             session: this.getSession(),
-            dfProgram: this.getProgram() as unknown as DFProgram<R, E, G, CDFBatch, CEX>,
+            dfProgram,
             wProgram,
         });
     }
 
-    private compileTrace(): any {
-        return this.interpretWith<any>(TraceDFAlg, TraceExprAlg);
+    private compileTrace(): TraceNode {
+        return this.interpretWith<TraceNode>(TraceDFAlg, TraceExprAlg);
     }
 
     toClientASTJSON(): string {
@@ -1187,12 +906,14 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         if (!this.streaming) {
             throw new Error("Cannot use .writeStream() on a batch DataFrame. Use .write() instead.");
         }
-        const prog: StreamWProgram<R, E, G, CDF & StreamingMark<R>, CEX> =
-            (WR, DF, EX) => WR.writeStream(this.getProgram()(DF as any, EX as any));
-        return DataFrameWriterTF.fromParts({
+        type StreamingCDF = CDF & StreamingMark<R>;
+        const dfProgram = this.getProgram() as unknown as DFProgram<R, E, G, StreamingCDF, CEX>;
+        const prog: StreamWProgram<R, E, G, StreamingCDF, CEX> =
+            (WR, DF, EX) => WR.writeStream(dfProgram(DF, EX));
+        return DataFrameWriterTF.fromParts<R, E, G, WStream, StreamingCDF, CEX, StreamWriterAlg<R>>({
             session: this.getSession(),
-            dfProgram: this.getProgram() as any,
-            wProgram: (WR, DF, EX) => prog(WR as any, DF, EX),
+            dfProgram,
+            wProgram: prog,
         });
     }
 }
@@ -1228,7 +949,7 @@ export class GroupedDataFrameTF<
         const parseAggregation = (value: string) => {
             const match = value.match(/^\s*([A-Za-z_]\w*)\s*\(\s*([^)]+)\s*\)\s*$/);
             if (!match) throw new Error(`Invalid aggregation: ${value}`);
-            return { fn: match[1], arg: match[2] };
+            return { fn: match[1]!, arg: match[2]! };
         };
 
         const next: DFProgram<R, E, G, CDF, CEX> = (DF, EX) => {

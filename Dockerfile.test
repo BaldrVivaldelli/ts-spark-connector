@@ -1,5 +1,5 @@
 # Dockerfile for running tests with all dependencies
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Install netcat for health checks
 RUN apk add --no-cache netcat-openbsd

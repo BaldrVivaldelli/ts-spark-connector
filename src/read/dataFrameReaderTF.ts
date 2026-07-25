@@ -7,7 +7,7 @@ import { UnknownSchema } from "../schema/schema-model";
 import { validateTableIdentifier } from "../utils/identifiers";
 import { SqlCap } from "../algebra/read/batch-capabilities";
 
-type Opts = Record<string, string>;
+export type Opts = Record<string, string>;
 export type ReaderOptionValue = string | number | boolean | bigint;
 
 function nonEmpty(value: string, label: string): string {
@@ -25,6 +25,10 @@ function optionValue(value: ReaderOptionValue, label: string): string {
         throw new RangeError(`${label} must be a finite number.`);
     }
     return String(value);
+}
+
+function oneOrManyPaths(paths: string[]): string | string[] {
+    return paths.length === 1 ? paths[0]! : paths;
 }
 
 export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
@@ -61,27 +65,27 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
 
     // Atajos con multipath
     csv(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("csv", paths.length <= 1 ? paths[0] : paths);
+        return this.make("csv", oneOrManyPaths(paths));
     }
     json(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("json", paths.length <= 1 ? paths[0] : paths);
+        return this.make("json", oneOrManyPaths(paths));
     }
     parquet(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("parquet", paths.length <= 1 ? paths[0] : paths);
+        return this.make("parquet", oneOrManyPaths(paths));
     }
     orc(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("orc", paths.length <= 1 ? paths[0] : paths);
+        return this.make("orc", oneOrManyPaths(paths));
     }
     text(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("text", paths.length <= 1 ? paths[0] : paths);
+        return this.make("text", oneOrManyPaths(paths));
     }
     avro(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.make("avro", paths.length <= 1 ? paths[0] : paths);
+        return this.make("avro", oneOrManyPaths(paths));
     }
 
     load(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
         const fmt = this.fmt ?? "parquet";
-        return this.make(fmt, paths.length === 0 ? [] : paths.length === 1 ? paths[0] : paths, true);
+        return this.make(fmt, oneOrManyPaths(paths), true);
     }
 
     table(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown> {

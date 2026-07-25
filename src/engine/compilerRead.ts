@@ -281,6 +281,9 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
         let acc: ProtoExpr = otherwise;
         for (let i = branches.length - 1; i >= 0; i--) {
             const b = branches[i];
+            if (!b) {
+                throw new Error("caseWhen received a sparse branch list.");
+            }
             acc = {
                 unresolved_function: {
                     function_name: "if",

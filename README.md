@@ -105,9 +105,9 @@ console.log(explain);
 
 ## Spark Connect server
 
-The repo includes a Spark 4.0.0 Docker setup under `spark-server/`. It starts a
-TLS-enabled endpoint by default and uses the development CA shown in the quick
-start.
+The repo includes a version-parameterized Spark 4.0.x Docker setup under
+`spark-server/`. It defaults to 4.0.4, starts a TLS-enabled endpoint, and uses
+the development CA shown in the quick start.
 
 ```bash
 docker compose up --build
@@ -149,13 +149,17 @@ Notes:
 
 Ready-to-run examples live under `docs/examples/`. They read the same
 `SPARK_CONNECT_URL`, `SPARK_TLS_CA`, and `SPARK_TLS_SERVER_NAME` variables as
-the E2E setup, wait for their work, and close the session. For example, after
-starting the bundled server:
+the E2E setup, compile with TypeScript 7, wait for their work, and close the
+session. After starting the bundled server, run one example or the full set:
 
 ```bash
-npm run build
-node -r ts-node/register docs/examples/join.ts
+npm run examples:run -- join
+npm run examples:run
 ```
+
+See [`docs/examples/README.md`](docs/examples/README.md) for the complete setup.
+Upgrade guidance and the canary promotion contract live in
+[`MIGRATION.md`](MIGRATION.md).
 
 ## Connection resiliency
 
@@ -210,13 +214,16 @@ await session.conf.unset("spark.sql.shuffle.partitions");
 
 ## Compatibility
 
-The currently verified compatibility target is:
+The currently verified compatibility targets are:
 
-- Spark Connect protocol/server 4.0.0 (the pinned Docker E2E target)
+- Vendored Spark Connect protocol descriptors from 4.0.4
+- Spark Connect servers 4.0.0 and 4.0.4 in the Docker E2E matrix
 - Scala 2.13 artifacts on the server image
-- Node.js 18+
+- Node.js 22 and 24
+- TypeScript 7 for compilation; TypeScript 6 API compatibility only for
+  tooling that has not migrated to the new compiler API
 
-Spark 3.5.x and other Spark Connect versions may work, but they are not
+Other Spark Connect versions may work, but they are not
 currently part of a green compatibility matrix and are therefore not claimed
 as supported. Add a version to this list only after its protocol and behavioral
 E2E suite passes in CI.
@@ -243,6 +250,16 @@ The package is CommonJS-first. Both `require()` and Node ESM named imports are
 smoke-tested from the packed tarball, together with NodeNext declarations and
 all `docs/examples`. Only the root import (`ts-spark-connector`) is a supported
 export; deep imports are intentionally blocked by `package.json#exports`.
+
+`npm run api:check` compares declarations with the committed API Extractor
+[report](etc/ts-spark-connector.api.md). `npm run package:lint` validates the
+packed tarball with Publint and Are The Types Wrong, and
+`npm run test:coverage` enforces the current coverage baseline.
+
+CI publishes a JUnit report, a machine-readable JSON result and a Markdown
+summary for every Spark E2E matrix entry. Canary releases use the npm `next`
+dist-tag and must pass the automated observation and 24-hour soak gate before a
+stable release is eligible.
 
 ## License
 

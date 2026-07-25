@@ -124,7 +124,7 @@ const protoWritingAlg = {
     },
 
     format<T extends ProtoWriterNode>(writer: T, fmt: WriterFormat): T {
-        return updateWriterSpec(writer, { format: fmt as WriterSpec["format"] });
+        return updateWriterSpec(writer, { format: fmt });
     },
 
     option<T extends ProtoWriterNode>(writer: T, key: string, value: string): T {

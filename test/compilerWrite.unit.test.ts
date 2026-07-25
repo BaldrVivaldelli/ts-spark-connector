@@ -98,7 +98,7 @@ describe("protoWriteRootToPlan - batch", () => {
       child: childRelation,
       writerKind: "batch",
       spec: {
-        format: "jdbc" as any,
+        format: "jdbc",
         options: { url: "jdbc:postgresql://db/app", dbtable: "events" },
         partitionBy: [],
         sortBy: [],

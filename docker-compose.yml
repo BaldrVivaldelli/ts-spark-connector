@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: spark-server/Dockerfile
+      args:
+        SPARK_VERSION: "${SPARK_VERSION:-4.0.4}"
+        SPARK_AVRO_SHA256: "${SPARK_AVRO_SHA256:-f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55}"
     # TLS is enabled by default. For trusted local plaintext debugging, combine
     # this file with docker-compose.plain.yml.
     environment:

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
     branches: [main]
 
@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22, 24]
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v6
 
@@ -28,17 +28,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | npm run lint:commit
+
+      - name: Verify TypeScript 7 toolchain
+        run: npm run check:typescript
+
       - name: Typecheck source
         run: npm run typecheck
 
       - name: Typecheck tests
         run: npm run typecheck:test
 
+      - name: Typecheck executable examples
+        run: npm run typecheck:examples
+
       - name: Lint
         run: npm run lint
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: Coverage gate
+        if: matrix.node == 22
+        run: npm run test:coverage
 
       - name: Verify Spark protocol manifest
         run: npm run test:proto
@@ -52,43 +68,74 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
       - name: Test packed CJS, ESM, and type consumers
         run: npm run test:package
+
+      - name: Validate package metadata and module types
+        run: npm run package:lint
+
+      - name: Verify the public API report
+        run: npm run api:check
+
+      - name: Validate production SBOM
+        run: |
+          npm run --silent sbom > sbom.cdx.json
+          node -e 'const fs=require("node:fs"); const sbom=JSON.parse(fs.readFileSync("sbom.cdx.json","utf8")); if (sbom.bomFormat !== "CycloneDX") process.exit(1)'
 
       - name: Smoke plan-compilation benchmark
         run: npm run benchmark
         env:
-          SPARK_PLAN_BENCH_ITERATIONS: 1000
+          SPARK_PLAN_BENCH_ITERATIONS: 5000
 
   e2e:
-    name: E2E / Spark 4.0.0
+    name: E2E / Spark ${{ matrix.spark }}
     needs: unit
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - spark: 4.0.0
+            avro-sha256: 083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709
+          - spark: 4.0.4
+            avro-sha256: f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55
+    env:
+      SPARK_VERSION: ${{ matrix.spark }}
+      SPARK_AVRO_SHA256: ${{ matrix.avro-sha256 }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Prepare writable Spark output
-        run: mkdir -p example_data/dest
+        run: mkdir -p example_data/dest artifacts/e2e
 
       - name: Boot Spark
         run: docker compose -f docker-compose.yml up --build --detach --wait spark
 
       - name: Run E2E tests
-        run: npm run test:e2e
+        id: e2e
+        continue-on-error: true
+        run: >-
+          npm run test:e2e --
+          --reporter=default
+          --reporter=junit
+          --outputFile.junit="artifacts/e2e/spark-${SPARK_VERSION}.xml"
         env:
           SPARK_CONNECT_URL: scs://127.0.0.1:15002
           SPARK_TLS_CA: ./spark-server/certs/ca.crt
@@ -96,16 +143,43 @@ jobs:
           SPARK_TEST_DEST: /data/dest/ci
 
       - name: Run an installed-package example
-        run: node -r ts-node/register docs/examples/join.ts
+        id: example
+        if: always()
+        continue-on-error: true
+        run: npm run examples:run -- join
         env:
           SPARK_CONNECT_URL: scs://127.0.0.1:15002
           SPARK_TLS_CA: ./spark-server/certs/ca.crt
           SPARK_TLS_SERVER_NAME: spark-connect
 
-      - name: Show Spark logs on failure
-        if: failure()
-        run: docker compose -f docker-compose.yml logs spark
+      - name: Capture Spark logs on failure
+        if: always() && (steps.e2e.outcome != 'success' || steps.example.outcome != 'success')
+        continue-on-error: true
+        run: >-
+          docker compose -f docker-compose.yml logs --no-color spark
+          > "artifacts/e2e/spark-${SPARK_VERSION}.log"
+
+      - name: Publish E2E job summary
+        if: always()
+        env:
+          E2E_TEST_OUTCOME: ${{ steps.e2e.outcome }}
+          E2E_EXAMPLE_OUTCOME: ${{ steps.example.outcome }}
+          E2E_JUNIT_PATH: artifacts/e2e/spark-${{ matrix.spark }}.xml
+        run: node scripts/publish-e2e-report.mjs
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-spark-${{ matrix.spark }}
+          path: artifacts/e2e
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Stop Spark
         if: always()
         run: docker compose -f docker-compose.yml down --volumes
+
+      - name: Enforce E2E result
+        if: always() && (steps.e2e.outcome != 'success' || steps.example.outcome != 'success')
+        run: exit 1

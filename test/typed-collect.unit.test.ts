@@ -7,7 +7,7 @@ import { sparkGrpcClient } from "../src/client/sparkClient";
 // Builds a Spark-Connect-shaped response carrying an Arrow IPC buffer, so we can
 // exercise the typed `collect()` decoding path without a live server.
 function arrowResponse(columns: Record<string, unknown[]>) {
-  const table = arrow.tableFromArrays(columns as any);
+  const table = arrow.tableFromArrays(columns);
   return tableResponse(table);
 }
 
@@ -122,7 +122,7 @@ describe("arrow-rows decoding (typed collect)", () => {
       label: [42],
     });
     vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([
-      resultWithWrongLabelType as any,
+      resultWithWrongLabelType,
     ]);
 
     const joined = session.read.readWith(Left, "csv", "/tmp/left.csv").join(

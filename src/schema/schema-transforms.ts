@@ -99,10 +99,8 @@ export type Dropped<S extends SchemaShape, K extends keyof S> = Prettify<
  *
  * Nota de alineación: esta es una definición *estructural* y mínima. El builder
  * concreto que la implementa (`count`/`sum`/`avg`/… con su `.as(alias)`) se
- * crea en `src/typed/aggregations.ts` (task 4.3). Cualquier clase que exponga un
- * `readonly __out: { [Alias]: Out }` —como el `Aggregation` del prototipo en
- * `src/experimental/aggregations.ts`— es asignable a este tipo, de modo que las
- * dos definiciones permanecen consistentes.
+ * crea en `src/typed/aggregations.ts`. Cualquier clase que exponga un
+ * `readonly __out: { [Alias]: Out }` es asignable a este tipo.
  */
 export interface Aggregation<
     Alias extends string = string,
@@ -140,9 +138,9 @@ export type Aggregated<
  * ambigua. El usuario lo resuelve renombrando antes del join
  * (`withColumnRenamed`) o accediendo por lado (Requirement 6.2, 6.3).
  */
-type NullableColumn<T> = T extends ColumnType ? T | null : T;
-type JoinName<J extends string> = Uppercase<J>;
-type IsLeftNullable<J extends string> = JoinName<J> extends
+export type NullableColumn<T> = T extends ColumnType ? T | null : T;
+export type JoinName<J extends string> = Uppercase<J>;
+export type IsLeftNullable<J extends string> = JoinName<J> extends
     | "RIGHT"
     | "RIGHT_OUTER"
     | "OUTER"
@@ -150,7 +148,7 @@ type IsLeftNullable<J extends string> = JoinName<J> extends
     | "FULL_OUTER"
     ? true
     : false;
-type IsRightNullable<J extends string> = JoinName<J> extends
+export type IsRightNullable<J extends string> = JoinName<J> extends
     | "LEFT"
     | "LEFT_OUTER"
     | "OUTER"
@@ -165,7 +163,7 @@ type IsRightNullable<J extends string> = JoinName<J> extends
  * izquierdo, tal como hace Spark. Las colisiones de los demás joins siguen
  * marcadas como ambiguas y nunca se vuelven columnas utilizables.
  */
-type JoinedForSingle<
+export type JoinedForSingle<
     L extends SchemaShape,
     R extends SchemaShape,
     J extends string,
