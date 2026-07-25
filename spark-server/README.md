@@ -5,6 +5,13 @@ end-to-end tests. It defaults to **Apache Spark 4.0.4** and CI also exercises
 **4.0.0** for backwards compatibility, always with the matching Scala 2.13
 Avro artifact. TLS is enabled by default on port `15002`.
 
+Spark Connect 4.0.x exposes a plaintext gRPC listener. The container therefore
+binds Spark only to `127.0.0.1:15003` and uses HAProxy to terminate TLS/ALPN
+`h2` on the public `15002` endpoint. The PKCS#12 fixture's private key is
+extracted only into the container's mode-`0700` runtime directory and removed
+when the entrypoint exits; no loose private key is stored in the repository or
+image layer.
+
 Other releases may work, but are not claimed as supported until they have a
 green compatibility matrix.
 
@@ -13,8 +20,8 @@ green compatibility matrix.
 ```text
 spark-server/
 ├── Dockerfile
-├── entrypoint.sh
-├── conf/spark-defaults.conf             # default TLS profile
+├── entrypoint.sh                        # Spark + TLS proxy supervisor
+├── conf/spark-defaults.conf             # loopback Spark backend
 ├── conf-plain/spark-defaults.conf       # opt-in plaintext profile
 └── certs/
     ├── ca.crt                           # public development CA

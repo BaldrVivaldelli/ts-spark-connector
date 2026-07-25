@@ -5,7 +5,7 @@ ARG SPARK_VERSION
 
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl netcat-openbsd \
+    curl haproxy netcat-openbsd openssl \
  && rm -rf /var/lib/apt/lists/*
 
 ENV SPARK_HOME=/opt/spark

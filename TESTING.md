@@ -70,8 +70,9 @@ docker compose -f docker-compose.test.yml down -v
 
 The Docker test setup includes:
 
-1. **Spark server container**: runs the selected Spark 4.0.x version with TLS
-   on port 15002.
+1. **Spark server container**: runs the selected Spark 4.0.x version on a
+   loopback-only plaintext backend. HAProxy terminates TLS with ALPN `h2` on
+   port 15002.
 2. **Test runner container**: trusts only the public development CA and runs
    the E2E suite against Spark.
 

@@ -12,6 +12,9 @@ services:
     # The E2E compatibility gate intentionally exercises the default TLS
     # profile on each Spark version selected by the CI compatibility matrix.
     environment:
+      SPARK_CONNECT_PORT: "15002"
+      SPARK_CONNECT_BACKEND_PORT: "15003"
+      SPARK_CONNECT_TLS_ENABLED: "true"
       SPARK_NO_DAEMONIZE: "true"
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "15002"]

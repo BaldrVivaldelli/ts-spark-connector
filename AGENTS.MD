@@ -15,6 +15,8 @@ Run Compose from the repository root:
 
 The plaintext profile is for isolated local debugging only. Do not use auth
 credentials with it. Docker E2E always uses TLS.
+The default container terminates TLS with HAProxy on port 15002 and keeps
+Spark's plaintext backend loopback-only on port 15003.
 
 ## How to run
 - Build: `npm run build`

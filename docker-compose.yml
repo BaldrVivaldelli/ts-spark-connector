@@ -11,6 +11,8 @@ services:
     environment:
       SPARK_ROLE: connect
       SPARK_CONNECT_PORT: "15002"
+      SPARK_CONNECT_BACKEND_PORT: "15003"
+      SPARK_CONNECT_TLS_ENABLED: "true"
       SPARK_NO_DAEMONIZE: "true"
     ports:
       - "15002:15002"   # Spark Connect gRPC

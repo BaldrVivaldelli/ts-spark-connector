@@ -4,3 +4,4 @@ services:
   spark:
     environment:
       SPARK_CONF_DIR: /opt/spark/conf-plain
+      SPARK_CONNECT_TLS_ENABLED: "false"
