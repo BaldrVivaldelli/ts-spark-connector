@@ -42,7 +42,9 @@ jobs:
             exit 1
           fi
 
-          git fetch origin "refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          git fetch origin \
+            "refs/heads/main:refs/remotes/origin/main" \
+            "refs/heads/next:refs/remotes/origin/next"
           if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$TESTED_SHA" ]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "$RELEASE_BRANCH advanced after this CI run; a newer workflow_run will release it"
@@ -50,6 +52,11 @@ jobs:
           fi
 
           git switch --force-create "$RELEASE_BRANCH" "$TESTED_SHA"
+          for configured_branch in main next; do
+            if [ "$configured_branch" != "$RELEASE_BRANCH" ]; then
+              git branch --force "$configured_branch" "origin/$configured_branch"
+            fi
+          done
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v6
