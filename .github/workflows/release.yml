@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the tested commit
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
@@ -64,6 +64,13 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # npm trusted publishing (OIDC) requiere npm >= 11.5.1; Node 22 trae npm 10.x
+      - name: Upgrade npm for trusted publishing
+        if: steps.tested-sha.outputs.eligible == 'true'
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
 
       - name: Install the tested source tree
         if: steps.tested-sha.outputs.eligible == 'true'
