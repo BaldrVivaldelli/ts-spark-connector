@@ -6,7 +6,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-package-lock.json
 .pnpm-debug.log
 *.tsbuildinfo
 
@@ -66,3 +65,9 @@ jest-html-reporters-*.html
 
 # Optional: if you generate compiled protobufs
 src/generated/
+
+# Certificate-generator intermediates/private PEM keys must stay out of git.
+spark-server/certs/*.key
+spark-server/certs/*.csr
+spark-server/certs/*.srl
+spark-server/certs/*.tmp

@@ -20,7 +20,7 @@ export interface SqlCap<R> {
 
 // Hints
 export interface HintCap<R> {
-    hint(plan: R, name: JoinHintName | string, params?: any[]): R;
+    hint(plan: R, name: JoinHintName | string, params?: unknown[]): R;
 }
 
 // Muestreo

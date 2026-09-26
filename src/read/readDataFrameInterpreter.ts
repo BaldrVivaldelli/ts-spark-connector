@@ -8,11 +8,7 @@ function exprToColumnName(expr: Expression): string | undefined {
     return expr.type === "Column" ? expr.name : undefined;
 }
 
-function exprsToColumnNames(exprs?: Expression[]): string[] | undefined {
-    if (!exprs || exprs.length === 0) {
-        return [];
-    }
-
+function exprsToColumnNames(exprs: Expression[]): string[] | undefined {
     const columnNames = exprs.map(exprToColumnName);
     return columnNames.every((name): name is string => typeof name === "string" && name.length > 0)
         ? columnNames
@@ -20,7 +16,7 @@ function exprsToColumnNames(exprs?: Expression[]): string[] | undefined {
 }
 
 export const SparkExprAlg: ExprAlg<Expression> = {
-    col: (name) => ({ type: "Column", name }),
+    col: (name, planId) => ({ type: "Column", name, ...(planId === undefined ? {} : { planId }) }),
     lit: (v) => ({ type: "Literal", value: v }),
     bin: (op, left, right) => ({ type: "Binary", op, left, right }),
     logical: (op, left, right) => ({ type: "Logical", op, left, right }),
@@ -126,7 +122,8 @@ export const SparkExprAlg: ExprAlg<Expression> = {
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<LogicalPlan, Expression>> = {
-    relation: (format, path, options) => ({ type: "Relation", format, path, options }),
+    relation: (format, path, options, schema) => ({ type: "Relation", format, path, options, schema }),
+    withPlanId: plan => plan,
     select: (plan, columns) => ({ type: "Project", input: plan, columns }),
     filter: (plan, condition) => ({ type: "Filter", input: plan, condition }),
     withColumn: (plan, name, column) => ({
@@ -183,6 +180,20 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<L
         inputs: [left, right],
         byName: !!opts?.byName,
         allowMissingColumns: !!opts?.allowMissingColumns,
+    }),
+    intersect: (left, right, opts) => ({
+        type: "SetOperation",
+        left,
+        right,
+        setOpType: "intersect",
+        isAll: !!opts?.all,
+    }),
+    except: (left, right, opts) => ({
+        type: "SetOperation",
+        left,
+        right,
+        setOpType: "except",
+        isAll: !!opts?.all,
     }),
     withColumnRenamed: (plan, oldName, newName) => ({
         type: "WithColumnsRenamed",

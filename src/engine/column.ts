@@ -2,7 +2,7 @@
 
 
 
-import {ExprAlg} from "../algebra/read";
+import {ExprAlg, LiteralValue} from "../algebra/read";
 import {NullsOrder, SortDirection, WindowSpec} from "../types";
 
 export type FrameBoundary =
@@ -41,7 +41,8 @@ export type EBuilder = {
     to_json(): EBuilder;
 };
 
-``
+// Coerces a standalone argument: a bare string is treated as a COLUMN reference.
+// Used by top-level helpers like call/coalesce/explode/isNull.
 const toE =
     (x: EBuilder | string | number | boolean) =>
         <E>(EX: ExprAlg<E>) =>
@@ -49,24 +50,26 @@ const toE =
                 ? x.build(EX)
                 : typeof x === "string"
                     ? EX.col(x)
-                    : EX.lit(x as any);
+                    : EX.lit(x);
 
 export type SortKeyBuilder = <E>(EX: ExprAlg<E>) => { expr: E; direction: SortDirection; nulls?: NullsOrder };
 
 const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
-    const toE = (x: EBuilder | string | number | boolean) =>
-        <E>(EX: ExprAlg<E>) => (typeof x === "object" && "build" in x) ? x.build(EX) : EX.lit(x as any);
+    // Coerces the right-hand side of a comparison: a bare string is treated as a
+    // LITERAL (PySpark semantics, e.g. col("a").eq("x") compares against the value "x").
+    const toCmpE = (x: EBuilder | string | number | boolean) =>
+        <E>(EX: ExprAlg<E>) => (typeof x === "object" && "build" in x) ? x.build(EX) : EX.lit(x);
 
     return {
         build: f,
 
         alias: (name) => EB(EX => EX.alias(f(EX), name)),
 
-        eq: (x) => EB(EX => EX.bin("=", f(EX), toE(x)(EX))),
-        gt: (x) => EB(EX => EX.bin(">", f(EX), toE(x)(EX))),
-        gte: (x) => EB(EX => EX.bin(">=", f(EX), toE(x)(EX))),
-        lt: (x) => EB(EX => EX.bin("<", f(EX), toE(x)(EX))),
-        lte: (x) => EB(EX => EX.bin("<=", f(EX), toE(x)(EX))),
+        eq: (x) => EB(EX => EX.bin("=", f(EX), toCmpE(x)(EX))),
+        gt: (x) => EB(EX => EX.bin(">", f(EX), toCmpE(x)(EX))),
+        gte: (x) => EB(EX => EX.bin(">=", f(EX), toCmpE(x)(EX))),
+        lt: (x) => EB(EX => EX.bin("<", f(EX), toCmpE(x)(EX))),
+        lte: (x) => EB(EX => EX.bin("<=", f(EX), toCmpE(x)(EX))),
 
         and: (x) => EB(EX => EX.logical("AND", f(EX), x.build(EX))),
         or: (x) => EB(EX => EX.logical("OR", f(EX), x.build(EX))),
@@ -122,7 +125,7 @@ export function getItem(collection: EBuilder, key: EBuilder | string | number): 
             collection.build(EX),
             typeof key === "object" && "build" in key
                 ? key.build(EX)
-                : EX.lit(key as any)
+                : EX.lit(key)
         )
     );
 }
@@ -147,9 +150,9 @@ export function coalesce(...xs: Array<EBuilder | string | number | boolean>): EB
 }
 
 export const col = (name: string): EBuilder => EB(EX => EX.col(name));
-export const lit = (v: string | number | boolean): EBuilder => EB(EX => EX.lit(v));
+export const lit = (v: LiteralValue): EBuilder => EB(EX => EX.lit(v));
 
-type CaseChain = {
+export type CaseChain = {
     when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain;
     otherwise(val: EBuilder | string | number | boolean): EBuilder;
 };
@@ -198,4 +201,4 @@ export const Window = {
 
 // util
 const asE = (x: EBuilder | string | number | boolean): EBuilder =>
-    (typeof x === "object" && "build" in x) ? x as EBuilder : lit(x as any);
+    (typeof x === "object" && "build" in x) ? x : lit(x);

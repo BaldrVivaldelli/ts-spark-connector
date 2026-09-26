@@ -4,21 +4,28 @@
 
 import {SaveMode} from "../algebra/write";
 
-export type ProtoSortDirection = "ASCENDING" | "DESCENDING";
-export type ProtoNullsOrder = "UNSPECIFIED" | "NULLS_FIRST" | "NULLS_LAST";
+// These are the enum labels declared by Expression.SortOrder in
+// expressions.proto. @grpc/proto-loader only recognizes the full labels when
+// configured with `enums: String`; shortened values are silently encoded as 0.
+export type ProtoSortDirection =
+    | "SORT_DIRECTION_ASCENDING"
+    | "SORT_DIRECTION_DESCENDING";
+export type ProtoNullsOrder = "SORT_NULLS_FIRST" | "SORT_NULLS_LAST";
 
 export const DEFAULT_JOIN_TYPE: JoinTypeInput = "INNER";
 
 export enum JoinType {
+    JOIN_TYPE_UNSPECIFIED = 0,
     JOIN_TYPE_INNER = 1,
-    JOIN_TYPE_LEFT_OUTER = 2,
-    JOIN_TYPE_RIGHT_OUTER = 3,
-    JOIN_TYPE_FULL_OUTER = 4,
-    JOIN_TYPE_LEFT_SEMI = 5,
-    JOIN_TYPE_LEFT_ANTI = 6,
+    JOIN_TYPE_FULL_OUTER = 2,
+    JOIN_TYPE_LEFT_OUTER = 3,
+    JOIN_TYPE_RIGHT_OUTER = 4,
+    JOIN_TYPE_LEFT_ANTI = 5,
+    JOIN_TYPE_LEFT_SEMI = 6,
+    JOIN_TYPE_CROSS = 7,
 }
 
-export type JoinTypeInput =
+export type JoinTypeName =
     | "INNER"
     | "LEFT"
     | "RIGHT"
@@ -28,9 +35,14 @@ export type JoinTypeInput =
     | "RIGHT_OUTER"
     | "FULL_OUTER"
     | "LEFT_SEMI"
-    | "LEFT_ANTI";
+    | "LEFT_ANTI"
+    | "CROSS";
 
-const joinTypeMap: Record<JoinTypeInput, JoinType> = {
+// Accept both Spark Connect canonical names ("LEFT") and PySpark-style
+// lowercase ("left"); toProtoJoinType normalizes case before mapping.
+export type JoinTypeInput = JoinTypeName | Lowercase<JoinTypeName>;
+
+const joinTypeMap: Record<JoinTypeName, JoinType> = {
     INNER: JoinType.JOIN_TYPE_INNER,
     LEFT: JoinType.JOIN_TYPE_LEFT_OUTER,
     LEFT_OUTER: JoinType.JOIN_TYPE_LEFT_OUTER,
@@ -41,10 +53,11 @@ const joinTypeMap: Record<JoinTypeInput, JoinType> = {
     FULL_OUTER: JoinType.JOIN_TYPE_FULL_OUTER,
     LEFT_SEMI: JoinType.JOIN_TYPE_LEFT_SEMI,
     LEFT_ANTI: JoinType.JOIN_TYPE_LEFT_ANTI,
+    CROSS: JoinType.JOIN_TYPE_CROSS,
 };
 
-export function toProtoJoinType(joinType: JoinTypeInput): number {
-    const normalized = joinType as JoinTypeInput;
+export function toProtoJoinType(joinType: JoinTypeInput): JoinType {
+    const normalized = String(joinType).toUpperCase() as JoinTypeName;
     const result = joinTypeMap[normalized];
     if (!result) {
         throw new Error(`Unsupported join type: "${joinType}".`);
@@ -99,12 +112,21 @@ export function toProtoSetOpType(kind: SetOpTypeInput = "union"): SetOpType {
 }
 
 export function toProtoSortDirection(dir: "asc" | "desc"): ProtoSortDirection {
-    return dir === "asc" ? "ASCENDING" : "DESCENDING";
+    return dir === "asc" ? "SORT_DIRECTION_ASCENDING" : "SORT_DIRECTION_DESCENDING";
 }
 
-export function toProtoNullsOrder(n?: "nullsFirst" | "nullsLast"): ProtoNullsOrder {
-    if (!n) return "UNSPECIFIED";
-    return n === "nullsFirst" ? "NULLS_FIRST" : "NULLS_LAST";
+export function toProtoNullsOrder(
+    n: "nullsFirst" | "nullsLast" | undefined,
+    direction: "asc" | "desc",
+): ProtoNullsOrder {
+    if (n) {
+        return n === "nullsFirst" ? "SORT_NULLS_FIRST" : "SORT_NULLS_LAST";
+    }
+
+    // Spark's default ordering is ASC NULLS FIRST / DESC NULLS LAST. The
+    // protocol marks null_ordering as required, so emit that default instead
+    // of relying on the enum's UNSPECIFIED value.
+    return direction === "asc" ? "SORT_NULLS_FIRST" : "SORT_NULLS_LAST";
 }
 
 

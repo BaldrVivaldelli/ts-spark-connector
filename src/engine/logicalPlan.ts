@@ -1,4 +1,5 @@
 import { GroupTypeInput, JoinHintName, JoinTypeInput } from "./sparkConnectEnums";
+import { LiteralValue } from "../algebra/read";
 import { FrameBoundary } from "./column";
 import { FrameType, SortOrder } from "../types";
 
@@ -27,17 +28,18 @@ export type DataSource = {
 };
 
 export type LogicalPlan =
-    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string> }
+    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string>; schema?: string }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
     | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, Expression>; groupType?: GroupTypeInput }
     | { type: "GroupBy"; input: LogicalPlan; expressions: Expression[] }
     | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression; joinType: JoinTypeInput }
-    | { type: "Sort"; input: LogicalPlan; orders: SortOrder<any>[] }
+    | { type: "Sort"; input: LogicalPlan; orders: SortOrder<Expression>[] }
     | { type: "Limit"; input: LogicalPlan; limit: number }
     | { type: "Distinct"; input: LogicalPlan }
     | { type: "Deduplicate"; input: LogicalPlan; columnNames?: string[] }
     | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean }
+    | { type: "SetOperation"; left: LogicalPlan; right: LogicalPlan; setOpType: "intersect" | "except"; isAll?: boolean }
     | { type: "WithColumnsRenamed"; input: LogicalPlan; mapping: Record<string, string> }
     | { type: "Describe"; input: LogicalPlan; columns: Expression[] }
     | { type: "Summary"; input: LogicalPlan; metrics: Expression[]; columns: Expression[] }
@@ -47,15 +49,15 @@ export type LogicalPlan =
     | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
     | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
     | { type: "Sql"; query: string }
-    | { type: "Hint"; name: JoinHintName | string; params?: any[]; child: LogicalPlan }
+    | { type: "Hint"; name: JoinHintName | string; params?: unknown[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
     | { type: "Drop"; input: LogicalPlan; columnNames: string[] }
     | { type: "EventTimeWatermark"; input: LogicalPlan; eventTimeColumn: string; delay: string }
     | { type: "Read"; data_source: DataSource; is_streaming?: boolean };
 
 export type Expression =
-    | { type: "Column"; name: string }
-    | { type: "Literal"; value: string | number | boolean }
+    | { type: "Column"; name: string; planId?: number }
+    | { type: "Literal"; value: LiteralValue }
     | { type: "Binary"; op: string; left: Expression; right: Expression }
     | { type: "Logical"; op: "AND" | "OR"; left: Expression; right: Expression }
     | { type: "Alias"; input: Expression; alias: string }

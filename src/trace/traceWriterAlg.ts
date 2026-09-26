@@ -97,6 +97,15 @@ export const TraceWriterAlg = {
     queryName(w: TWNode, name: string): TWNode {
         return { ...w, queryName: name };
     },
+    start(w: TWNode): TWNode {
+        return w;
+    },
+    awaitTermination(w: TWNode): TWNode {
+        return w;
+    },
+    fromTempView(w: TWNode, name: string): TWNode {
+        return { ...w, target: { kind: "tempView", name, replace: false } };
+    },
 
     // destinos / acciones (para save/saveAsTable/createTempView)
     targetPath(w: TWNode, path: string): TWNode {
