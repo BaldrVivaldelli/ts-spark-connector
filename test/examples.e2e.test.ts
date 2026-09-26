@@ -9,23 +9,23 @@ let col: any, isNull: any, isNotNull: any, when: any;
 
 
 beforeAll(async () => {
-    // si no viene del entorno, usa el local
-    process.env.SPARK_CONNECT_URL ??= 'sc://localhost:15002';
-
-
     ({spark} = await import('../src/client/session'));
     ({col, isNull, isNotNull, when} = await import('../src/engine/column'));
 });
 
-const session = SparkSession.builder()
-    .withAuth({ type: "token", token: "my-token" }) // opcional
-    .enableTLS({
-        keyStorePath: "./spark-server/certs/keystore.p12",
-        keyStorePassword: "password",
-        trustStorePath: "./spark-server/certs/cert.crt",
-        trustStorePassword: "password"
-    })
-    .getOrCreate();
+// El compose local sirve texto plano (sc://). Con scs:// se habilita TLS
+// usando el certificado local, como hace el entorno de canary en `next`.
+const connectUrl = process.env.SPARK_CONNECT_URL ?? 'sc://localhost:15002';
+const sessionBuilder = SparkSession.builder().config("spark.connect.url", connectUrl);
+
+if (connectUrl.startsWith("scs://")) {
+    sessionBuilder.enableTLS({
+        trustStorePath: process.env.SPARK_TLS_CA ?? "./spark-server/certs/cert.crt",
+        serverNameOverride: process.env.SPARK_TLS_SERVER_NAME,
+    });
+}
+
+const session = sessionBuilder.getOrCreate();
 // helpers para obtener DF frescos en cada test
 
 const DEST_BASE =

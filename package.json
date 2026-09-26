@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
     "test": "vitest run",
-    "test:e2e": "vitest run test/examples.e2e.test.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest --passWithNoTests",
     "test:docker": "docker compose -f docker-compose.test.yml up --build --abort-on-container-exit test-runner",
     "test:docker:cleanup": "docker compose -f docker-compose.test.yml down -v",
