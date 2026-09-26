@@ -20,10 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -66,10 +73,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -114,10 +128,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -235,7 +256,7 @@ jobs:
           done
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.freshness.outputs.eligible == 'true'
         with:
           node-version: 22
