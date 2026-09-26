@@ -346,6 +346,18 @@ jobs:
             echo "semantic-release published nothing for $GITHUB_SHA"
           fi
 
+      # semantic-release pushes the tag before the publish plugins run, so a failed
+      # publish strands a tag for a version that never reached npm, and it reads tags
+      # to decide what is released, so it then skips that version for good. Diagnose
+      # it here; never undo it automatically, because a publish npm has accepted but
+      # not finished processing reads as a 404 for minutes.
+      - name: Diagnose an orphaned release
+        if: steps.semantic_release.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/diagnose-orphaned-release.mjs semantic-release.log
+
       - name: Publish release diagnostics
         if: steps.semantic_release.outcome == 'failure'
         run: |
