@@ -15,8 +15,9 @@ Use the repo Docker setup:
 
 ## How to run
 - Build: `npm run build`
-- Tests: `npm test` (or `npm run test` if present)
-- Examples live in `examples/` (prefer updating/adding an example when adding a feature)
+- Unit tests: `npm test`
+- E2E tests (need the Docker Spark server up): `npm run test:e2e`
+- Examples live in `docs/examples/` (prefer updating/adding an example when adding a feature)
 
 ## Coding rules
 - Keep public APIs stable; avoid breaking changes unless necessary and documented.
@@ -24,7 +25,7 @@ Use the repo Docker setup:
 - When editing README examples, imports should be from the package name (not `./src/...`).
 
 ## Compatibility
-- Target Spark Connect 3.5.x unless explicitly expanding support.
+- Target Spark Connect 4.0.x (the bundled Docker server and CI run Spark 4.0.0) unless explicitly expanding support.
 
 ## Release process
 - Repo uses semantic-release. Use Conventional Commits:

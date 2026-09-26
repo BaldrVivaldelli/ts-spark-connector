@@ -10,7 +10,7 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -42,22 +42,20 @@ jobs:
 
       - run: npm ci
         env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+          SPARK_CONNECT_URL: sc://127.0.0.1:15002
 
       - run: npm run typecheck --if-present
       - run: npm run lint --if-present
 
       - run: npm test
         env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+          SPARK_CONNECT_URL: sc://127.0.0.1:15002
 
   e2e:
     needs: unit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -87,5 +85,4 @@ jobs:
       - name: Run E2E tests (host)
         run: npm run test:e2e
         env:
-          SPARK_CONNECT_HOST: 127.0.0.1
-          SPARK_CONNECT_PORT: 15002
+          SPARK_CONNECT_URL: sc://127.0.0.1:15002
