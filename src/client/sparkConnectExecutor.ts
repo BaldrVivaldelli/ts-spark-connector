@@ -29,14 +29,6 @@ type AnalyzePlanRequest = {
     };
 };
 
-type StreamingExecuteRequest = {
-    session_id: string;
-    user_context: UserContext;
-    client_type: "ts-spark-connector";
-    plan: ProtoPlan;
-    operation_id: string;
-};
-
 type OrderedStreamingPlan = ProtoPlan & {
     command?: {
         create_dataframe_view?: unknown;
@@ -55,7 +47,6 @@ function debugEnabled(): boolean {
 
 function debugLog(payload: unknown) {
     if (!debugEnabled()) return;
-    // eslint-disable-next-line no-console
     console.log(typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
 }
 

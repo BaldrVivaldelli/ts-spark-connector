@@ -5,8 +5,7 @@ import {
     toProtoGroupType,
     toProtoSortDirection,
     // toProtoNullsOrder, // si tu proto lo necesita explícito en vez de boolean
-    toProtoSetOpType, toProtoExplainMode, ExplainModeInput,
-    JoinHintName,
+    toProtoSetOpType, ExplainModeInput,
 } from "./sparkConnectEnums";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";

@@ -23,7 +23,7 @@ export const TraceExprAlg = {
 } as const;
 
 export const TraceDFAlg = {
-    relation: (format: string, path: string | string[], opts?: Record<string, string>): TraceNode =>
+    relation: (format: string, _path: string | string[], _opts?: Record<string, string>): TraceNode =>
         ({id: nid("rel"), label: `relation(${format})`, children: []}),
 
     select: (df: TraceNode, cols: TraceNode[]): TraceNode =>
