@@ -33,7 +33,42 @@ const run = (command, args, options = {}) => {
     return result.stdout;
 };
 
-const metadata = JSON.parse(run(npm, [
+// registry.npmjs.org sits behind a CDN, so a packument read moments after a publish
+// can still come from a stale edge cache and 404 on the brand new dist-tag.
+const retryableRegistryFailure =
+    /E404|No match found|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|registry returned 5\d\d/iu;
+const registryAttempts = Number(process.env.CANARY_REGISTRY_ATTEMPTS ?? 8);
+assert.ok(
+    Number.isInteger(registryAttempts) && registryAttempts >= 1,
+    "CANARY_REGISTRY_ATTEMPTS must be a positive integer",
+);
+
+const sleep = milliseconds => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+};
+
+const runAgainstRegistry = (command, args, options = {}) => {
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            return run(command, args, options);
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            if (attempt >= registryAttempts || !retryableRegistryFailure.test(detail)) {
+                throw error;
+            }
+            const backoff = Math.min(2 ** attempt * 1_000, 15_000);
+            process.stderr.write(
+                `Registry read failed (attempt ${attempt}/${registryAttempts}); retrying in ${backoff / 1_000}s\n`,
+            );
+            sleep(backoff);
+        }
+    }
+};
+
+const tagSeparator = specifier.lastIndexOf("@");
+const packageName = tagSeparator > 0 ? specifier.slice(0, tagSeparator) : specifier;
+
+const metadata = JSON.parse(runAgainstRegistry(npm, [
     "view",
     specifier,
     "version",
@@ -43,6 +78,10 @@ const metadata = JSON.parse(run(npm, [
     "--json",
 ]));
 assert.match(metadata.version, /-next\.\d+$/, `${specifier} is not a semantic-release next canary`);
+
+// Install the exact version the registry just resolved; re-resolving the dist-tag
+// would expose the install to the same stale-cache race.
+const pinnedSpecifier = `${packageName}@${metadata.version}`;
 
 const report = {
     schemaVersion: 1,
@@ -68,14 +107,14 @@ const report = {
 let failure;
 try {
     mkdirSync(consumer, { recursive: true });
-    run(npm, [
+    runAgainstRegistry(npm, [
         "install",
         "--prefix",
         consumer,
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
-        specifier,
+        pinnedSpecifier,
     ]);
 
     const installedManifest = JSON.parse(readFileSync(
