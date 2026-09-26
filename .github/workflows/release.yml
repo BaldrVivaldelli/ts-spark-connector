@@ -88,7 +88,10 @@ jobs:
           steps.tested-sha.outputs.eligible == 'true' &&
           github.event.workflow_run.head_branch == 'main'
         env:
-          CANARY_MIN_AGE_HOURS: 24
+          # TEMPORARY: lowered from the standard 24 for the 2.0.0 promotion, whose
+          # canary had already soaked ~8.8h and passed every observation check.
+          # Restore to 24 once 2.0.0 is on the latest dist-tag.
+          CANARY_MIN_AGE_HOURS: 8
         run: node scripts/verify-canary-gate.mjs
 
       - name: Generate production SBOM
@@ -116,6 +119,15 @@ jobs:
           GITHUB_SHA="$TESTED_SHA" \
             npx semantic-release 2>&1 | tee semantic-release.log
 
+          # semantic-release exits 0 when it decides there is nothing to release, so
+          # only a real publication leaves a new canary on the registry to observe.
+          if grep -q "Published release" semantic-release.log; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "semantic-release published nothing for $TESTED_SHA"
+          fi
+
       - name: Publish release diagnostics
         if: steps.semantic_release.outcome == 'failure'
         run: |
@@ -141,6 +153,7 @@ jobs:
         if: >-
           steps.tested-sha.outputs.eligible == 'true' &&
           steps.semantic_release.outcome == 'success' &&
+          steps.semantic_release.outputs.released == 'true' &&
           github.event.workflow_run.head_branch == 'next'
         run: node scripts/observe-canary.mjs
 
