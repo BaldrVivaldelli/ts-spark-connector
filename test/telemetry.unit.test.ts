@@ -22,6 +22,24 @@ describe("structured Spark Connect telemetry", () => {
         });
     });
 
+    it("redacts access-key attribute names, including S3A configuration keys", () => {
+        const value = redactForTelemetry({
+            "spark.hadoop.fs.s3a.access.key": "AKIAIOSFODNN7EXAMPLE",
+            "spark.hadoop.fs.s3a.secret.key": "wJalrXUtnFEMI/K7MDENG",
+            "spark.hadoop.fs.s3a.session.token": "FwoGZXIvYXdzEBc",
+            accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+            "spark.hadoop.fs.s3a.endpoint": "s3.us-east-1.amazonaws.com",
+        });
+
+        expect(value).toEqual({
+            "spark.hadoop.fs.s3a.access.key": "[REDACTED]",
+            "spark.hadoop.fs.s3a.secret.key": "[REDACTED]",
+            "spark.hadoop.fs.s3a.session.token": "[REDACTED]",
+            accessKeyId: "[REDACTED]",
+            "spark.hadoop.fs.s3a.endpoint": "s3.us-east-1.amazonaws.com",
+        });
+    });
+
     it("is opt-in, emits structured events and isolates logger failures", () => {
         const logger = vi.fn();
         emitTelemetry(undefined, "spark.rpc.start", "debug", { rpc: "Config" });

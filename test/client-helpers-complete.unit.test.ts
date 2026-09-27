@@ -397,13 +397,13 @@ describe("complete connection normalization", () => {
                 "spark.auth.username": "user",
             },
         }).auth).toBeUndefined();
-        expect(normalizeConnectionConfig({
+        expect(() => normalizeConnectionConfig({
             auth: { type: "token", token: "explicit" },
             sessionConfig: {
                 "spark.auth.type": "token",
                 "spark.auth.token": "legacy",
             },
-        }).auth).toEqual({ type: "token", token: "explicit" });
+        })).toThrow(/both an explicit auth config and legacy spark\.auth\.\*/);
     });
 
     it("migrates enabled and material-based legacy TLS", () => {

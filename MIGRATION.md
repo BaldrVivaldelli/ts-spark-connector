@@ -1,5 +1,25 @@
 # Migration guide
 
+## 3.0: one authentication source, loud header collisions
+
+Authentication misconfigurations that previous releases resolved silently are
+now errors:
+
+- `withAuth()` (or an explicit `auth` in the connection config) can no longer
+  be combined with the legacy `spark.auth.*` keys. Configuring both throws;
+  previously the legacy keys silently rewrote the explicit configuration.
+  Migrate by deleting the legacy keys and keeping `withAuth()`.
+- A `spark.connect.header.*` entry whose name collides with a header produced
+  by the configured authentication (for example
+  `spark.connect.header.authorization` next to `withAuth({ type: "token" })`)
+  now throws; previously the static header silently overrode the credential.
+  Keep whichever source is intentional and remove the other. Disjoint custom
+  headers are unaffected.
+
+Legacy `spark.auth.*` keys used **alone** keep working unchanged.
+
+## 2.x
+
 This guide covers the canary following `1.12.x`, including the Spark 4.0.4
 baseline and the TypeScript 7 build-tool migration.
 
