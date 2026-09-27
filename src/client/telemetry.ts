@@ -5,7 +5,7 @@ import type {
 } from "./session";
 
 const REDACTED = "[REDACTED]";
-const SENSITIVE_KEY = /(?:auth(?:orization)?|token|password|secret|credential|private.?key|api.?key)/i;
+const SENSITIVE_KEY = /(?:auth(?:orization)?|token|password|secret|credential|private.?key|api.?key|access.?key)/i;
 const AUTHORIZATION_VALUE = /\b(Bearer|Basic)\s+[^\s,;]+/gi;
 const SECRET_QUERY_VALUE = /([?&](?:token|password|secret|api[_-]?key)=)[^&#\s]*/gi;
 
