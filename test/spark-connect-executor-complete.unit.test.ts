@@ -102,7 +102,9 @@ describe("SparkConnectExecutor complete behavior", () => {
                 [Symbol.asyncIterator]() {
                     return this;
                 },
-            }) as AsyncGenerator<Record<string, unknown>, void, void>,
+                // The stub only implements what the executor consumes, so go through
+                // unknown as the compiler itself suggests for a partial async iterator.
+            }) as unknown as AsyncGenerator<Record<string, unknown>, void, void>,
         );
         await expect(async () => {
             for await (const value of executor.stream(plan)) void value;

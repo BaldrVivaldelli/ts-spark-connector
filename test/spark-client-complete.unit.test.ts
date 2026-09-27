@@ -304,7 +304,9 @@ describe("spark gRPC client complete behavior", () => {
             if (String(file).includes("denied-ca.pem")) {
                 throw Object.assign(new Error("permission denied"), { code: "EACCES" });
             }
-            return originalRead(file, options as never);
+            // @types/node 26 narrows this overload's return type; naming the new
+            // type here would not compile against 22, so defer to the real call.
+            return originalRead(file, options as never) as never;
         });
         expect(() => getClientCacheKey({
             address: "scs://spark:15002",

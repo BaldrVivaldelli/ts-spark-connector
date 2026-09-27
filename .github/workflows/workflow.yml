@@ -237,9 +237,19 @@ jobs:
       - name: Verify the branch still points at this commit
         id: freshness
         run: |
-          git fetch origin \
-            "refs/heads/main:refs/remotes/origin/main" \
-            "refs/heads/next:refs/remotes/origin/next"
+          # A configured release branch can be absent: GitHub deletes the head branch
+          # of a merged pull request when auto-delete is on, which is what removed
+          # next after #78. Fetching a ref that is gone is fatal, so ask only for the
+          # branches the remote still has.
+          for configured_branch in main next; do
+            if git ls-remote --exit-code --heads origin "$configured_branch" >/dev/null 2>&1; then
+              git fetch origin \
+                "refs/heads/$configured_branch:refs/remotes/origin/$configured_branch"
+            else
+              echo "$configured_branch is not on the remote; skipping it"
+            fi
+          done
+
           if [ "$(git rev-parse "origin/$GITHUB_REF_NAME")" != "$GITHUB_SHA" ]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "$GITHUB_REF_NAME advanced past $GITHUB_SHA; the newer run releases it"
@@ -250,7 +260,8 @@ jobs:
           # semantic-release needs a local ref for every configured branch to work
           # out channels and prerelease lineage.
           for configured_branch in main next; do
-            if [ "$configured_branch" != "$GITHUB_REF_NAME" ]; then
+            if [ "$configured_branch" != "$GITHUB_REF_NAME" ] \
+              && git rev-parse --verify --quiet "origin/$configured_branch" >/dev/null; then
               git branch --force "$configured_branch" "origin/$configured_branch"
             fi
           done
