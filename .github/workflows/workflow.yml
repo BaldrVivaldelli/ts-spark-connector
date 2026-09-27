@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   pull_request:
-    branches: [main, next]
+    branches: [main]
 
 permissions:
   contents: read
@@ -213,18 +213,15 @@ jobs:
     # GITHUB_EVENT_NAME that the workflow_run indirection needed made provenance
     # impossible to satisfy (E422, invalid SLSA predicate). needs: also ties the
     # release to the exact commit these jobs tested.
-    if: >-
-      github.event_name == 'push' &&
-      (github.ref_name == 'main' || github.ref_name == 'next')
+    if: github.event_name == 'push' && github.ref_name == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: write
       pull-requests: write
       id-token: write
-    # One group for both branches. A canary on next and a stable on main must never
-    # publish at the same time: the stable gate reads the next dist-tag, so a canary
-    # landing mid-run makes it measure a zero-hour soak.
+    # Two pushes landing close together must not publish at the same time; the
+    # freshness check below then retires whichever run is no longer at the tip.
     concurrency:
       group: release
       cancel-in-progress: false
@@ -237,18 +234,8 @@ jobs:
       - name: Verify the branch still points at this commit
         id: freshness
         run: |
-          # A configured release branch can be absent: GitHub deletes the head branch
-          # of a merged pull request when auto-delete is on, which is what removed
-          # next after #78. Fetching a ref that is gone is fatal, so ask only for the
-          # branches the remote still has.
-          for configured_branch in main next; do
-            if git ls-remote --exit-code --heads origin "$configured_branch" >/dev/null 2>&1; then
-              git fetch origin \
-                "refs/heads/$configured_branch:refs/remotes/origin/$configured_branch"
-            else
-              echo "$configured_branch is not on the remote; skipping it"
-            fi
-          done
+          git fetch origin \
+            "refs/heads/$GITHUB_REF_NAME:refs/remotes/origin/$GITHUB_REF_NAME"
 
           if [ "$(git rev-parse "origin/$GITHUB_REF_NAME")" != "$GITHUB_SHA" ]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
@@ -256,15 +243,8 @@ jobs:
             exit 0
           fi
 
+          # semantic-release resolves its configured branch from a local ref.
           git switch --force-create "$GITHUB_REF_NAME" "$GITHUB_SHA"
-          # semantic-release needs a local ref for every configured branch to work
-          # out channels and prerelease lineage.
-          for configured_branch in main next; do
-            if [ "$configured_branch" != "$GITHUB_REF_NAME" ] \
-              && git rev-parse --verify --quiet "origin/$configured_branch" >/dev/null; then
-              git branch --force "$configured_branch" "origin/$configured_branch"
-            fi
-          done
           echo "eligible=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v7
@@ -311,18 +291,6 @@ jobs:
             echo "no release is due for $GITHUB_SHA"
           fi
 
-      - name: Observe the canary before a stable release
-        if: >-
-          steps.pending.outputs.release == 'true' &&
-          github.ref_name == 'main'
-        run: node scripts/observe-canary.mjs
-
-      - name: Enforce the stable canary lineage
-        if: >-
-          steps.pending.outputs.release == 'true' &&
-          github.ref_name == 'main'
-        run: node scripts/verify-canary-gate.mjs
-
       - name: Generate production SBOM
         if: steps.pending.outputs.release == 'true'
         run: npm run --silent sbom > sbom.cdx.json
@@ -344,9 +312,12 @@ jobs:
           npx semantic-release 2>&1 | tee semantic-release.log
 
           # semantic-release exits 0 when it decides there is nothing to release, so
-          # only a real publication leaves a new canary on the registry to observe.
+          # only a real publication leaves something on the registry to observe.
           if grep -q "Published release" semantic-release.log; then
             echo "released=true" >> "$GITHUB_OUTPUT"
+            version="$(sed -n 's/.*Published release \([^ ]*\) on .*/\1/p' semantic-release.log | tail -1)"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "published $version"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
             echo "semantic-release published nothing for $GITHUB_SHA"
@@ -385,18 +356,24 @@ jobs:
           NODE
           exit 1
 
-      - name: Observe the published canary
+      # With main the only release branch there is no canary to inspect before
+      # publishing, and the next dist-tag is frozen at the last prerelease, so the old
+      # pre-publish observation would have installed a stale tarball and the lineage
+      # gate would have compared against it. Observe the artifact that actually went
+      # out instead, pinned to its exact version so no dist-tag race can confuse it.
+      - name: Observe the published release
         if: >-
           steps.semantic_release.outcome == 'success' &&
-          steps.semantic_release.outputs.released == 'true' &&
-          github.ref_name == 'next'
-        run: node scripts/observe-canary.mjs
+          steps.semantic_release.outputs.released == 'true'
+        run: >-
+          node scripts/observe-release.mjs
+          "ts-spark-connector@${{ steps.semantic_release.outputs.version }}"
 
-      - name: Upload canary observation
+      - name: Upload the release observation
         if: always() && steps.pending.outputs.release == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: canary-observation-${{ github.sha }}
-          path: artifacts/canary
+          name: release-observation-${{ github.sha }}
+          path: artifacts/release
           if-no-files-found: warn
           retention-days: 30

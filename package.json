@@ -53,8 +53,7 @@
     "prepare": "npm run build",
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run",
-    "canary:observe": "node scripts/observe-canary.mjs",
-    "canary:gate": "node scripts/verify-canary-gate.mjs"
+    "release:observe": "node scripts/observe-release.mjs"
   },
   "keywords": [
     "spark",
@@ -118,11 +117,7 @@
   },
   "release": {
     "branches": [
-      "main",
-      {
-        "name": "next",
-        "prerelease": true
-      }
+      "main"
     ],
     "plugins": [
       [
