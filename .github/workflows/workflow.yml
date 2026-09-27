@@ -20,10 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -66,10 +73,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -114,10 +128,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: npm ci
@@ -182,3 +203,189 @@ jobs:
       - name: Stop Spark
         if: always()
         run: docker compose -f docker-compose.yml down --volumes
+
+  release:
+    name: Release
+    needs: [unit, package, e2e]
+    # Runs here, on the real push, rather than in a separate workflow_run. npm
+    # builds its provenance predicate from the same environment variables the
+    # registry then verifies against the OIDC token, so the spoofed GITHUB_REF and
+    # GITHUB_EVENT_NAME that the workflow_run indirection needed made provenance
+    # impossible to satisfy (E422, invalid SLSA predicate). needs: also ties the
+    # release to the exact commit these jobs tested.
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref_name == 'main' || github.ref_name == 'next')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    # One group for both branches. A canary on next and a stable on main must never
+    # publish at the same time: the stable gate reads the next dist-tag, so a canary
+    # landing mid-run makes it measure a zero-hour soak.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - name: Check out the released commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify the branch still points at this commit
+        id: freshness
+        run: |
+          git fetch origin \
+            "refs/heads/main:refs/remotes/origin/main" \
+            "refs/heads/next:refs/remotes/origin/next"
+          if [ "$(git rev-parse "origin/$GITHUB_REF_NAME")" != "$GITHUB_SHA" ]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "$GITHUB_REF_NAME advanced past $GITHUB_SHA; the newer run releases it"
+            exit 0
+          fi
+
+          git switch --force-create "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          # semantic-release needs a local ref for every configured branch to work
+          # out channels and prerelease lineage.
+          for configured_branch in main next; do
+            if [ "$configured_branch" != "$GITHUB_REF_NAME" ]; then
+              git branch --force "$configured_branch" "origin/$configured_branch"
+            fi
+          done
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v7
+        if: steps.freshness.outputs.eligible == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # npm provenance needs npm >= 11.5.1; Node 22 ships npm 10.x.
+      - name: Upgrade npm
+        if: steps.freshness.outputs.eligible == 'true'
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      - name: Install the released source tree
+        if: steps.freshness.outputs.eligible == 'true'
+        run: npm ci
+
+      # The observation and the soak gate exist to guard a publication, so asking a
+      # commit that publishes nothing to satisfy them only ever produced a red run.
+      # When a release IS due both still run, unchanged.
+      - name: Decide whether this commit releases
+        id: pending
+        if: steps.freshness.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -o pipefail
+          # A non-zero exit means semantic-release could not decide. Treating that as
+          # "nothing to release" would skip a real release on a green run, so fail.
+          if ! npx semantic-release --dry-run 2>&1 | tee dry-run.log; then
+            echo "::error title=Release dry run failed::semantic-release could not determine whether a release is due"
+            exit 1
+          fi
+          if grep -q "The next release version is" dry-run.log; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            grep "The next release version is" dry-run.log | tail -1
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "no release is due for $GITHUB_SHA"
+          fi
+
+      - name: Observe the canary before a stable release
+        if: >-
+          steps.pending.outputs.release == 'true' &&
+          github.ref_name == 'main'
+        run: node scripts/observe-canary.mjs
+
+      - name: Enforce the stable canary lineage
+        if: >-
+          steps.pending.outputs.release == 'true' &&
+          github.ref_name == 'main'
+        run: node scripts/verify-canary-gate.mjs
+
+      - name: Generate production SBOM
+        if: steps.pending.outputs.release == 'true'
+        run: npm run --silent sbom > sbom.cdx.json
+
+      - name: Semantic Release
+        id: semantic_release
+        if: steps.pending.outputs.release == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -o pipefail
+          npx semantic-release 2>&1 | tee semantic-release.log
+
+          # semantic-release exits 0 when it decides there is nothing to release, so
+          # only a real publication leaves a new canary on the registry to observe.
+          if grep -q "Published release" semantic-release.log; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "semantic-release published nothing for $GITHUB_SHA"
+          fi
+
+      # semantic-release pushes the tag before the publish plugins run, so a failed
+      # publish strands a tag for a version that never reached npm, and it reads tags
+      # to decide what is released, so it then skips that version for good. Diagnose
+      # it here; never undo it automatically, because a publish npm has accepted but
+      # not finished processing reads as a 404 for minutes.
+      - name: Diagnose an orphaned release
+        if: steps.semantic_release.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/diagnose-orphaned-release.mjs semantic-release.log
+
+      - name: Publish release diagnostics
+        if: steps.semantic_release.outcome == 'failure'
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const log = fs.readFileSync("semantic-release.log", "utf8")
+            .replaceAll(/\u001b\[[0-9;]*m/g, "")
+            .split(/\r?\n/u)
+            .filter(line => /error|fail|forbidden|unauthorized|E[A-Z]{3,}/iu.test(line))
+            .slice(-20);
+          const diagnostic = (log.length ? log : ["semantic-release failed without a diagnostic line"])
+            .join(" | ")
+            .replaceAll(/[A-Za-z0-9_=-]{36,}/gu, "***REDACTED***")
+            .replaceAll("%", "%25")
+            .replaceAll("\r", "%0D")
+            .replaceAll("\n", "%0A");
+          console.log(`::error title=Semantic Release diagnostics::${diagnostic}`);
+          NODE
+          exit 1
+
+      - name: Observe the published canary
+        if: >-
+          steps.semantic_release.outcome == 'success' &&
+          steps.semantic_release.outputs.released == 'true' &&
+          github.ref_name == 'next'
+        run: node scripts/observe-canary.mjs
+
+      - name: Upload canary observation
+        if: always() && steps.pending.outputs.release == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-observation-${{ github.sha }}
+          path: artifacts/canary
+          if-no-files-found: warn
+          retention-days: 30
