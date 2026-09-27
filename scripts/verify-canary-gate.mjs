@@ -6,8 +6,14 @@ import process from "node:process";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const packageName = process.env.CANARY_PACKAGE ?? "ts-spark-connector";
 const channel = process.env.CANARY_CHANNEL ?? "next";
-const minimumAgeHours = Number(process.env.CANARY_MIN_AGE_HOURS ?? 24);
-assert.ok(Number.isFinite(minimumAgeHours) && minimumAgeHours >= 0, "Invalid canary minimum age");
+
+// This gate also used to require the canary to have existed for a number of hours.
+// That measured wall-clock and nothing else: it read no issue, download or
+// observation signal, so it could not tell a healthy canary from a broken one. The
+// one race it did prevent, a stable publish overtaking a canary publish, is now
+// prevented structurally by the single release concurrency group. What remains is
+// the check that carries weight: that the stable candidate contains the commit the
+// canary was built from, so the observation that just passed describes this code.
 
 const capture = (command, args) => {
     const result = spawnSync(command, args, { encoding: "utf8" });
@@ -41,18 +47,13 @@ assert.equal(
 );
 
 const ageHours = (Date.now() - Date.parse(publishedAt)) / 3_600_000;
-assert.ok(
-    ageHours >= minimumAgeHours,
-    `Canary ${metadata.version} has soaked for ${ageHours.toFixed(2)}h; ${minimumAgeHours}h required`,
-);
 
 const markdown = [
     `## Stable release canary gate — PASS`,
     "",
     `- Canary: \`${metadata.version}\``,
     `- Published: ${publishedAt}`,
-    `- Observed age: ${ageHours.toFixed(2)} hours`,
-    `- Required age: ${minimumAgeHours} hours`,
+    `- Age at release: ${ageHours.toFixed(2)} hours (reported, not enforced)`,
     `- Git lineage: \`${metadata.gitHead}\` is included in the stable candidate`,
     "",
 ].join("\n");

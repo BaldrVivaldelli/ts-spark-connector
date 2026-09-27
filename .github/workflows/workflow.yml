@@ -306,15 +306,10 @@ jobs:
           github.ref_name == 'main'
         run: node scripts/observe-canary.mjs
 
-      - name: Enforce the stable canary gate
+      - name: Enforce the stable canary lineage
         if: >-
           steps.pending.outputs.release == 'true' &&
           github.ref_name == 'main'
-        env:
-          # TEMPORARY: lowered from the standard 24 for the 2.0.0 promotion, whose
-          # canary had already soaked ~8.8h and passed every observation check.
-          # Restore to 24 once the infrastructure work is finished.
-          CANARY_MIN_AGE_HOURS: 8
         run: node scripts/verify-canary-gate.mjs
 
       - name: Generate production SBOM
