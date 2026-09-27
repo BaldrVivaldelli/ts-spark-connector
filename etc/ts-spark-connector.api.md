@@ -61,6 +61,10 @@ export type AuthConfig = {
 } | {
     type: "token";
     token: string;
+} | {
+    type: "provider";
+    provider: SparkCredentialProvider;
+    refreshSkewMs?: number;
 };
 
 // @public (undocumented)
@@ -1068,6 +1072,15 @@ export type SparkConnectionConfig = {
     logger?: SparkLogger;
     metrics?: SparkMetricObserver;
     sessionConfig?: SessionConfigMap;
+};
+
+// @public
+export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCredentials>;
+
+// @public
+export type SparkCredentials = {
+    headers: Record<string, string>;
+    expiresAt?: number;
 };
 
 // @public

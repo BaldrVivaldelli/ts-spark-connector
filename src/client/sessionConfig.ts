@@ -1,5 +1,6 @@
 import os from "node:os";
 import { validateRetryConfig } from "./retry";
+import { validateRefreshSkew } from "./credentialProvider";
 import type {
     AuthConfig,
     SessionConfigMap,
@@ -178,10 +179,19 @@ function stripSensitiveConnectionConfig(sessionConfig: SessionConfigMap): Sessio
     return sanitized;
 }
 
+function validateAuthConfig(auth?: AuthConfig): void {
+    if (auth?.type !== "provider") return;
+    if (typeof auth.provider !== "function") {
+        throw new TypeError("auth.provider must be a function.");
+    }
+    validateRefreshSkew(auth.refreshSkewMs);
+}
+
 export function normalizeConnectionConfig(
     config?: SparkConnectionConfig,
 ): SparkConnectionConfig {
     validateRetryConfig(config?.retry);
+    validateAuthConfig(config?.auth);
     if (config?.logger !== undefined && typeof config.logger !== "function") {
         throw new TypeError("logger must be a function.");
     }

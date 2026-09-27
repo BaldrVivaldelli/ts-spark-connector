@@ -135,10 +135,69 @@ const session = SparkSession.builder()
   .getOrCreate();
 ```
 
+### Rotating credentials
+
+A static token breaks as soon as it expires. For short-lived credentials
+(OIDC/JWT, AWS Cognito or STS, Databricks OAuth) pass a provider instead, and
+the connector resolves credentials per RPC:
+
+```ts
+const session = SparkSession.builder()
+  .config("spark.connect.url", "scs://spark.example.com:15002")
+  .enableTLS({ trustStorePath: "./path/to/ca.crt" })
+  .withAuth({
+    type: "provider",
+    async provider() {
+      const { token, expiresInSeconds } = await mintJwt();
+      return {
+        headers: { authorization: `Bearer ${token}` },
+        expiresAt: Date.now() + expiresInSeconds * 1000,
+      };
+    },
+  })
+  .getOrCreate();
+```
+
+The connector caches the result until `expiresAt` minus a refresh window
+(`refreshSkewMs`, 30s by default) and collapses concurrent refreshes into one
+provider call. The window is also a resilience buffer: if a refresh fails while
+the previous credential is still valid, the connector keeps using it, reports a
+`spark.auth.refresh_fallback` telemetry warning, and retries on later RPCs —
+the failure only surfaces once the credential has truly expired. Omit
+`expiresAt` when the provider already caches — for example the AWS SDK; such
+results are held for at most one second, to absorb the burst of RPCs a single
+query produces, and are never used as a fallback:
+
+```ts
+import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
+
+const credentials = fromNodeProviderChain();
+
+const provider = async () => {
+  const { accessKeyId, secretAccessKey, sessionToken, expiration } = await credentials();
+  return {
+    // Your own signing step, e.g. SigV4 over the gRPC request, or an
+    // exchange of these credentials for a gateway token.
+    headers: await signHeaders({ accessKeyId, secretAccessKey, sessionToken }),
+    ...(expiration ? { expiresAt: expiration.getTime() } : {}),
+  };
+};
+```
+
+The connector ships no AWS dependency: a provider is any function returning
+headers, so SigV4 signing, IAM role assumption, or a token exchange all stay on
+your side.
+
+Rotating a credential does not rebuild the gRPC channel — authentication is
+deliberately excluded from the channel cache identity.
+
 Notes:
 
-- Token and basic auth are sent as gRPC metadata.
-- Basic and Bearer credentials are refused on plaintext `sc://` connections by default. Existing local-development setups can opt in explicitly with `.allowInsecureAuth()`, but TLS is recommended anywhere outside a trusted local network.
+- Token, basic, and provider credentials are sent as gRPC metadata.
+- Provider header names are lowercased; values containing CR, LF, or NUL are rejected, and a failing provider surfaces its error to the RPC caller.
+- A `spark.connect.header.*` key whose name collides with a provider-supplied header is rejected as a configuration error; disjoint static headers combine with the provider's. (Static headers still override `token`/`basic` auth, which predates providers.)
+- Hoist your provider to a single instance: caching, refresh coalescing, and fallback are keyed by the provider's function identity, so a closure recreated per session never hits its cache.
+- Basic, Bearer, and provider credentials are refused on plaintext `sc://` connections by default. Existing local-development setups can opt in explicitly with `.allowInsecureAuth()`, but TLS is recommended anywhere outside a trusted local network.
 - TLS uses grpc-js channel credentials.
 - Server-auth TLS works with a CA / root certificate via `trustStorePath`.
 - Optional PEM client cert/key paths are supported through `certChainPath` and `privateKeyPath`.

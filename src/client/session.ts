@@ -38,9 +38,39 @@ export type TLSConfig = {
     serverNameOverride?: string;
 };
 
+/** Credentials resolved by a {@link SparkCredentialProvider} for outgoing RPCs. */
+export type SparkCredentials = {
+    /**
+     * Headers attached to each Spark Connect call, such as
+     * `{ authorization: "Bearer <jwt>" }`. Names are lowercased; values must
+     * not contain CR, LF, or NUL.
+     */
+    headers: Record<string, string>;
+    /**
+     * Epoch milliseconds at which these credentials stop being valid. Until
+     * then a refresh failure falls back to the previous result. When omitted,
+     * the result is held only briefly to absorb per-query RPC bursts, so a
+     * provider that does its own caching stays authoritative.
+     */
+    expiresAt?: number;
+};
+
+/**
+ * Supplies credentials on demand. Called before RPCs whose cached credentials
+ * are absent or within the refresh window, and never more than once
+ * concurrently per provider.
+ */
+export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCredentials>;
+
 export type AuthConfig =
     | { type: "basic"; username: string; password: string }
-    | { type: "token"; token: string };
+    | { type: "token"; token: string }
+    | {
+        type: "provider";
+        provider: SparkCredentialProvider;
+        /** Refresh lead time before `expiresAt`, in milliseconds. Defaults to 30000. */
+        refreshSkewMs?: number;
+    };
 
 export type RetryEvent = {
     /** One-based retry attempt number (the initial call is not a retry). */
@@ -692,7 +722,12 @@ export class SparkSessionBuilder {
                 return;
         }
 
-        this.auth = syncAuthFromDraft(this.authDraft);
+        const fromDraft = syncAuthFromDraft(this.authDraft);
+        // Legacy `spark.auth.*` keys cannot express a provider, so they only
+        // replace one when they actually resolve to a usable credential.
+        if (fromDraft || this.auth?.type !== "provider") {
+            this.auth = fromDraft;
+        }
     }
 
     private applyTlsDraftKey(key: string, value: SessionConfigValue) {

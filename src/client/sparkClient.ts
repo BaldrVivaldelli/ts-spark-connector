@@ -5,6 +5,7 @@ import path from "node:path";
 import tls from "node:tls";
 import type { AuthConfig, SessionConfigMap, SparkConnectionConfig, TLSConfig } from "./session";
 import { resolveRetryConfig, withRetry } from "./retry";
+import { resolveProviderCredentials } from "./credentialProvider";
 import {
     executeReattachable,
     RpcMessage,
@@ -302,10 +303,13 @@ function readLegacyAuthConfig(sessionConfig?: SessionConfigMap): AuthConfig | un
     return undefined;
 }
 
-function getPlaintextAuthorizationScheme(config?: SparkConnectionConfig): "Basic" | "Bearer" | undefined {
+function getPlaintextCredentialLabel(config?: SparkConnectionConfig): string | undefined {
     const auth = config?.auth ?? readLegacyAuthConfig(config?.sessionConfig);
     if (auth?.type === "basic") return "Basic";
     if (auth?.type === "token") return "Bearer";
+    // A provider resolves its headers asynchronously, long after this
+    // synchronous guard runs, so it is always treated as carrying credentials.
+    if (auth?.type === "provider") return "provider-supplied";
 
     for (const [key, value] of Object.entries(config?.sessionConfig ?? {})) {
         if (!key.startsWith("spark.connect.header.")) continue;
@@ -321,20 +325,22 @@ function getPlaintextAuthorizationScheme(config?: SparkConnectionConfig): "Basic
 
 /** @internal Guard invoked before a channel is created or reused. */
 export function assertSecureAuthTransport(config?: SparkConnectionConfig): void {
-    const scheme = getPlaintextAuthorizationScheme(config);
-    if (!scheme || isTlsEnabled(config) || config?.allowInsecureAuth === true) {
+    const label = getPlaintextCredentialLabel(config);
+    if (!label || isTlsEnabled(config) || config?.allowInsecureAuth === true) {
         return;
     }
 
     throw new Error(
-        `Refusing to send ${scheme} credentials over an insecure Spark Connect channel. ` +
+        `Refusing to send ${label} credentials over an insecure Spark Connect channel. ` +
         "Use an scs:// address or enableTLS(); for trusted local development only, " +
         "set allowInsecureAuth to true."
     );
 }
 
-function buildMetadata(config?: SparkConnectionConfig): Grpc.Metadata {
+/** @internal Resolves per-RPC call metadata, including provider credentials. */
+export async function buildMetadata(config?: SparkConnectionConfig): Promise<Grpc.Metadata> {
     const metadata = new (grpcRuntime().Metadata)();
+    const providerHeaderNames = new Set<string>();
     const auth = config?.auth ?? readLegacyAuthConfig(config?.sessionConfig);
 
     if (auth?.type === "token") {
@@ -342,6 +348,18 @@ function buildMetadata(config?: SparkConnectionConfig): Grpc.Metadata {
     } else if (auth?.type === "basic") {
         const encoded = Buffer.from(`${auth.username}:${auth.password}`, "utf8").toString("base64");
         metadata.set("authorization", `Basic ${encoded}`);
+    } else if (auth?.type === "provider") {
+        const credentials = await resolveProviderCredentials(
+            auth.provider,
+            auth.refreshSkewMs,
+            error => emitTelemetry(config, "spark.auth.refresh_fallback", "warn", {
+                reason: String(error),
+            }),
+        );
+        for (const [name, value] of Object.entries(credentials.headers)) {
+            metadata.set(name, value);
+            providerHeaderNames.add(name);
+        }
     }
 
     const sessionConfig = config?.sessionConfig ?? {};
@@ -349,6 +367,16 @@ function buildMetadata(config?: SparkConnectionConfig): Grpc.Metadata {
         if (!key.startsWith("spark.connect.header.")) continue;
         const headerName = key.slice("spark.connect.header.".length).trim();
         if (!headerName || value == null) continue;
+        if (providerHeaderNames.has(headerName.toLowerCase())) {
+            // Two live sources for one header is a misconfiguration, not a
+            // precedence question: whichever silently won would break the
+            // other's purpose. Static headers still override token/basic
+            // auth, which predates providers.
+            throw new Error(
+                `Configuration "spark.connect.header.${headerName}" conflicts with a header ` +
+                "supplied by the credential provider. Remove one of the two sources."
+            );
+        }
         metadata.set(headerName, String(value));
     }
 
@@ -442,7 +470,7 @@ export function getClientCacheKey(config?: SparkConnectionConfig): string {
     });
 }
 
-function getClientContext(config?: SparkConnectionConfig): ClientContext {
+async function getClientContext(config?: SparkConnectionConfig): Promise<ClientContext> {
     assertSecureAuthTransport(config);
     const cacheKey = getClientCacheKey(config);
     let client = clientCache.get(cacheKey);
@@ -459,7 +487,7 @@ function getClientContext(config?: SparkConnectionConfig): ClientContext {
 
     return {
         client,
-        metadata: buildMetadata(config),
+        metadata: await buildMetadata(config),
     };
 }
 
@@ -504,7 +532,7 @@ export const sparkGrpcClient = {
         request: RpcMessage,
         config?: SparkConnectionConfig
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         let latestObservedServerSessionId = request.client_observed_server_side_session_id;
         const cleanupConfig = config ? { ...config, signal: undefined } : undefined;
         const startedAt = Date.now();
@@ -585,7 +613,7 @@ export const sparkGrpcClient = {
         request: RpcMessage,
         config?: SparkConnectionConfig
     ): Promise<{ explainString: string; response: AnalyzePlanResponse }> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         const response = await callUnaryWithRetry(
             client,
             client.analyzePlan.bind(client),
@@ -607,7 +635,7 @@ export const sparkGrpcClient = {
 
     /** Executes a non-explain AnalyzePlan operation such as persist/unpersist. */
     async analyze(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         return callUnaryWithRetry(
             client,
             client.analyzePlan.bind(client),
@@ -619,7 +647,7 @@ export const sparkGrpcClient = {
     },
 
     async interrupt(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         return callUnaryWithRetry(
             client,
             client.interrupt.bind(client),
@@ -632,7 +660,7 @@ export const sparkGrpcClient = {
 
     /** Executes Spark Connect's session configuration RPC. */
     async config(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         return callUnaryWithRetry(
             client,
             client.config.bind(client),
@@ -645,7 +673,7 @@ export const sparkGrpcClient = {
 
     /** Releases all server-side state associated with a Spark Connect session. */
     async releaseSession(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         return callUnaryWithRetry(
             client,
             client.releaseSession.bind(client),
@@ -658,7 +686,7 @@ export const sparkGrpcClient = {
 
     /** Retrieves structured details for a previously returned Spark error id. */
     async fetchErrorDetails(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
-        const { client, metadata } = getClientContext(config);
+        const { client, metadata } = await getClientContext(config);
         const retryConfig = resolveRetryConfig(config);
         return withRetry(
             () => callUnary(client.fetchErrorDetails.bind(client), request, metadata, config, "FetchErrorDetails"),
