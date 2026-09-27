@@ -30,6 +30,15 @@ new protocol baseline, with 4.0.0 kept under test for compatibility.
 * **types:** drop ambient shims that masked real library typings ([514c571](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/514c57138176f9e2a74545c9f0bd5849aa0624f4))
 * updates ([cb14d7a](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/cb14d7aff76569097cfecf499faa0ecb6b960b03))
 
+## [2.0.0-next.2](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v2.0.0-next.1...v2.0.0-next.2) (2026-09-26)
+
+### Bug Fixes
+
+* **release:** bind canary to tested ref [skip ci] ([3c90609](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/3c90609e5c965a5a50b2f7c75f4165215ebfdf06))
+* **release:** fetch semantic release branches [skip ci] ([6e18824](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/6e18824d78600ff06a9cf4e0a6af389cb327aad4))
+* **release:** honour BREAKING CHANGE footers ([ef4e615](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/ef4e615a92ff108af6d601ddab71f658b28119a0))
+* **types:** drop ambient shims that masked real library typings ([514c571](https://github.com/BaldrVivaldelli/ts-spark-connector/commit/514c57138176f9e2a74545c9f0bd5849aa0624f4))
+
 ## [2.0.0-next.1](https://github.com/BaldrVivaldelli/ts-spark-connector/compare/v1.12.0...v2.0.0-next.1) (2026-09-26)
 
 ### ⚠ BREAKING CHANGES
