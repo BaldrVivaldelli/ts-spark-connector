@@ -62,6 +62,18 @@ export type SparkCredentials = {
  */
 export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCredentials>;
 
+/**
+ * AWS credentials forwarded to the Spark job as S3A Hadoop configuration.
+ * These authenticate the job's `s3a://` reads and writes on the server, not
+ * the client's gRPC channel; use {@link AuthConfig} for the latter.
+ */
+export type S3Credentials = {
+    accessKeyId: string;
+    secretAccessKey: string;
+    /** Marks the credentials as temporary (STS/AssumeRole) when present. */
+    sessionToken?: string;
+};
+
 export type AuthConfig =
     | { type: "basic"; username: string; password: string }
     | { type: "token"; token: string }
@@ -566,6 +578,7 @@ export function createSparkSession(sessionId?: string): SparkSession {
 export class SparkSessionBuilder {
     private configMap: SessionConfigMap = {};
     private auth?: AuthConfig;
+    private s3CredentialsConfigured = false;
     private insecureAuthAllowed = false;
     private rpcTimeoutMs?: number;
     private signal?: AbortSignal;
@@ -618,6 +631,38 @@ export class SparkSessionBuilder {
     withAuth(auth: AuthConfig): this {
         this.auth = { ...auth };
         this.resetAuthDraft(auth);
+        return this;
+    }
+
+    /**
+     * Forwards AWS credentials to the Spark job as `spark.hadoop.fs.s3a.*`
+     * session configuration so `s3a://` paths resolve on the server. With a
+     * `sessionToken`, S3A's `TemporaryAWSCredentialsProvider` is selected as
+     * well, which temporary STS credentials require.
+     *
+     * The values travel to the server in Config RPCs, so `getOrCreate()`
+     * refuses a plaintext channel unless `allowInsecureAuth()` is set.
+     */
+    withS3Credentials(credentials: S3Credentials): this {
+        const { accessKeyId, secretAccessKey, sessionToken } = credentials;
+        if (typeof accessKeyId !== "string" || !accessKeyId.trim()
+            || typeof secretAccessKey !== "string" || !secretAccessKey.trim()) {
+            throw new TypeError("withS3Credentials requires non-empty accessKeyId and secretAccessKey strings.");
+        }
+        if (sessionToken !== undefined && (typeof sessionToken !== "string" || !sessionToken.trim())) {
+            throw new TypeError("withS3Credentials sessionToken must be a non-empty string when provided.");
+        }
+
+        this.s3CredentialsConfigured = true;
+        this.config("spark.hadoop.fs.s3a.access.key", accessKeyId);
+        this.config("spark.hadoop.fs.s3a.secret.key", secretAccessKey);
+        if (sessionToken !== undefined) {
+            this.config("spark.hadoop.fs.s3a.session.token", sessionToken);
+            this.config(
+                "spark.hadoop.fs.s3a.aws.credentials.provider",
+                "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider",
+            );
+        }
         return this;
     }
 
@@ -675,6 +720,7 @@ export class SparkSessionBuilder {
      * is opened and no existing `SparkSession` is reused here.
      */
     getOrCreate(): SparkSession {
+        this.assertS3CredentialTransport();
         const session = new SparkSession(undefined, {
             userContext: this.userContext,
             connectionConfig: {
@@ -763,6 +809,22 @@ export class SparkSessionBuilder {
         }
 
         this.tls = syncTlsFromDraft(this.tlsDraft);
+    }
+
+    // Mirrors assertSecureAuthTransport, but runs at build time: S3 secrets
+    // ride Config RPCs, so a plaintext channel would expose them just like a
+    // Bearer header. Raw .config() writes of the same keys stay unguarded as
+    // the documented escape hatch.
+    private assertS3CredentialTransport(): void {
+        if (!this.s3CredentialsConfigured || this.insecureAuthAllowed || this.tls) return;
+        const address = this.readConfiguredAddress() ?? process.env.SPARK_CONNECT_URL ?? "";
+        if (/^scs:\/\//i.test(address.trim())) return;
+
+        throw new Error(
+            "Refusing to send S3 credentials over an insecure Spark Connect channel. " +
+            "Use an scs:// address or enableTLS(); for trusted local development only, " +
+            "set allowInsecureAuth to true."
+        );
     }
 
     private resetAuthDraft(auth: AuthConfig) {

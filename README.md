@@ -191,6 +191,36 @@ your side.
 Rotating a credential does not rebuild the gRPC channel — authentication is
 deliberately excluded from the channel cache identity.
 
+### S3 credentials for the job
+
+Channel auth (above) authenticates *you* to the Spark Connect server. For the
+*job* to read `s3a://` paths, the server needs AWS credentials as Hadoop
+configuration — a different concern with its own helper:
+
+```ts
+const session = SparkSession.builder()
+  .config("spark.connect.url", "scs://spark.example.com:15002")
+  .enableTLS({ trustStorePath: "./path/to/ca.crt" })
+  .withS3Credentials({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    sessionToken: process.env.AWS_SESSION_TOKEN, // optional (STS/AssumeRole)
+  })
+  .getOrCreate();
+
+const events = session.read.parquet("s3a://my-bucket/events/");
+```
+
+The helper writes `spark.hadoop.fs.s3a.access.key` / `secret.key` /
+`session.token` and, when a `sessionToken` is present, selects S3A's
+`TemporaryAWSCredentialsProvider` — the pairing temporary STS credentials
+require. Because these values travel to the server in Config RPCs,
+`getOrCreate()` refuses a plaintext channel unless `.allowInsecureAuth()` is
+set (same policy as Bearer/Basic). Setting the raw `spark.hadoop.fs.s3a.*`
+keys through `.config()` still works and bypasses the guard — that is the
+deliberate escape hatch, not the recommended path. Telemetry redacts all
+three values by key name.
+
 Notes:
 
 - Token, basic, and provider credentials are sent as gRPC metadata.
