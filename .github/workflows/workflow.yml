@@ -66,6 +66,12 @@ jobs:
       - name: Verify Spark protocol manifest
         run: npm run test:proto
 
+      # Guards the release path: an incompatible changelog preset/writer pair
+      # installs cleanly and only fails inside generateNotes, on a commit that
+      # actually releases.
+      - name: Verify changelog preset renders
+        run: npm run check:changelog
+
   package:
     name: Publishable tarball
     needs: unit
