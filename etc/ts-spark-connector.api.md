@@ -61,6 +61,10 @@ export type AuthConfig = {
 } | {
     type: "token";
     token: string;
+} | {
+    type: "provider";
+    provider: SparkCredentialProvider;
+    refreshSkewMs?: number;
 };
 
 // @public (undocumented)
@@ -927,6 +931,13 @@ export type RowOf<S> = [S] extends [UnknownSchema] ? Record<string, unknown> : S
     [K in keyof S]: S[K] extends ColumnType ? S[K] : unknown;
 } : Record<string, unknown>;
 
+// @public
+export type S3Credentials = {
+    accessKeyId: string;
+    secretAccessKey: string;
+    sessionToken?: string;
+};
+
 // @public (undocumented)
 export interface SamplingCap<R> {
     // (undocumented)
@@ -1071,6 +1082,15 @@ export type SparkConnectionConfig = {
 };
 
 // @public
+export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCredentials>;
+
+// @public
+export type SparkCredentials = {
+    headers: Record<string, string>;
+    expiresAt?: number;
+};
+
+// @public
 export type SparkErrorDetails = Record<string, unknown>;
 
 // @public
@@ -1185,6 +1205,7 @@ export class SparkSessionBuilder {
     // (undocumented)
     withRetry(retry: RetryConfig): this;
     withRpcTimeout(timeoutMs: number): this;
+    withS3Credentials(credentials: S3Credentials): this;
 }
 
 // @public (undocumented)

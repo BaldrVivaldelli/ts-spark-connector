@@ -1,5 +1,6 @@
 import os from "node:os";
 import { validateRetryConfig } from "./retry";
+import { validateRefreshSkew } from "./credentialProvider";
 import type {
     AuthConfig,
     SessionConfigMap,
@@ -178,10 +179,34 @@ function stripSensitiveConnectionConfig(sessionConfig: SessionConfigMap): Sessio
     return sanitized;
 }
 
+function assertSingleAuthSource(
+    auth: AuthConfig | undefined,
+    sessionConfig: SessionConfigMap,
+): void {
+    if (!auth) return;
+    for (const key of LEGACY_AUTH_KEYS) {
+        if (sessionConfig[key] != null) {
+            throw new Error(
+                "Authentication is configured through both an explicit auth config and " +
+                "legacy spark.auth.* session keys. Use a single source."
+            );
+        }
+    }
+}
+
+function validateAuthConfig(auth?: AuthConfig): void {
+    if (auth?.type !== "provider") return;
+    if (typeof auth.provider !== "function") {
+        throw new TypeError("auth.provider must be a function.");
+    }
+    validateRefreshSkew(auth.refreshSkewMs);
+}
+
 export function normalizeConnectionConfig(
     config?: SparkConnectionConfig,
 ): SparkConnectionConfig {
     validateRetryConfig(config?.retry);
+    validateAuthConfig(config?.auth);
     if (config?.logger !== undefined && typeof config.logger !== "function") {
         throw new TypeError("logger must be a function.");
     }
@@ -196,6 +221,7 @@ export function normalizeConnectionConfig(
     validateGrpcMessageLimit("grpcMaxSendMessageBytes", config?.grpcMaxSendMessageBytes);
 
     const rawSessionConfig = cloneSessionConfig(config?.sessionConfig);
+    assertSingleAuthSource(config?.auth, rawSessionConfig);
     const auth = cloneAuth(config?.auth) ?? readLegacyAuthConfig(rawSessionConfig);
     const tls = cloneTls(config?.tls) ?? readLegacyTlsConfig(rawSessionConfig);
     return {

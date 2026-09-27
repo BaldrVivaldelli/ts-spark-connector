@@ -7,7 +7,8 @@ export {
     spark,
 } from "./client/session";
 export type {
-    AuthConfig, TLSConfig, RetryConfig, RetryEvent,
+    AuthConfig, SparkCredentials, SparkCredentialProvider, S3Credentials,
+    TLSConfig, RetryConfig, RetryEvent,
     SparkConnectionConfig, SparkLogger, SparkTelemetryEvent,
     SparkMetric, SparkMetricObserver,
     SessionConfigMap, SessionConfigValue, SparkUserContext,

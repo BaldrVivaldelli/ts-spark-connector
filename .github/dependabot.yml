@@ -7,6 +7,14 @@ updates:
     groups:
       development-dependencies:
         dependency-type: development
+    ignore:
+      # semantic-release's release-notes-generator still depends on
+      # conventional-changelog-writer@8, which cannot render the v10 preset
+      # ("Missing helper"). The break only surfaces on a commit that actually
+      # releases, so it passes CI and fails at publish time. Unpin once
+      # @semantic-release/release-notes-generator ships writer@9.
+      - dependency-name: conventional-changelog-conventionalcommits
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
