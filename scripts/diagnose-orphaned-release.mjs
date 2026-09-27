@@ -26,6 +26,8 @@ const capture = (command, args) => spawnSync(command, args, { encoding: "utf8" }
 
 let log = "";
 try {
+    // Matching the escape character is the whole point: the log is ANSI-coloured.
+    // eslint-disable-next-line no-control-regex
     log = readFileSync(logPath, "utf8").replaceAll(/\u001b\[[0-9;]*m/gu, "");
 } catch {
     // semantic-release can fail before the log exists.
