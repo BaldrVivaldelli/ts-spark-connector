@@ -264,7 +264,23 @@ describe("provider credentials on the wire", () => {
       tls: { trustStorePath: "/certs/ca.pem" },
       auth: { type: "provider", provider: () => bearer("from-provider") },
       sessionConfig: { "spark.connect.header.Authorization": "Bearer pinned" },
-    })).rejects.toThrow(/conflicts with a header supplied by the credential provider/);
+    })).rejects.toThrow(/conflicts with a header supplied by the configured authentication/);
+  });
+
+  it("rejects a static authorization header colliding with token or basic auth", async () => {
+    await expect(buildMetadata({
+      address: "scs://spark:15002",
+      tls: { trustStorePath: "/certs/ca.pem" },
+      auth: { type: "token", token: "t" },
+      sessionConfig: { "spark.connect.header.authorization": "Bearer pinned" },
+    })).rejects.toThrow(/conflicts with a header supplied by the configured authentication/);
+
+    await expect(buildMetadata({
+      address: "scs://spark:15002",
+      tls: { trustStorePath: "/certs/ca.pem" },
+      auth: { type: "basic", username: "u", password: "p" },
+      sessionConfig: { "spark.connect.header.Authorization": "Basic pinned" },
+    })).rejects.toThrow(/conflicts with a header supplied by the configured authentication/);
   });
 
   it("still allows static headers disjoint from the provider's", async () => {
@@ -373,28 +389,21 @@ describe("builder and config integration", () => {
       .toEqual({ type: "provider", provider, refreshSkewMs: 5_000 });
   });
 
-  it("does not let an incomplete legacy auth key discard a provider", () => {
-    const session = SparkSession.builder()
+  it("rejects legacy spark.auth.* keys once withAuth() has been used", () => {
+    expect(() => SparkSession.builder()
       .config("spark.connect.url", "scs://spark:15002")
-      .enableTLS({ trustStorePath: "/certs/ca.pem" })
       .withAuth({ type: "provider", provider })
-      .config("spark.auth.token", "stray-value")
-      .getOrCreate();
-
-    expect(session.getConnectionConfig().auth).toMatchObject({ type: "provider" });
+      .config("spark.auth.token", "stray-value"))
+      .toThrow(/both withAuth\(\) and legacy spark\.auth\.\* keys/);
   });
 
-  it("lets a complete legacy auth configuration replace a provider", () => {
-    const session = SparkSession.builder()
+  it("rejects withAuth() once legacy spark.auth.* keys have been used", () => {
+    expect(() => SparkSession.builder()
       .config("spark.connect.url", "scs://spark:15002")
-      .enableTLS({ trustStorePath: "/certs/ca.pem" })
-      .withAuth({ type: "provider", provider })
       .config("spark.auth.type", "token")
-      .config("spark.auth.token", "explicit-token")
-      .getOrCreate();
-
-    expect(session.getConnectionConfig().auth)
-      .toEqual({ type: "token", token: "explicit-token" });
+      .config("spark.auth.token", "legacy-token")
+      .withAuth({ type: "provider", provider }))
+      .toThrow(/both withAuth\(\) and legacy spark\.auth\.\* keys/);
   });
 
   it("rejects an invalid provider when the connection config is normalized", () => {

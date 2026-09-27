@@ -575,9 +575,14 @@ export function createSparkSession(sessionId?: string): SparkSession {
     return new SparkSession(sessionId);
 }
 
+const AUTH_SOURCE_CONFLICT_MESSAGE =
+    "Authentication is configured through both withAuth() and legacy spark.auth.* keys. " +
+    "Use a single source.";
+
 export class SparkSessionBuilder {
     private configMap: SessionConfigMap = {};
     private auth?: AuthConfig;
+    private authSource?: "api" | "legacy";
     private s3CredentialsConfigured = false;
     private insecureAuthAllowed = false;
     private rpcTimeoutMs?: number;
@@ -629,6 +634,10 @@ export class SparkSessionBuilder {
     }
 
     withAuth(auth: AuthConfig): this {
+        if (this.authSource === "legacy") {
+            throw new Error(AUTH_SOURCE_CONFLICT_MESSAGE);
+        }
+        this.authSource = "api";
         this.auth = { ...auth };
         this.resetAuthDraft(auth);
         return this;
@@ -750,6 +759,12 @@ export class SparkSessionBuilder {
     }
 
     private applyAuthDraftKey(key: string, value: SessionConfigValue) {
+        if (!LEGACY_AUTH_KEYS.has(key)) return;
+        if (this.authSource === "api") {
+            throw new Error(AUTH_SOURCE_CONFLICT_MESSAGE);
+        }
+        this.authSource = "legacy";
+
         const text = String(value);
         switch (key) {
             case "spark.auth.type":
@@ -761,19 +776,12 @@ export class SparkSessionBuilder {
             case "spark.auth.password":
                 this.authDraft.password = text;
                 break;
-            case "spark.auth.token":
-                this.authDraft.token = text;
-                break;
             default:
-                return;
+                // Membership was checked above, so this is "spark.auth.token".
+                this.authDraft.token = text;
         }
 
-        const fromDraft = syncAuthFromDraft(this.authDraft);
-        // Legacy `spark.auth.*` keys cannot express a provider, so they only
-        // replace one when they actually resolve to a usable credential.
-        if (fromDraft || this.auth?.type !== "provider") {
-            this.auth = fromDraft;
-        }
+        this.auth = syncAuthFromDraft(this.authDraft);
     }
 
     private applyTlsDraftKey(key: string, value: SessionConfigValue) {

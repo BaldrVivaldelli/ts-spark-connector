@@ -340,14 +340,16 @@ export function assertSecureAuthTransport(config?: SparkConnectionConfig): void 
 /** @internal Resolves per-RPC call metadata, including provider credentials. */
 export async function buildMetadata(config?: SparkConnectionConfig): Promise<Grpc.Metadata> {
     const metadata = new (grpcRuntime().Metadata)();
-    const providerHeaderNames = new Set<string>();
+    const authHeaderNames = new Set<string>();
     const auth = config?.auth ?? readLegacyAuthConfig(config?.sessionConfig);
 
     if (auth?.type === "token") {
         metadata.set("authorization", `Bearer ${auth.token}`);
+        authHeaderNames.add("authorization");
     } else if (auth?.type === "basic") {
         const encoded = Buffer.from(`${auth.username}:${auth.password}`, "utf8").toString("base64");
         metadata.set("authorization", `Basic ${encoded}`);
+        authHeaderNames.add("authorization");
     } else if (auth?.type === "provider") {
         const credentials = await resolveProviderCredentials(
             auth.provider,
@@ -358,7 +360,7 @@ export async function buildMetadata(config?: SparkConnectionConfig): Promise<Grp
         );
         for (const [name, value] of Object.entries(credentials.headers)) {
             metadata.set(name, value);
-            providerHeaderNames.add(name);
+            authHeaderNames.add(name);
         }
     }
 
@@ -367,14 +369,13 @@ export async function buildMetadata(config?: SparkConnectionConfig): Promise<Grp
         if (!key.startsWith("spark.connect.header.")) continue;
         const headerName = key.slice("spark.connect.header.".length).trim();
         if (!headerName || value == null) continue;
-        if (providerHeaderNames.has(headerName.toLowerCase())) {
+        if (authHeaderNames.has(headerName.toLowerCase())) {
             // Two live sources for one header is a misconfiguration, not a
             // precedence question: whichever silently won would break the
-            // other's purpose. Static headers still override token/basic
-            // auth, which predates providers.
+            // other's purpose.
             throw new Error(
                 `Configuration "spark.connect.header.${headerName}" conflicts with a header ` +
-                "supplied by the credential provider. Remove one of the two sources."
+                "supplied by the configured authentication. Remove one of the two sources."
             );
         }
         metadata.set(headerName, String(value));

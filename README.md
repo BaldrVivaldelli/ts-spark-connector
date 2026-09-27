@@ -225,7 +225,8 @@ Notes:
 
 - Token, basic, and provider credentials are sent as gRPC metadata.
 - Provider header names are lowercased; values containing CR, LF, or NUL are rejected, and a failing provider surfaces its error to the RPC caller.
-- A `spark.connect.header.*` key whose name collides with a provider-supplied header is rejected as a configuration error; disjoint static headers combine with the provider's. (Static headers still override `token`/`basic` auth, which predates providers.)
+- A `spark.connect.header.*` key whose name collides with a header produced by the configured authentication (`token`, `basic`, or `provider`) is rejected as a configuration error; disjoint static headers combine with it.
+- `withAuth()` and the legacy `spark.auth.*` config keys are mutually exclusive; configuring both throws.
 - Hoist your provider to a single instance: caching, refresh coalescing, and fallback are keyed by the provider's function identity, so a closure recreated per session never hits its cache.
 - Basic, Bearer, and provider credentials are refused on plaintext `sc://` connections by default. Existing local-development setups can opt in explicitly with `.allowInsecureAuth()`, but TLS is recommended anywhere outside a trusted local network.
 - TLS uses grpc-js channel credentials.
