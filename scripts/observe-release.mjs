@@ -14,9 +14,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const specifier = process.argv[2] ?? "ts-spark-connector@next";
-const outputDirectory = resolve(root, process.argv[3] ?? "artifacts/canary");
-const workspace = mkdtempSync(join(tmpdir(), "ts-spark-connector-canary-"));
+const specifier = process.argv[2] ?? "ts-spark-connector@latest";
+const outputDirectory = resolve(root, process.argv[3] ?? "artifacts/release");
+const workspace = mkdtempSync(join(tmpdir(), "ts-spark-connector-observe-"));
 const consumer = join(workspace, "consumer");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
@@ -77,7 +77,6 @@ const metadata = JSON.parse(runAgainstRegistry(npm, [
     "gitHead",
     "--json",
 ]));
-assert.match(metadata.version, /-next\.\d+$/, `${specifier} is not a semantic-release next canary`);
 
 // Install the exact version the registry just resolved; re-resolving the dist-tag
 // would expose the install to the same stale-cache race.
@@ -178,7 +177,7 @@ void col("id");
         "--json",
     ], { cwd: consumer }));
     const vulnerabilities = audit.metadata?.vulnerabilities?.total ?? 0;
-    assert.equal(vulnerabilities, 0, `canary has ${vulnerabilities} production vulnerabilities`);
+    assert.equal(vulnerabilities, 0, `${metadata.version} has ${vulnerabilities} production vulnerabilities`);
     report.checks.productionAudit = true;
     report.status = "passed";
 } catch (error) {
@@ -186,15 +185,15 @@ void col("id");
     report.error = error instanceof Error ? error.message : String(error);
 } finally {
     mkdirSync(outputDirectory, { recursive: true });
-    const reportPath = join(outputDirectory, "canary-observation.json");
-    const markdownPath = join(outputDirectory, "canary-observation.md");
+    const reportPath = join(outputDirectory, "release-observation.json");
+    const markdownPath = join(outputDirectory, "release-observation.md");
     const rows = Object.entries(report.checks)
         .map(([name, passed]) => `| ${name} | ${passed ? "PASS" : "FAIL"} |`);
     const runUrl = process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
         ? `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
         : undefined;
     const markdown = [
-        `## Canary ${report.version} — ${report.status.toUpperCase()}`,
+        `## Release ${report.version} — ${report.status.toUpperCase()}`,
         "",
         `Package: \`${specifier}\``,
         "",
@@ -218,4 +217,4 @@ void col("id");
 if (failure) {
     throw failure;
 }
-process.stdout.write(`Canary ${report.version} passed registry, runtime, types and audit checks.\n`);
+process.stdout.write(`Release ${report.version} passed registry, runtime, types and audit checks.\n`);
