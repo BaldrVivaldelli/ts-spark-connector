@@ -170,3 +170,24 @@ gate. See `spark-server/README.md`.
 - Spark runs as a non-root user. The default Compose file uses a named volume
   for `/data/dest` to avoid host UID mismatches; use the same approach for
   additional writable locations.
+
+## Coverage policy
+
+`npm run test:coverage` enforces 100 % statements, functions, lines and
+branches over `src/`, measured by the unit suite only. The gate exists to
+surface untested behaviour, not to be satisfied mechanically:
+
+- Reach a branch through the public API, or through a direct unit test of the
+  function that owns it, and assert on the result. Assertions such as
+  `expect(value).toBeTypeOf("object")` do not count as coverage of behaviour.
+- Do not fabricate states the types forbid (for example an
+  `as unknown as ProtoWriteRoot` with missing fields) to light up a defensive
+  fallback. Remove the fallback and let the type carry the guarantee, or, when
+  the guard protects against untyped external input, exercise it with
+  type-valid malformed values.
+- Interpreter methods that the public API never calls (for example
+  `TraceDFAlg.describe`, which the DataFrame emulates client-side) are tested
+  directly in the interpreter's own test file.
+- Mocks do not cover transport behaviour. Reattach, cancellation, deadlines,
+  Arrow decoding of real batches and authentication are only considered
+  covered by `npm run test:e2e` against a Spark Connect server.

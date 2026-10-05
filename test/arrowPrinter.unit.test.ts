@@ -40,3 +40,25 @@ describe("printArrowResults", () => {
         expect(() => printArrowResults([], { truncate: 1.5 })).toThrow(RangeError);
     });
 });
+
+describe("printArrowResults display rules", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("renders nulls, collapses one-character truncation to an ellipsis and bounds rows", () => {
+        const buffer = ipc({ id: [1, 2], value: [null, "long-value"] });
+        const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+        printArrowResults([buffer], { maxRows: 1, truncate: 1 });
+        let lines = log.mock.calls.map(args => String(args[0]));
+        expect(lines).toHaveLength(3);
+        expect(lines[2]).toContain("…");
+        expect(lines[2]).not.toContain("null");
+
+        log.mockClear();
+        printArrowResults([buffer, buffer], { maxRows: 2, truncate: 0 });
+        lines = log.mock.calls.map(args => String(args[0]));
+        expect(lines).toHaveLength(4);
+        expect(lines[2]).toContain("null");
+        expect(lines[3]).toContain("long-value");
+    });
+});

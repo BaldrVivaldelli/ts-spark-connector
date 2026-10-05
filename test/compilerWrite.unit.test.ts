@@ -178,6 +178,46 @@ describe("protoWriteRootToPlan - streaming", () => {
   });
 });
 
+describe("protoWriteRootToPlan - streaming trigger validation", () => {
+  // The low-level Trigger type allows any number, so a non-positive or NaN
+  // interval is type-valid input that the compiler must still reject.
+  const streamRoot = (trigger: NonNullable<ProtoWriteRoot["spec"]["trigger"]>): ProtoWriteRoot => ({
+    child: childRelation,
+    writerKind: "stream",
+    spec: { options: {}, partitionBy: [], sortBy: [], trigger },
+  });
+
+  it("rejects non-positive or non-finite processing-time intervals", () => {
+    expect(() => protoWriteRootToPlan(streamRoot({ kind: "ProcessingTime", intervalMs: Number.NaN })))
+      .toThrow(/invalid streaming trigger/i);
+    expect(() => protoWriteRootToPlan(streamRoot({ kind: "ProcessingTime", intervalMs: 0 })))
+      .toThrow(/invalid streaming trigger/i);
+  });
+
+  it("rejects a trigger object that selects no kind", () => {
+    expect(() => protoWriteRootToPlan(streamRoot({ once: false })))
+      .toThrow(/invalid streaming trigger/i);
+    expect(() => protoWriteRootToPlan(streamRoot({ availableNow: false })))
+      .toThrow(/invalid streaming trigger/i);
+  });
+
+  it("rejects non-positive or non-finite continuous checkpoint intervals", () => {
+    expect(() => protoWriteRootToPlan(streamRoot({ kind: "Continuous", checkpointIntervalMs: -1 })))
+      .toThrow(/invalid streaming trigger/i);
+    expect(() => protoWriteRootToPlan(streamRoot({ kind: "Continuous", checkpointIntervalMs: Number.NaN })))
+      .toThrow(/invalid streaming trigger/i);
+  });
+
+  it("serializes the low-level trigger variants in milliseconds", () => {
+    expect(singlePlan(streamRoot({ kind: "ProcessingTime", intervalMs: 1500 })))
+      .toMatchObject({ command: { write_stream_operation_start: { processing_time_interval: "1500 milliseconds" } } });
+    expect(singlePlan(streamRoot({ kind: "Continuous", checkpointIntervalMs: 250 })))
+      .toMatchObject({ command: { write_stream_operation_start: { continuous_checkpoint_interval: "250 milliseconds" } } });
+    expect(singlePlan(streamRoot({ kind: "Once" })))
+      .toMatchObject({ command: { write_stream_operation_start: { once: true } } });
+  });
+});
+
 describe("protoWriteRootToPlan - views", () => {
   it("serializes registerView as a non-global create_dataframe_view", () => {
     const plan = singlePlan({
