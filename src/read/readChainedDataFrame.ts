@@ -239,10 +239,21 @@ export const desc = (e: EBuilder, nulls?: NullsOrder) =>
  * inferencia de schema resultante se agregan en tareas posteriores (5.2–5.4,
  * 7.1); esta tarea solo establece la firma de la clase y la propagación de `S`
  * por `chain()`.
+ * @public
  */
 export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G = unknown, CDF = {}, CEX = {}> {
     /** @internal Mantiene `S` invariante para que las set ops exijan el mismo schema. */
     declare private readonly __schemaInvariant: (schema: S) => S;
+    /**
+     * @internal Mantiene invariante únicamente la marca de streaming de `CDF`.
+     * Sin esto `CDF` solo aparece en posición contravariante y los guards
+     * `this:` de `write()` / `writeStream()` aceptan cualquier sabor; con la
+     * marca invariante un DataFrame streaming no es asignable al `this` batch
+     * ni viceversa, mientras que las capacidades restantes siguen siendo libres.
+     */
+    declare private readonly __streamingInvariant: (
+        mark: Extract<CDF, StreamingMark<R>>,
+    ) => Extract<CDF, StreamingMark<R>>;
     private readonly prog: DFProgram<R, E, G, CDF, CEX>;
 
     constructor(
@@ -279,17 +290,28 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         return this.chainAs<S, CDF2, CEX2>(step);
     }
 
-    /** Compone el mismo programa cambiando únicamente el phantom schema. */
+    /**
+     * Compone el mismo programa cambiando únicamente el phantom schema.
+     *
+     * `step` recibe el plan izquierdo ya interpretado. Las operaciones binarias
+     * deben usar ese valor en lugar de volver a ejecutar `this.prog`: cada
+     * re-ejecución interpreta el subárbol izquierdo dos veces, y una cadena de
+     * N joins o unions pasa a costar 2^N interpretaciones.
+     *
+     * `streaming` permite que las binarias marquen el resultado como streaming
+     * cuando cualquiera de los dos lados lo es.
+     */
     private chainAs<NS, CDF2 = unknown, CEX2 = unknown>(
         step: (df: R, EX: ExprAlg<E> & CEX & CEX2, DF: DFAlg<R, E, G, CDF & CDF2>) => R,
         schemaTransform: (schema: SchemaDef | undefined) => SchemaDef | undefined = schema => schema,
+        streaming: boolean = this.streaming,
     ): ReadChainedDataFrame<NS, R, E, G, CDF & CDF2, CEX & CEX2> {
         const next: DFProgram<R, E, G, CDF & CDF2, CEX & CEX2> = (DF, EX) =>
             step(this.prog(DF, EX), EX, DF);
         return new ReadChainedDataFrame<NS, R, E, G, CDF & CDF2, CEX & CEX2>(
             next,
             this.session,
-            this.streaming,
+            streaming,
             schemaTransform(this.runtimeSchema),
         );
     }
@@ -364,8 +386,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         const typedJoin = typeof on === "function";
         const leftPlanId = typedJoin ? freshRelationPlanId() : undefined;
         const rightPlanId = typedJoin ? freshRelationPlanId() : undefined;
-        return this.chainAs<any, RCDF, RCEX>((_, EX, DF) => {
-            const rawLeftPlan = this.prog(DF, EX);
+        return this.chainAs<any, RCDF, RCEX>((rawLeftPlan, EX, DF) => {
             // DF tiene al menos CDF & RCDF; EX tiene al menos CEX & RCEX.
             const rawRightPlan = right.getProgram()(
                 DF as DFAlg<R, E, G, RCDF>,
@@ -387,7 +408,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                 )
                 : on;
             return DF.join(leftPlan, rightPlan, condition.build(EX), jt);
-        }, schema => joinRuntimeSchema(schema, right.runtimeSchema, jt));
+        }, schema => joinRuntimeSchema(schema, right.runtimeSchema, jt), this.streaming || right.streaming);
     }
 
 
@@ -443,19 +464,16 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         });
     }
 
-    union(right: ReadChainedDataFrame<S, R, E, G, CDF, CEX>): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
-        const next: DFProgram<R, E, G, CDF, CEX> = (DF, EX) => {
-            const leftPlan = this.prog(DF, EX);
-            const rightPlan = right.prog(DF, EX);
-            return DF.union(leftPlan, rightPlan);
-        };
-        return new ReadChainedDataFrame<S, R, E, G, CDF, CEX>(
-            next,
-            this.session,
+    union<RCDF = unknown, RCEX = unknown>(
+        right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>,
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX> {
+        return this.chainAs<S, RCDF, RCEX>(
+            (df, EX, DF) => DF.union(
+                df,
+                right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
+            ),
+            schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
-            schemaDefsEqual(this.runtimeSchema, right.runtimeSchema)
-                ? this.runtimeSchema
-                : undefined,
         );
     }
 
@@ -472,15 +490,16 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         allowMissingColumns = false,
     ): ReadChainedDataFrame<any, R, E, G, CDF & RCDF, CEX & RCEX> {
         return this.chainAs<any, RCDF, RCEX>(
-            (_, EX, DF) =>
+            (df, EX, DF) =>
                 DF.union(
-                    this.prog(DF, EX),
+                    df,
                     right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
                     { byName: true, allowMissingColumns }
                 ),
             schema => !allowMissingColumns && schemaDefsEqual(schema, right.runtimeSchema)
                 ? schema
                 : undefined,
+            this.streaming || right.streaming,
         );
     }
 
@@ -488,11 +507,12 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>
     ): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX> {
         return this.chainAs<S, RCDF, RCEX>(
-            (_, EX, DF) => DF.intersect(
-                this.prog(DF, EX),
+            (df, EX, DF) => DF.intersect(
+                df,
                 right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX)
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
+            this.streaming || right.streaming,
         );
     }
 
@@ -500,12 +520,13 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>
     ): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX> {
         return this.chainAs<S, RCDF, RCEX>(
-            (_, EX, DF) => DF.intersect(
-                this.prog(DF, EX),
+            (df, EX, DF) => DF.intersect(
+                df,
                 right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
                 { all: true }
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
+            this.streaming || right.streaming,
         );
     }
 
@@ -513,11 +534,12 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>
     ): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX> {
         return this.chainAs<S, RCDF, RCEX>(
-            (_, EX, DF) => DF.except(
-                this.prog(DF, EX),
+            (df, EX, DF) => DF.except(
+                df,
                 right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX)
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
+            this.streaming || right.streaming,
         );
     }
 
@@ -525,12 +547,13 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>
     ): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX> {
         return this.chainAs<S, RCDF, RCEX>(
-            (_, EX, DF) => DF.except(
-                this.prog(DF, EX),
+            (df, EX, DF) => DF.except(
+                df,
                 right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
                 { all: true }
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
+            this.streaming || right.streaming,
         );
     }
 
@@ -818,7 +841,8 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
 
     toSparkLogicalPlanJSON(): string {
         const lp = this.compileToSparkPlan();
-        return JSON.stringify(lp, null, 2);
+        // The logical-plan AST keeps bigint literals as-is; JSON has no bigint.
+        return JSON.stringify(lp, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2);
     }
 
     toProtoJSON(): string {
