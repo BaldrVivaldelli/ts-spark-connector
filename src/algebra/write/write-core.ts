@@ -1,7 +1,10 @@
 // src/write/write-core.ts
+/** @public */
 export type SaveMode = "append" | "overwrite" | "ignore" | "error" | "errorifexists";
+/** @public */
 export type BatchWriterFormat = "parquet" | "csv" | "json" | "orc" | "avro";
 
+/** @public */
 export type StreamWriterFormat = "console" | "kafka" | "memory";
 
 export interface WriterTarget {
@@ -17,7 +20,10 @@ export interface WriterCommonSpec {
     target?: WriterTarget;
 }
 
-/** Núcleo común del algebra de write (batch/stream). */
+/**
+ * Núcleo común del algebra de write (batch/stream).
+ * @internal
+ */
 export interface WriteCore<R, W> {
     /** crea el writer a partir del DF hijo (mismo R que tu DFCore) */
     fromChild(child: R): W;
@@ -51,7 +57,11 @@ export interface WriterSpec extends WriterCommonSpec {
         | { kind: "Continuous"; checkpointIntervalMs: number };
     queryName?: string;
 }
+/** @internal */
 export interface WBatchBrand { __wflavor?: "batch" }
+/** @internal */
 export interface WStreamBrand { __wflavor?: "stream" }
+/** @internal */
 export type WBatch = {} & WBatchBrand;
+/** @internal */
 export type WStream = {} & WStreamBrand;

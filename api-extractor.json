@@ -3,7 +3,14 @@
   "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
   "apiReport": {
     "enabled": true,
-    "reportFileName": "ts-spark-connector.api.md",
+    // Base name only: API Extractor appends ".<variant>.api.md" itself.
+    "reportFileName": "ts-spark-connector",
+    // Only the "public" variant is generated and enforced, so the committed
+    // etc/ts-spark-connector.public.api.md lists @public declarations only.
+    // Declarations tagged @internal stay exported from the root entry point
+    // for typing convenience but are outside the semver contract, so they
+    // neither appear in the report nor gate on it.
+    "reportVariants": ["public"],
     "reportFolder": "<projectFolder>/etc",
     "reportTempFolder": "<projectFolder>/node_modules/.cache/api-extractor"
   },
@@ -22,6 +29,10 @@
         "logLevel": "warning"
       }
     },
+    // api-extractor-defaults.json gives several ae-* rules addToApiReportFile:
+    // true, which writes the message into the report and marks it handled,
+    // so neither "error" nor "none" below would take effect without
+    // addToApiReportFile: false.
     "extractorMessageReporting": {
       "default": {
         "logLevel": "warning"
@@ -29,8 +40,25 @@
       "ae-missing-release-tag": {
         "logLevel": "none"
       },
+      // A type referenced by a public signature but not exported from the
+      // root entry point is a hard error, not a note in the report.
       "ae-forgotten-export": {
-        "logLevel": "error"
+        "logLevel": "error",
+        "addToApiReportFile": false
+      },
+      // @internal declarations keep their established names: the _underscore
+      // convention would rename exports that consumers may already import.
+      "ae-internal-missing-underscore": {
+        "logLevel": "none",
+        "addToApiReportFile": false
+      },
+      // Public signatures deliberately reference @internal plumbing types
+      // (DFProgram, ExprAlg, the writer Impl, ...). Users never have to name
+      // them, so the public report shows those signatures without defining
+      // the referenced types. A warning fails a non --local run, hence "none".
+      "ae-incompatible-release-tags": {
+        "logLevel": "none",
+        "addToApiReportFile": false
       }
     },
     "tsdocMessageReporting": {

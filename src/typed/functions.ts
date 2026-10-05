@@ -31,6 +31,7 @@ import { Condition, NumericColumn, NumericValue, TypedColumn } from "./typed-col
  * `length(col)` — longitud de una columna de string como columna numérica. El
  * resultado se modela como nullable (`length(null)` es `null` en Spark), igual
  * que en el prototipo.
+ * @public
  */
 export function length<E>(col: TypedColumn<string | null, E>): NumericColumn<number | null, E> {
     return new NumericColumn<number | null, E>(EX => EX.call("length", [col.build(EX)]));
@@ -39,6 +40,7 @@ export function length<E>(col: TypedColumn<string | null, E>): NumericColumn<num
 /**
  * `upper(col)` — pasa a mayúsculas una columna de string. La nullabilidad de la
  * entrada se **preserva** en la salida (el parámetro `T` viaja sin cambios).
+ * @public
  */
 export function upper<T extends string | null, E>(col: TypedColumn<T, E>): TypedColumn<T, E> {
     return new TypedColumn<T, E>(EX => EX.call("upper", [col.build(EX)]));
@@ -47,6 +49,7 @@ export function upper<T extends string | null, E>(col: TypedColumn<T, E>): Typed
 /**
  * `lower(col)` — pasa a minúsculas una columna de string, preservando la
  * nullabilidad de la entrada.
+ * @public
  */
 export function lower<T extends string | null, E>(col: TypedColumn<T, E>): TypedColumn<T, E> {
     return new TypedColumn<T, E>(EX => EX.call("lower", [col.build(EX)]));
@@ -56,6 +59,7 @@ export function lower<T extends string | null, E>(col: TypedColumn<T, E>): Typed
  * `concat(a, b, ...)` — concatena columnas de string y/o literales en una
  * columna de string. El resultado se modela como nullable (cualquier parte nula
  * propaga `null`), igual que en el prototipo.
+ * @public
  */
 export function concat<E>(
     ...parts: Array<TypedColumn<string | null, E> | string>
@@ -75,6 +79,7 @@ export function concat<E>(
 /**
  * `abs(col)` — valor absoluto, **preservando la nullabilidad** de la entrada
  * (el parámetro `T` viaja sin cambios).
+ * @public
  */
 export function abs<T extends NumericValue | null, E>(col: TypedColumn<T, E>): NumericColumn<T, E> {
     return new NumericColumn<T, E>(EX => EX.call("abs", [col.build(EX)]));
@@ -84,6 +89,7 @@ export function abs<T extends NumericValue | null, E>(col: TypedColumn<T, E>): N
  * `round(col, scale)` — redondea una columna numérica, preservando la
  * nullabilidad de la entrada. `scale` es la cantidad de decimales (0 por
  * defecto) y se promueve a literal.
+ * @public
  */
 export function round<T extends NumericValue | null, E>(
     col: TypedColumn<T, E>,
@@ -100,6 +106,7 @@ export function round<T extends NumericValue | null, E>(
  * Ensancha un literal escalar a su tipo base (`"high"` -> `string`, `1` ->
  * `number`), de modo que `when(cond, "high")` produzca una cadena de `string`
  * (no de `"high"`) y las ramas siguientes admitan otros valores del mismo tipo.
+ * @internal
  */
 export type Widen<V> = V extends string
     ? string
@@ -111,7 +118,10 @@ export type Widen<V> = V extends string
         ? boolean
         : V;
 
-/** Una rama `when(cond) -> value` aún sin interpretar. */
+/**
+ * Una rama `when(cond) -> value` aún sin interpretar.
+ * @internal
+ */
 export interface Branch<T extends ScalarType, E> {
     readonly cond: Condition<E>;
     readonly value: T | TypedColumn<T, E>;
@@ -124,6 +134,7 @@ export interface Branch<T extends ScalarType, E> {
  *
  * `T` se ensancha desde el literal del primer valor a su tipo base (ver
  * `Widen`), igual que en el prototipo.
+ * @public
  */
 export function when<V extends ScalarType, E>(
     cond: Condition<E>,
@@ -136,6 +147,7 @@ export function when<V extends ScalarType, E>(
  * Cadena de ramas `case when` en construcción. Es inmutable: cada `when`
  * agregado devuelve una nueva cadena. Solo al llamar `otherwise` se materializa
  * el `TypedColumn` con su *thunk*.
+ * @public
  */
 export class CaseChain<T extends ScalarType, E> {
     /** @internal Las cadenas se obtienen de `when(...)`, no se construyen a mano. */

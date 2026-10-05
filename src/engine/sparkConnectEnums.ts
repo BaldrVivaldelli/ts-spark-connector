@@ -24,6 +24,7 @@ export enum JoinType {
     JOIN_TYPE_CROSS = 7,
 }
 
+/** @public */
 export type JoinTypeName =
     | "INNER"
     | "LEFT"
@@ -39,6 +40,7 @@ export type JoinTypeName =
 
 // Accept both Spark Connect canonical names ("LEFT") and PySpark-style
 // lowercase ("left"); toProtoJoinType normalizes case before mapping.
+/** @public */
 export type JoinTypeInput = JoinTypeName | Lowercase<JoinTypeName>;
 
 const joinTypeMap: Record<JoinTypeName, JoinType> = {
@@ -71,6 +73,7 @@ export enum GroupType {
     GROUP_TYPE_PIVOT = 4,
 }
 
+/** @public */
 export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot";
 
 const groupTypeMap: Record<GroupTypeInput, GroupType> = {
@@ -147,6 +150,7 @@ export enum ExplainMode {
     EXPLAIN_MODE_FORMATTED = 5,
 }
 
+/** @public */
 export type ExplainModeInput = "simple" | "extended" | "codegen" | "cost" | "formatted";
 
 const explainModeMap: Record<ExplainModeInput, ExplainMode> = {
@@ -163,6 +167,7 @@ export function toProtoExplainMode(mode: ExplainModeInput): ExplainMode {
     return m;
 }
 
+/** @public */
 export type JoinHintName =
     | "broadcast"
     | "merge"

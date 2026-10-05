@@ -1,6 +1,7 @@
 import { SortOrder } from "../../types";
 import { GroupTypeInput, JoinTypeInput } from "../../engine/sparkConnectEnums";
 
+/** @internal */
 export interface DFCore<R, E, G = unknown> {
     relation(
         format: string,

@@ -23,19 +23,29 @@
  *
  * `long` usa `bigint` para no perder precisión; fechas, timestamps y decimales
  * se normalizan a strings canónicos (ISO/decimal) en la frontera Arrow.
+ * @public
  */
 export type ScalarType = string | number | bigint | boolean;
 
-/** Valores complejos públicos devueltos por `collect()`. */
+/**
+ * Valores complejos públicos devueltos por `collect()`.
+ * @public
+ */
 export type ComplexType =
     | readonly ColumnType[]
     | ReadonlyMap<ScalarType, ColumnType>
     | ({ readonly [field: string]: ColumnType } & { readonly __ambiguous?: never });
 
-/** Un tipo de valor de columna, posiblemente nulo y recursivo. */
+/**
+ * Un tipo de valor de columna, posiblemente nulo y recursivo.
+ * @public
+ */
 export type ColumnType = ScalarType | ComplexType | null;
 
-/** Un schema es un mapa nombre de columna -> tipo de valor (TS). */
+/**
+ * Un schema es un mapa nombre de columna -> tipo de valor (TS).
+ * @public
+ */
 export type Schema = Record<string, ColumnType>;
 
 /**
@@ -43,20 +53,30 @@ export type Schema = Record<string, ColumnType>;
  * modelo base (y no en el DataFrame) para que las transformaciones posteriores
  * puedan conservar el resto del schema sin convertir una columna ambigua en
  * una columna utilizable por accidente.
+ * @public
  */
 export type AmbiguousColumn<Name extends string = string> = {
     readonly __ambiguous: Name;
 };
 
-/** Schema que puede contener marcas de ambigüedad producidas por un join. */
+/**
+ * Schema que puede contener marcas de ambigüedad producidas por un join.
+ * @public
+ */
 export type SchemaShape = Record<string, ColumnType | AmbiguousColumn>;
 
-/** Nombres que todavía representan columnas utilizables. */
+/**
+ * Nombres que todavía representan columnas utilizables.
+ * @internal
+ */
 export type UsableColumnKey<S> = {
     [K in keyof S]-?: S[K] extends ColumnType ? K : never;
 }[keyof S] & string;
 
-/** Extrae el tipo de valor de una columna utilizable. */
+/**
+ * Extrae el tipo de valor de una columna utilizable.
+ * @internal
+ */
 export type UsableColumnType<S, K extends keyof S> = Extract<S[K], ColumnType>;
 
 // ---------------------------------------------------------------------------
@@ -71,6 +91,7 @@ export type UsableColumnType<S, K extends keyof S> = Extract<S[K], ColumnType>;
  *
  * El `unique symbol` garantiza que `UnknownSchema` no colisione estructuralmente
  * con ningún `Schema` real declarado por el usuario.
+ * @public
  */
 export type UnknownSchema = { readonly __unknownSchema: unique symbol };
 
@@ -81,6 +102,7 @@ export type UnknownSchema = { readonly __unknownSchema: unique symbol };
  *
  * El envoltorio en tupla (`[S] extends [UnknownSchema]`) evita la distribución
  * sobre uniones, de modo que la comparación se hace sobre `S` como un todo.
+ * @internal
  */
 export type IsKnownSchema<S> = [S] extends [UnknownSchema]
     ? false
@@ -92,7 +114,10 @@ export type IsKnownSchema<S> = [S] extends [UnknownSchema]
 // Maquinaria de tipos clave (helpers)
 // ---------------------------------------------------------------------------
 
-/** Quita `| null` para obtener el tipo escalar subyacente de una columna. */
+/**
+ * Quita `| null` para obtener el tipo escalar subyacente de una columna.
+ * @public
+ */
 export type NonNull<T> = T extends null ? never : T;
 
 /**
@@ -100,6 +125,7 @@ export type NonNull<T> = T extends null ? never : T;
  * No cambia la semántica del tipo; solo mejora cómo lo muestran las
  * herramientas (hover, errores), lo que es clave para que los mensajes de las
  * transformaciones de schema sean comprensibles.
+ * @internal
  */
 export type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
@@ -107,6 +133,7 @@ export type Prettify<T> = { [K in keyof T]: T[K] } & {};
  * Convierte una unión `U` en la intersección de sus miembros. Helper estándar
  * usado, entre otras cosas, para fusionar las salidas de varias agregaciones en
  * un único tipo objeto.
+ * @internal
  */
 export type UnionToIntersection<U> = (
     U extends unknown ? (k: U) => void : never

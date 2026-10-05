@@ -26,9 +26,12 @@ import { DFWritingExec } from "./writeDataFrame";
 import { StreamingQueryHandle } from "../client/sparkClient";
 
 // ==================== tipos base ====================
+/** @internal */
 export type DefaultR = unknown;
 const PROTO_INT32_MAX = 2_147_483_647;
+/** @public */
 export type WriterOptionValue = string | number | boolean | bigint;
+/** @public */
 export type StreamTriggerInput =
     | { processingTime: string }
     | { once: true }
@@ -97,16 +100,19 @@ function validateTrigger(trigger: StreamTriggerInput): StreamTriggerInput {
     return trigger;
 }
 
+/** @internal */
 export type ReadDFPublic<R, E, G, CDF = unknown, CEX = unknown> = {
     getSession(): SparkSession;
     getProgram(): DFProgram<R, E, G, CDF, CEX>;
 };
 
+/** @internal */
 export type ReadDFPrivate<R, E, G, CDF = unknown, CEX = unknown> = {
     _getSession(): SparkSession;
     _getProgram(): DFProgram<R, E, G, CDF, CEX>;
 };
 
+/** @internal */
 export type ReadDFAny<R, E, G, CDF = unknown, CEX = unknown> =
     | ReadDFPublic<R, E, G, CDF, CEX>
     | ReadDFPrivate<R, E, G, CDF, CEX>;
@@ -125,6 +131,7 @@ function programOf<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>): DFProgr
     return isPublicReadDF(df) ? df.getProgram() : df._getProgram();
 }
 
+/** @internal */
 export type Impl<R, E, G, W, CDF, CEX, WRALG> = {
     DF: DFAlg<R, E, G, CDF>;
     EX: ExprAlg<E> & CEX;
@@ -159,6 +166,7 @@ type StreamWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
 };
 
 // ==================== Writer ====================
+/** @public */
 export class DataFrameWriterTF<
     R = DefaultR,
     E = unknown,

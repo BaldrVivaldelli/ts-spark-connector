@@ -28,6 +28,7 @@ import {
     validateSessionId,
 } from "./sessionConfig";
 
+/** @public */
 export type TLSConfig = {
     keyStorePath?: string;
     keyStorePassword?: string;
@@ -38,7 +39,10 @@ export type TLSConfig = {
     serverNameOverride?: string;
 };
 
-/** Credentials resolved by a {@link SparkCredentialProvider} for outgoing RPCs. */
+/**
+ * Credentials resolved by a {@link SparkCredentialProvider} for outgoing RPCs.
+ * @public
+ */
 export type SparkCredentials = {
     /**
      * Headers attached to each Spark Connect call, such as
@@ -59,6 +63,7 @@ export type SparkCredentials = {
  * Supplies credentials on demand. Called before RPCs whose cached credentials
  * are absent or within the refresh window, and never more than once
  * concurrently per provider.
+ * @public
  */
 export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCredentials>;
 
@@ -66,6 +71,7 @@ export type SparkCredentialProvider = () => SparkCredentials | Promise<SparkCred
  * AWS credentials forwarded to the Spark job as S3A Hadoop configuration.
  * These authenticate the job's `s3a://` reads and writes on the server, not
  * the client's gRPC channel; use {@link AuthConfig} for the latter.
+ * @public
  */
 export type S3Credentials = {
     accessKeyId: string;
@@ -74,6 +80,7 @@ export type S3Credentials = {
     sessionToken?: string;
 };
 
+/** @public */
 export type AuthConfig =
     | { type: "basic"; username: string; password: string }
     | { type: "token"; token: string }
@@ -84,6 +91,7 @@ export type AuthConfig =
         refreshSkewMs?: number;
     };
 
+/** @public */
 export type RetryEvent = {
     /** One-based retry attempt number (the initial call is not a retry). */
     attempt: number;
@@ -93,6 +101,7 @@ export type RetryEvent = {
     error: unknown;
 };
 
+/** @public */
 export type RetryConfig = {
     /** Maximum number of retry attempts after the initial call (0 disables retries). */
     maxRetries?: number;
@@ -106,6 +115,7 @@ export type RetryConfig = {
     onRetry?: (event: RetryEvent) => void;
 };
 
+/** @public */
 export type SparkTelemetryEvent = {
     name: string;
     level: "debug" | "info" | "warn" | "error";
@@ -113,9 +123,13 @@ export type SparkTelemetryEvent = {
     attributes: Record<string, unknown>;
 };
 
-/** Opt-in sink for structured, redacted Spark Connect lifecycle events. */
+/**
+ * Opt-in sink for structured, redacted Spark Connect lifecycle events.
+ * @public
+ */
 export type SparkLogger = (event: Readonly<SparkTelemetryEvent>) => void;
 
+/** @public */
 export type SparkMetric = {
     name: string;
     kind: "counter" | "histogram";
@@ -125,17 +139,24 @@ export type SparkMetric = {
     attributes: Record<string, unknown>;
 };
 
-/** Opt-in metrics sink. Observer failures never affect Spark operations. */
+/**
+ * Opt-in metrics sink. Observer failures never affect Spark operations.
+ * @public
+ */
 export type SparkMetricObserver = (metric: Readonly<SparkMetric>) => void | PromiseLike<void>;
 
+/** @public */
 export type SparkUserContext = {
     user_id: string;
     user_name?: string;
 };
 
+/** @public */
 export type SessionConfigValue = string | number | boolean;
+/** @public */
 export type SessionConfigMap = Record<string, SessionConfigValue>;
 
+/** @public */
 export type SparkConnectionConfig = {
     address?: string;
     auth?: AuthConfig;
@@ -159,6 +180,7 @@ export type SparkConnectionConfig = {
     sessionConfig?: SessionConfigMap;
 };
 
+/** @public */
 export class SparkSession implements SessionAlgebra {
     private readonly sessionId: string;
     private userContext: SparkUserContext;
@@ -491,7 +513,10 @@ export class SparkSession implements SessionAlgebra {
 
 type ConfigPair = { key?: string; value?: string };
 
-/** Spark Connect runtime configuration facade backed by the Config RPC. */
+/**
+ * Spark Connect runtime configuration facade backed by the Config RPC.
+ * @public
+ */
 export class SparkRuntimeConfig {
     /** @internal */ constructor(private readonly session: SparkSession) {}
 
@@ -572,6 +597,7 @@ export class SparkRuntimeConfig {
     }
 }
 
+/** @public */
 export function createSparkSession(sessionId?: string): SparkSession {
     return new SparkSession(sessionId);
 }
@@ -580,6 +606,7 @@ const AUTH_SOURCE_CONFLICT_MESSAGE =
     "Authentication is configured through both withAuth() and legacy spark.auth.* keys. " +
     "Use a single source.";
 
+/** @public */
 export class SparkSessionBuilder {
     private configMap: SessionConfigMap = {};
     private auth?: AuthConfig;
@@ -854,4 +881,5 @@ export class SparkSessionBuilder {
     }
 }
 
+/** @public */
 export const spark = createSparkSession();

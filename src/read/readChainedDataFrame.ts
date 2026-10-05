@@ -4,6 +4,7 @@ import {
     ProtoDFAlg,
     ProtoExec,
     ProtoExprAlg,
+    ProtoRel,
     applyPendingAnalyzeActions,
 } from "../engine/compilerRead";
 import { SparkSession } from "../client/session";
@@ -75,48 +76,65 @@ import {
     statisticsRuntimeSchema,
 } from "./runtimeSchema";
 
+/**
+ * Minimal structural contract accepted by the lax (untyped) DataFrame
+ * overloads: any value that can build an expression against an `ExprAlg`.
+ *
+ * @deprecated Annotate with `EBuilder` from the root entry point instead; every
+ * expression helper (`col`, `lit`, `when`, ...) returns an `EBuilder`, which
+ * satisfies this shape. Exported as `DataFrameExpressionBuilder`, this alias
+ * will be removed from the root entry point in the next major release.
+ * @public
+ */
 export type EBuilder = { build<E>(EX: ExprAlg<E>): E };
 export type SortKeyInput =
     | string
     | EBuilder
     | ((EX: ExprAlg<any>) => SortOrder<any>);
 
+/** @public */
 export type ColumnName<S> = [S] extends [UnknownSchema]
     ? string
     : S extends SchemaShape
       ? UsableColumnKey<S>
       : string;
 
+/** @internal */
 export type SelectedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Selected<S, Extract<K, keyof S>>
       : UnknownSchema;
 
+/** @internal */
 export type DroppedSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Dropped<S, Extract<K, keyof S>>
       : UnknownSchema;
 
+/** @internal */
 export type RenamedSchema<S, From extends PropertyKey, To extends string> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? Renamed<S, Extract<From, keyof S>, To>
       : UnknownSchema;
 
+/** @internal */
 export type AddedColumnSchema<S, Name extends string, T extends ColumnType> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? WithColumn<S, Name, T>
       : UnknownSchema;
 
+/** @internal */
 export type RenamedColumnsSchema<S, M extends Record<string, string>> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? { [K in keyof S as K extends keyof M ? Extract<M[K], string> : K]: S[K] }
       : UnknownSchema;
 
+/** @internal */
 export type DuplicateRenameTargets<M extends Record<string, string>> = {
     [K in keyof M]: {
         [P in Exclude<keyof M, K>]: M[P] extends M[K]
@@ -127,6 +145,7 @@ export type DuplicateRenameTargets<M extends Record<string, string>> = {
     }[Exclude<keyof M, K>];
 }[keyof M];
 
+/** @internal */
 export type ValidRenameMap<S, M extends Record<string, string>> =
     DuplicateRenameTargets<M> extends never
         ? [S] extends [UnknownSchema]
@@ -141,6 +160,7 @@ export type ValidRenameMap<S, M extends Record<string, string>> =
               : never
         : never;
 
+/** @internal */
 export type ValidRenameTarget<S, From extends PropertyKey, To extends string> =
     [S] extends [UnknownSchema]
         ? To
@@ -148,32 +168,39 @@ export type ValidRenameTarget<S, From extends PropertyKey, To extends string> =
           ? never
           : To;
 
+/** @internal */
 export type StatisticsSchema<S, K extends PropertyKey> = [S] extends [UnknownSchema]
     ? UnknownSchema
     : S extends SchemaShape
       ? { summary: string } & { [P in Extract<K, keyof S>]: string | null }
       : UnknownSchema;
 
+/** @internal */
 export type JoinSchema<S, RS extends SchemaShape, JT extends JoinTypeInput> = S extends SchemaShape
     ? JoinedFor<S, RS, JT>
     : UnknownSchema;
 
+/** @public */
 export type TypedPredicate<S, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => Condition<E>
     : never;
 
+/** @public */
 export type TypedColumnFactory<S, T extends ColumnType, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => TypedColumn<T, E>
     : never;
 
+/** @public */
 export type TypedJoinPredicate<S, RS extends SchemaShape, E> = S extends SchemaShape
     ? (left: Columns<S, E>, right: Columns<RS, E>) => Condition<E>
     : never;
 
+/** @public */
 export type TypedOrderFactory<S, E> = S extends SchemaShape
     ? (columns: Columns<S, E>) => SortKey<E> | TypedColumn<ColumnType, E>
     : never;
 
+/** @public */
 export type TypedAggBuilder<
     S,
     E,
@@ -182,6 +209,7 @@ export type TypedAggBuilder<
     ? (factory: AggFactory<S, E>) => readonly [...A] & UniqueAggregationTuple<A>
     : never;
 
+/** @internal */
 export type UniqueAggregationTuple<
     A extends readonly { readonly alias: string }[],
     Seen extends string = never,
@@ -195,6 +223,7 @@ export type UniqueAggregationTuple<
         : unknown
     : unknown;
 
+/** @internal */
 export type AggregatedSchema<
     S,
     K extends PropertyKey,
@@ -207,6 +236,7 @@ export type AggregatedSchema<
  * Row shape returned by `collect()`. A collided join column is deliberately
  * exposed as `unknown`: the marker is a compile-time diagnostic for column
  * expressions, not a value that Spark places in Arrow rows.
+ * @public
  */
 export type RowOf<S> = [S] extends [UnknownSchema]
     ? Record<string, unknown>
@@ -731,13 +761,13 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     }
 
     async collectRaw(): Promise<unknown[]> {
-        const root = this.interpretWith<unknown>(ProtoDFAlg, ProtoExprAlg);
+        const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         return ProtoExec.collect(root, this.session);
     }
 
     /** Streams raw Spark Connect ExecutePlan responses with bounded buffering. */
     async *streamRaw(): AsyncGenerator<Record<string, unknown>, void, void> {
-        const root = this.interpretWith<LogicalPlan>(ProtoDFAlg, ProtoExprAlg);
+        const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         const executor = await applyPendingAnalyzeActions(root, this.session);
         for await (const response of executor.stream(root)) {
             yield response;
@@ -784,7 +814,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     }
 
     explain(mode: ExplainModeInput = "simple"): Promise<string> {
-        const root = this.interpretWith<unknown>(ProtoDFAlg, ProtoExprAlg);
+        const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         return ProtoExec.explain(root, this.session, mode);
     }
 
@@ -946,6 +976,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
  * Resultado intermedio de `groupBy`. Conserva el programa tagless-final y las
  * claves en el tipo; `agg` materializa recién al interpretar, de modo que los
  * builders tipados siguen siendo agnósticos de proto/trace/logical-plan.
+ * @public
  */
 export class GroupedDataFrameTF<
     S,

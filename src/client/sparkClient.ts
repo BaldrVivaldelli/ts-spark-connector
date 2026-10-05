@@ -36,6 +36,7 @@ import {
     validateTerminationTimeout,
 } from "./streamingProtocol";
 
+/** @public */
 export interface StreamingQueryHandle {
     awaitTermination(): Promise<void>;
     awaitTermination(timeoutMs: number): Promise<boolean>;

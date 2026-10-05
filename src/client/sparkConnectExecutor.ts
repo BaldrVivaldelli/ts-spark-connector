@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { SparkSession } from "./session";
-import { LogicalPlan } from "../engine/logicalPlan";
+import type { ProtoRel } from "../engine/compilerRead";
 import { sparkGrpcClient, StreamingQueryHandle } from "./sparkClient";
 import { ProtoPlan, ProtoWriteRoot, protoWriteRootToPlan } from "../write/compilerWrite";
 import { ExplainModeInput, toProtoExplainMode } from "../engine/sparkConnectEnums";
@@ -13,7 +13,7 @@ type ExecutePlanRequest = {
     user_context: UserContext;
     client_type: "ts-spark-connector";
     plan: {
-        root: LogicalPlan | ProtoPlan;
+        root: ProtoRel;
     };
     operation_id: string;
     client_observed_server_side_session_id?: string;
@@ -25,7 +25,7 @@ type AnalyzePlanRequest = {
     client_type: "ts-spark-connector";
     explain: {
         plan: {
-            root: LogicalPlan | ProtoPlan;
+            root: ProtoRel;
         };
         explain_mode: number;
     };
@@ -61,8 +61,13 @@ const STORAGE_LEVELS: Record<string, StorageLevelProto> = {
     OFF_HEAP: { use_disk: true, use_memory: true, use_off_heap: true, deserialized: false, replication: 1 },
 };
 
+/**
+ * Runs already-compiled Spark Connect relations. `ProtoDFAlg` produces the
+ * `ProtoRel` directly; the client-side `LogicalPlan` AST in ../engine/logicalPlan
+ * is a debugging serializer and never reaches this boundary.
+ */
 export interface SparkPlanInterpreter<F> {
-    execute(plan: LogicalPlan): F;
+    execute(plan: ProtoRel): F;
     runWrite(plan: ProtoWriteRoot): Promise<ExecutePlanResponse[]>;
 }
 
@@ -73,7 +78,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return new SparkConnectExecutor(session);
     }
 
-    async execute(plan: LogicalPlan): Promise<ExecutePlanResponse[]> {
+    async execute(plan: ProtoRel): Promise<ExecutePlanResponse[]> {
         await this.prepareSession();
         const request = this.buildExecuteRequest(plan);
         const responses = await this.remote(() =>
@@ -84,7 +89,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     }
 
     /** Streams ExecutePlan responses without materializing the complete result. */
-    async *stream(plan: LogicalPlan): AsyncGenerator<ExecutePlanResponse, void, void> {
+    async *stream(plan: ProtoRel): AsyncGenerator<ExecutePlanResponse, void, void> {
         await this.prepareSession();
         const request = this.buildExecuteRequest(plan);
         try {
@@ -101,7 +106,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         }
     }
 
-    async explain(plan: LogicalPlan, mode: ExplainModeInput): Promise<string> {
+    async explain(plan: ProtoRel, mode: ExplainModeInput): Promise<string> {
         await this.prepareSession();
         const request = this.buildAnalyzeRequest(plan, mode);
         const result = await this.remote(() =>
@@ -201,7 +206,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return handle;
     }
 
-    private buildExecuteRequest(root: LogicalPlan): ExecutePlanRequest {
+    private buildExecuteRequest(root: ProtoRel): ExecutePlanRequest {
         return {
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
@@ -212,7 +217,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         };
     }
 
-    private buildAnalyzeRequest(root: LogicalPlan, mode: ExplainModeInput): AnalyzePlanRequest {
+    private buildAnalyzeRequest(root: ProtoRel, mode: ExplainModeInput): AnalyzePlanRequest {
         return {
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
