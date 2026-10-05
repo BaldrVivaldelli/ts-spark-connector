@@ -101,10 +101,18 @@ describe("arrow-rows decoding (typed collect)", () => {
       { id: "long?" },
     )).toThrow(/expected long.*Float64/i);
 
-    expect(() => rowsFromArrowBuffers(
+    // Spark reports file-source columns as nullable even when the declared
+    // schema says NOT NULL, so nullability is checked on the data, not on the
+    // Arrow metadata: a nullable field without nulls decodes as non-null.
+    expect(rowsFromArrowBuffers(
       arrowBuffersFromResponses([response]),
       { id: "double" },
-    )).toThrow(/expects a non-null column/i);
+    )).toEqual([{ id: 1 }]);
+
+    expect(() => rowsFromArrowBuffers(
+      arrowBuffersFromResponses([arrowResponse({ id: [1, null] })]),
+      { id: "double" },
+    )).toThrow(/expects a non-null column, but Spark returned 1 null value in this batch/i);
 
     expect(rowsFromArrowBuffers(
       arrowBuffersFromResponses([response]),

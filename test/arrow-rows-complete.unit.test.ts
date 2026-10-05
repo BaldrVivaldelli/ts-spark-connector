@@ -105,14 +105,25 @@ describe("complete Arrow row schema behavior", () => {
             ])],
             { first: "int" },
         )).toThrow(/expected columns/i);
-        expect(() => rowsFromArrowBuffers(
-            [tableBuffer([field("value", new arrow.Int32(), true)])],
+        // Nullability is checked on the data: Spark reports file-source columns
+        // as nullable regardless of the declared schema, so a nullable field
+        // without nulls satisfies a non-null declaration and only real nulls fail.
+        expectSchemaAccepted(
+            [field("value", new arrow.Int32(), true)],
             { value: "int" },
-        )).toThrow(/non-null/i);
+        );
         expectSchemaAccepted(
             [field("value", new arrow.Int32(), true)],
             { value: "int?" },
         );
+        const withNulls = new arrow.Table({
+            value: arrow.vectorFromArray([1, null, null], new arrow.Int32()),
+        });
+        const withNullsBuffer = Buffer.from(arrow.tableToIPC(withNulls, "stream"));
+        expect(() => rowsFromArrowBuffers([withNullsBuffer], { value: "int" }))
+            .toThrow(/expects a non-null column, but Spark returned 2 null values in this batch/i);
+        expect(rowsFromArrowBuffers([withNullsBuffer], { value: "int?" }))
+            .toEqual([{ value: 1 }, { value: null }, { value: null }]);
     });
 
     it("accepts decimals, lists, maps and nested structs", () => {

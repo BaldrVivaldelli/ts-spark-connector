@@ -13,7 +13,7 @@
  * modo que el contrato no cambie según el valor ni pierda precisión.
  */
 
-import type { DataType, Field } from "apache-arrow";
+import type { DataType, Field, Table } from "apache-arrow";
 import type { FieldSpec, SchemaDef, TypeToken } from "../schema/schema";
 
 let arrowModule: typeof import("apache-arrow") | undefined;
@@ -57,7 +57,7 @@ export function rowsFromArrowBuffers<Row>(buffers: Buffer[], expectedSchema?: Sc
         const table = arrow().tableFromIPC(buf);
         const fields = table.schema.fields as Field<DataType>[];
         assertUniqueFieldNames(fields);
-        if (expectedSchema) assertExpectedSchema(fields, expectedSchema);
+        if (expectedSchema) assertExpectedSchema(table, fields, expectedSchema);
         if (table.numRows === 0) continue;
 
         const names = fields.map(f => f.name);
@@ -135,7 +135,7 @@ function assertUniqueFieldNames(fields: readonly Field<DataType>[]): void {
     }
 }
 
-function assertExpectedSchema(fields: readonly Field<DataType>[], expected: SchemaDef): void {
+function assertExpectedSchema(table: Table, fields: readonly Field<DataType>[], expected: SchemaDef): void {
     const entries = Object.entries(expected);
     const actualNames = fields.map(field => field.name);
     const expectedNames = entries.map(([name]) => name);
@@ -150,10 +150,18 @@ function assertExpectedSchema(fields: readonly Field<DataType>[], expected: Sche
     entries.forEach(([name, spec], index) => {
         const field = requiredAt(fields, index, "expected field");
         if (!isNullableSpec(spec) && field.nullable) {
-            throw new TypeError(
-                `Spark schema mismatch at ${name}: TypeScript expects a non-null column, ` +
-                "but Spark reports it as nullable."
-            );
+            // Spark marks every file-source column nullable whatever the declared
+            // schema says (readWith on csv/json/parquet/orc/avro), so the Arrow
+            // metadata cannot prove non-nullability. Check the data instead: a
+            // declared non-null column must not carry a single null.
+            const nullCount = table.getChildAt(index)!.nullCount;
+            if (nullCount > 0) {
+                throw new TypeError(
+                    `Spark schema mismatch at ${name}: TypeScript expects a non-null column, ` +
+                    `but Spark returned ${nullCount} null value${nullCount === 1 ? "" : "s"} in this batch. ` +
+                    "Declare the column as nullable or filter the nulls before collecting."
+                );
+            }
         }
         assertFieldType(field.type, spec, name);
     });
