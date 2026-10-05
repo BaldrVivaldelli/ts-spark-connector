@@ -12,10 +12,13 @@ run_connect() {
   local FLAGS=(--host "$host" --port "$port")
 
   if [[ -x "$SPARK_HOME/bin/spark-connect-server" ]]; then
-    # Direct launcher provided by the pinned Spark 4.x image.
+    # Direct launcher, if a future image ships one. No apache/spark 4.0-4.2 tag does.
     exec "$SPARK_HOME/bin/spark-connect-server" "${FLAGS[@]}"
   elif [[ -x "$SPARK_HOME/sbin/start-connect-server.sh" ]]; then
-    # Keep the upstream sbin launcher as a packaging-compatible fallback.
+    # The upstream sbin launcher is what every 4.0-4.2 image actually runs.
+    # spark-submit forwards --host/--port to SparkConnectServer as inert
+    # application arguments; the real bind address and port come from
+    # spark-defaults.conf.
     "$SPARK_HOME/sbin/start-connect-server.sh" "${FLAGS[@]}"
     exec tail -F "$SPARK_HOME/logs/"*.out
   else
