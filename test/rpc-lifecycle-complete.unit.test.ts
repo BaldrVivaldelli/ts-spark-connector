@@ -59,6 +59,11 @@ describe("RPC lifecycle completion", () => {
         expect(() => assertRpcResponseSessionIntegrity(request, {
             sessionId: "session-1",
         }, "Config")).not.toThrow();
+        // FetchErrorDetailsResponse never sets session_id; proto-loader materializes
+        // the proto3 default "" and that must read as "absent", not as a foreign session.
+        expect(() => assertRpcResponseSessionIntegrity(request, {
+            session_id: "",
+        }, "FetchErrorDetails")).not.toThrow();
         expect(() => assertRpcResponseSessionIntegrity({
             ...request,
             session_id: 7,

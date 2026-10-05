@@ -351,6 +351,33 @@ describe("reattachable ExecutePlan", () => {
         await expect(consume()).rejects.toThrow(/session_id other-session/i);
     });
 
+    it("accepts a response whose session_id is the proto3 default empty string", async () => {
+        const execute = vi.fn(() => new ScriptedCall<ReattachableResponse>([
+            {
+                type: "data",
+                value: {
+                    session_id: "",
+                    operation_id: request.operation_id,
+                    response_id: "response-1",
+                    result_complete: {},
+                },
+            },
+            { type: "end" },
+        ]));
+
+        const received: ReattachableResponse[] = [];
+        for await (const response of executeReattachable(request, {
+            execute,
+            reattach: () => { throw new Error("should not reattach"); },
+            release: async () => ({}),
+        }, { retry: resolveRetryConfig() })) {
+            received.push(response);
+        }
+
+        expect(received).toHaveLength(1);
+        expect(received[0]).toMatchObject({ response_id: "response-1" });
+    });
+
     it("reports but does not surface ReleaseExecute failure after result_complete", async () => {
         const cleanupError = Object.assign(new Error("release unavailable"), { code: 14 });
         const onCleanupError = vi.fn();

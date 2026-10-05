@@ -320,7 +320,8 @@ export class SparkSession implements SessionAlgebra {
             serverSideSessionId?: unknown;
         } | null;
         const responseSessionId = carrier?.session_id ?? carrier?.sessionId;
-        if (responseSessionId !== undefined && responseSessionId !== this.sessionId) {
+        // "" is proto3's unset string, not a foreign session.
+        if (responseSessionId !== undefined && responseSessionId !== "" && responseSessionId !== this.sessionId) {
             throw this.invalidate(
                 `Spark Connect returned session_id ${String(responseSessionId)}; expected ${this.sessionId}.`
             );
