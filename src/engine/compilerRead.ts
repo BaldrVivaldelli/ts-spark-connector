@@ -9,7 +9,7 @@ import {
 } from "./sparkConnectEnums";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
-import {SortOrder, WindowSpec} from "../types";
+import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
 import {DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
@@ -429,6 +429,61 @@ function protoSortedRelation(
     };
 }
 
+/**
+ * Compiles a catalog operation to the `Catalog` relation payload, keeping the
+ * optional proto3 fields absent instead of serialising empty strings.
+ */
+function catalogProtoPayload(op: CatalogOperation): ProtoMessage {
+    switch (op.method) {
+        case "currentCatalog":
+            return { current_catalog: {} };
+        case "setCurrentCatalog":
+            return { set_current_catalog: { catalog_name: op.catalogName } };
+        case "listCatalogs":
+            return { list_catalogs: { ...(op.pattern !== undefined ? { pattern: op.pattern } : {}) } };
+        case "currentDatabase":
+            return { current_database: {} };
+        case "setCurrentDatabase":
+            return { set_current_database: { db_name: op.dbName } };
+        case "listDatabases":
+            return { list_databases: { ...(op.pattern !== undefined ? { pattern: op.pattern } : {}) } };
+        case "listTables":
+            return {
+                list_tables: {
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                    ...(op.pattern !== undefined ? { pattern: op.pattern } : {}),
+                },
+            };
+        case "listColumns":
+            return {
+                list_columns: {
+                    table_name: op.tableName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "databaseExists":
+            return { database_exists: { db_name: op.dbName } };
+        case "tableExists":
+            return {
+                table_exists: {
+                    table_name: op.tableName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "functionExists":
+            return {
+                function_exists: {
+                    function_name: op.functionName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "dropTempView":
+            return { drop_temp_view: { view_name: op.viewName } };
+        case "dropGlobalTempView":
+            return { drop_global_temp_view: { view_name: op.viewName } };
+    }
+}
+
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     relation: (format, path, options, schema) => {
         if (format === "table") {
@@ -457,6 +512,7 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             },
         };
     },
+    catalog: op => ({ catalog: catalogProtoPayload(op) }),
     withPlanId: (input, planId) => preserveAnalyzeActions(input, {
         ...input,
         common: {

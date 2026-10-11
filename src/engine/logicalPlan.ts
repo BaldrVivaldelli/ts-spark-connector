@@ -1,4 +1,5 @@
 import { GroupTypeInput, JoinHintName, JoinTypeInput } from "./sparkConnectEnums";
+import { CatalogOperation } from "../types/catalog";
 import { LiteralValue } from "../algebra/read";
 import { FrameBoundary } from "./column";
 import { FrameType, SortOrder } from "../types";
@@ -49,6 +50,7 @@ export type LogicalPlan =
     | { type: "Repartition"; input: LogicalPlan; numPartitions: number; shuffle: boolean }
     | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
     | { type: "Sql"; query: string }
+    | { type: "Catalog"; operation: CatalogOperation }
     | { type: "Hint"; name: JoinHintName | string; params?: unknown[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
     | { type: "Drop"; input: LogicalPlan; columnNames: string[] }

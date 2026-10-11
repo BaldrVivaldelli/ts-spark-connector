@@ -1,4 +1,5 @@
 import { SortOrder } from "../../types";
+import { CatalogOperation } from "../../types/catalog";
 import { GroupTypeInput, JoinTypeInput } from "../../engine/sparkConnectEnums";
 
 /** @internal */
@@ -9,6 +10,9 @@ export interface DFCore<R, E, G = unknown> {
         options?: Record<string, string>,
         schema?: string
     ): R;
+
+    /** Roots the plan at a server-side catalog metadata operation. */
+    catalog(op: CatalogOperation): R;
 
     /** Binds a relation root to the id used by qualified unresolved attributes. */
     withPlanId?(plan: R, planId: number): R;

@@ -58,6 +58,102 @@ export type BatchWriterFormat = "parquet" | "csv" | "json" | "orc" | "avro";
 export function call(name: string, args: (EBuilder | string | number | boolean)[]): EBuilder;
 
 // @public (undocumented)
+export type CatalogColumn = InferSchema<typeof CatalogColumnRow.def>;
+
+// @public
+export const CatalogColumnRow: DeclaredSchema<{
+    name: "string";
+    description: "string?";
+    dataType: "string";
+    nullable: "boolean";
+    isPartition: "boolean";
+    isBucket: "boolean";
+    isCluster: "boolean";
+}>;
+
+// @public (undocumented)
+export type CatalogDatabase = InferSchema<typeof CatalogDatabaseRow.def>;
+
+// @public
+export const CatalogDatabaseRow: DeclaredSchema<{
+    name: "string";
+    catalog: "string?";
+    description: "string?";
+    locationUri: "string?";
+}>;
+
+// @public (undocumented)
+export type CatalogEntry = InferSchema<typeof CatalogEntryRow.def>;
+
+// @public
+export const CatalogEntryRow: DeclaredSchema<{
+    name: "string";
+    description: "string?";
+}>;
+
+// @public
+export type CatalogMethod = CatalogOperation["method"];
+
+// @public
+export type CatalogOperation = {
+    readonly method: "currentCatalog";
+} | {
+    readonly method: "setCurrentCatalog";
+    readonly catalogName: string;
+} | {
+    readonly method: "listCatalogs";
+    readonly pattern?: string;
+} | {
+    readonly method: "currentDatabase";
+} | {
+    readonly method: "setCurrentDatabase";
+    readonly dbName: string;
+} | {
+    readonly method: "listDatabases";
+    readonly pattern?: string;
+} | {
+    readonly method: "listTables";
+    readonly dbName?: string;
+    readonly pattern?: string;
+} | {
+    readonly method: "listColumns";
+    readonly tableName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "databaseExists";
+    readonly dbName: string;
+} | {
+    readonly method: "tableExists";
+    readonly tableName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "functionExists";
+    readonly functionName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "dropTempView";
+    readonly viewName: string;
+} | {
+    readonly method: "dropGlobalTempView";
+    readonly viewName: string;
+};
+
+// @public (undocumented)
+export type CatalogTable = InferSchema<typeof CatalogTableRow.def>;
+
+// @public
+export const CatalogTableRow: DeclaredSchema<{
+    name: "string";
+    catalog: "string?";
+    namespace: ArraySpec<"string?"> & {
+        readonly nullable: true;
+    };
+    description: "string?";
+    tableType: "string?";
+    isTemporary: "boolean";
+}>;
+
+// @public (undocumented)
 export function coalesce(...xs: Array<EBuilder | string | number | boolean>): EBuilder;
 
 // @public (undocumented)
@@ -646,6 +742,25 @@ export type SortOrder<E> = {
 export const spark: SparkSession;
 
 // @public
+export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
+    constructor(session: SparkSession);
+    currentCatalog(): Promise<string>;
+    currentDatabase(): Promise<string>;
+    databaseExists(dbName: string): Promise<boolean>;
+    dropGlobalTempView(viewName: string): Promise<boolean>;
+    dropTempView(viewName: string): Promise<boolean>;
+    functionExists(functionName: string, dbName?: string): Promise<boolean>;
+    listCatalogs(pattern?: string): ReadChainedDataFrame<CatalogEntry, R, E, G>;
+    listColumns(tableName: string, dbName?: string): ReadChainedDataFrame<CatalogColumn, R, E, G>;
+    listDatabases(pattern?: string): ReadChainedDataFrame<CatalogDatabase, R, E, G>;
+    listTables(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogTable, R, E, G>;
+    plan(op: CatalogOperation): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+    setCurrentCatalog(catalogName: string): Promise<void>;
+    setCurrentDatabase(dbName: string): Promise<void>;
+    tableExists(tableName: string, dbName?: string): Promise<boolean>;
+}
+
+// @public
 export class SparkConnectError extends Error {
     constructor(message: string, options: SparkConnectErrorOptions);
     // (undocumented)
@@ -756,6 +871,7 @@ export class SparkSession implements SessionAlgebra {
     });
     // (undocumented)
     static builder(): SparkSessionBuilder;
+    get catalog(): SparkCatalog;
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
     // (undocumented)
