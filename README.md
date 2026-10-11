@@ -82,6 +82,37 @@ const rows = await events.select("id", "amount", "tags").collect();
 // rows: Array<{ id: bigint; amount: string; tags: Array<string | null> }>
 ```
 
+## Local data
+
+`createDataFrame` turns local rows into a Spark DataFrame through the Connect
+`LocalRelation`: the declared schema types the rows at compile time, drives the
+Arrow IPC encoding, and travels to Spark as the relation's schema. Value
+representations are exactly the ones `collect()` returns, so
+`createDataFrame(await df.collect(), Schema)` round-trips without loss —
+`long` stays `bigint` at any magnitude.
+
+```ts
+import { SparkSession, col, schema } from "ts-spark-connector";
+
+const People = schema({ id: "long", name: "string", joined: "date?" });
+
+const people = session.createDataFrame(
+  [
+    { id: 1n, name: "ada", joined: "2026-01-31" },
+    { id: 2n, name: "grace", joined: null },
+  ],
+  People,
+);
+
+await people.filter(col("id").gt(1)).show();
+```
+
+Rows are validated during encoding: a `null` in a non-nullable column or a
+value that does not match its token fails with the column and row in the
+message, before anything reaches the network. Complex column types (decimal,
+array, map, struct) are not supported yet and are rejected explicitly. An
+empty row array produces an empty, correctly-typed relation.
+
 ## Plan inspection
 
 ```ts
@@ -355,6 +386,7 @@ E2E suite passes in CI.
 Implemented and exposed in the public API:
 
 - Reads: CSV / JSON / Parquet / ORC / Avro
+- Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
 - Transformations: `select`, `filter`, `join`, `groupBy().agg()`, `sort`, `limit`, `distinct`, `dropDuplicates`, `withColumn`, `withColumnRenamed`, `withColumnsRenamed`, `drop`, `sample`, `randomSplit`, `repartition`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
 - SQL / temp views

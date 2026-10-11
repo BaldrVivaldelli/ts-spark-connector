@@ -877,7 +877,13 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
 
     toProtoJSON(): string {
         const protoRoot = this.interpretWith<unknown>(ProtoDFAlg, ProtoExprAlg);
-        return JSON.stringify(protoRoot, null, 2);
+        // LocalRelation carries its rows as Arrow IPC bytes; summarise them
+        // instead of flooding the inspection output with a byte-per-line dump.
+        return JSON.stringify(
+            protoRoot,
+            (_key, value) => (value instanceof Uint8Array ? `<${value.byteLength} bytes of Arrow IPC data>` : value),
+            2,
+        );
     }
 
     sample(fraction: number, withReplacement = false, seed?: number, deterministicOrder = false) {

@@ -94,6 +94,8 @@ export const TraceDFAlg: TraceDFAlgebra = {
 
     catalog: op => node("rel", `catalog(${op.method})`),
 
+    localRelation: (_ddl, _data, rowCount) => node("rel", `localRelation[${rowCount}]`),
+
     withPlanId: (df, _planId) => df,
 
     select: (df, cols) => node("select", `select[${cols.length}]`, [df, ...cols]),

@@ -14,6 +14,13 @@ export interface DFCore<R, E, G = unknown> {
     /** Roots the plan at a server-side catalog metadata operation. */
     catalog(op: CatalogOperation): R;
 
+    /**
+     * Roots the plan at client-provided local data: a DDL schema plus, when
+     * the relation is not empty, rows already serialized as an Arrow IPC
+     * stream. `rowCount` feeds plan inspection; the bytes never reach it.
+     */
+    localRelation(ddl: string, data: Uint8Array | undefined, rowCount: number): R;
+
     /** Binds a relation root to the id used by qualified unresolved attributes. */
     withPlanId?(plan: R, planId: number): R;
 

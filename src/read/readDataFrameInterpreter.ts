@@ -124,6 +124,7 @@ export const SparkExprAlg: ExprAlg<Expression> = {
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<LogicalPlan, Expression>> = {
     relation: (format, path, options, schema) => ({ type: "Relation", format, path, options, schema }),
     catalog: op => ({ type: "Catalog", operation: op }),
+    localRelation: (ddl, _data, rowCount) => ({ type: "LocalRelation", schema: ddl, rowCount }),
     withPlanId: plan => plan,
     select: (plan, columns) => ({ type: "Project", input: plan, columns }),
     filter: (plan, condition) => ({ type: "Filter", input: plan, condition }),
