@@ -69,6 +69,20 @@ export type {
     ValidRenameTarget,
 } from "./read/readChainedDataFrame";
 export { DataFrameReaderTF } from "./read/dataFrameReaderTF";
+export {
+    SparkCatalog,
+    CatalogEntryRow,
+    CatalogDatabaseRow,
+    CatalogTableRow,
+    CatalogColumnRow,
+} from "./client/catalog";
+export type {
+    CatalogEntry,
+    CatalogDatabase,
+    CatalogTable,
+    CatalogColumn,
+} from "./client/catalog";
+export type { CatalogOperation, CatalogMethod } from "./types/catalog";
 export type {
     Opts as ReaderOptions,
     ReaderOptionValue,

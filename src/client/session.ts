@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
+import { SparkCatalog } from "./catalog";
 import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
 import { StreamingMark } from "../algebra/read";
@@ -250,6 +251,12 @@ export class SparkSession implements SessionAlgebra {
     get read(): DataFrameReaderTF {
         this.assertOpen();
         return new DataFrameReaderTF(this);
+    }
+
+    /** Server-side catalog metadata (databases, tables, columns, temp views). */
+    get catalog(): SparkCatalog {
+        this.assertOpen();
+        return new SparkCatalog(this);
     }
 
     /** Remote Spark SQL/runtime configuration for this Connect session. */

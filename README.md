@@ -306,6 +306,32 @@ const value = await session.conf.get("spark.sql.shuffle.partitions");
 await session.conf.unset("spark.sql.shuffle.partitions");
 ```
 
+## Catalog metadata
+
+`session.catalog` mirrors `spark.catalog` over the Connect `Catalog` relation.
+List operations are ordinary DataFrames — they compose with `filter`, `select`,
+`collect` and `show` — and their rows are typed through the same declared-schema
+machinery as `readWith`:
+
+```ts
+const tables = await session.catalog.listTables().collect();
+// tables: Array<{ name: string; isTemporary: boolean; ... }>
+
+await session.catalog.listColumns("people").show();
+
+if (await session.catalog.tableExists("people")) {
+  console.log(await session.catalog.currentDatabase());
+}
+
+await session.catalog.dropTempView("people_view");
+```
+
+Scalar operations (`currentCatalog`, `currentDatabase`, `databaseExists`,
+`tableExists`, `functionExists`, `dropTempView`, `dropGlobalTempView`,
+`setCurrentCatalog`, `setCurrentDatabase`) execute immediately and unwrap
+their single result. Catalog plans print through the same inspection surface
+as any other DataFrame (`toProtoJSON`, Mermaid, client AST).
+
 ## Compatibility
 
 The currently verified compatibility targets are:
@@ -332,6 +358,7 @@ Implemented and exposed in the public API:
 - Transformations: `select`, `filter`, `join`, `groupBy().agg()`, `sort`, `limit`, `distinct`, `dropDuplicates`, `withColumn`, `withColumnRenamed`, `withColumnsRenamed`, `drop`, `sample`, `randomSplit`, `repartition`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
 - SQL / temp views
+- Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables and columns, existence checks, and temp-view drops
 - Batch writes plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
 - `explain(...)`
 
