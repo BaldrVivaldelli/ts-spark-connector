@@ -27,7 +27,7 @@ type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
  * prevents `any` from leaking through the interpreter while still allowing
  * every Spark Connect message field emitted below.
  */
-export type ProtoScalar = string | number | boolean | null;
+export type ProtoScalar = string | number | boolean | null | Uint8Array;
 export type ProtoValue = ProtoScalar | ProtoMessage | ProtoValue[];
 
 export interface ProtoMessage {
@@ -513,6 +513,12 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         };
     },
     catalog: op => ({ catalog: catalogProtoPayload(op) }),
+    localRelation: (ddl, data, _rowCount) => ({
+        local_relation: {
+            schema: ddl,
+            ...(data !== undefined ? { data } : {}),
+        },
+    }),
     withPlanId: (input, planId) => preserveAnalyzeActions(input, {
         ...input,
         common: {

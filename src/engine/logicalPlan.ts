@@ -51,6 +51,7 @@ export type LogicalPlan =
     | { type: "Coalesce"; input: LogicalPlan; numPartitions: number }
     | { type: "Sql"; query: string }
     | { type: "Catalog"; operation: CatalogOperation }
+    | { type: "LocalRelation"; schema: string; rowCount: number }
     | { type: "Hint"; name: JoinHintName | string; params?: unknown[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
     | { type: "Drop"; input: LogicalPlan; columnNames: string[] }

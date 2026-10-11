@@ -874,6 +874,7 @@ export class SparkSession implements SessionAlgebra {
     get catalog(): SparkCatalog;
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
+    createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(rows: ReadonlyArray<InferSchema<D>>, declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G>;
     // (undocumented)
     getConnectionConfig(): SparkConnectionConfig;
     // (undocumented)

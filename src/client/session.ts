@@ -3,8 +3,10 @@ import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import { SparkCatalog } from "./catalog";
 import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import { StreamingMark } from "../algebra/read";
+import { DFProgram, StreamingMark } from "../algebra/read";
 import { SqlCap } from "../algebra/read/batch-capabilities";
+import { DeclaredSchema, InferSchema, SchemaDef } from "../schema/schema";
+import { encodeLocalRelation } from "../typed/arrow-encode";
 import { StreamingReadCap } from "../algebra/read/streaming-capabilities";
 import { DataFrameWriterTF } from "../write/dataFrameWriterTF";
 import { WStream } from "../algebra/write";
@@ -242,6 +244,37 @@ export class SparkSession implements SessionAlgebra {
         name: string
     ): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown> {
         return new DataFrameReaderTF<R, E, G>(this).table(name);
+    }
+
+    /**
+     * Builds a DataFrame from local rows. The declared schema is the single
+     * source of truth: it types the rows at compile time, drives the Arrow
+     * encoding, and travels to Spark as the `LocalRelation` schema. Value
+     * representations are the ones `collect()` returns (`bigint` for `long`,
+     * `"YYYY-MM-DD"` for `date`, ISO-8601 strings for `timestamp`), so
+     * `createDataFrame(await df.collect(), Schema)` round-trips.
+     *
+     * Complex column types (decimal, array, map, struct) are not supported
+     * yet and are rejected with a `TypeError`.
+     */
+    createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(
+        rows: ReadonlyArray<InferSchema<D>>,
+        declared: DeclaredSchema<D>,
+    ): ReadChainedDataFrame<InferSchema<D>, R, E, G> {
+        this.assertOpen();
+        if (!Array.isArray(rows)) {
+            throw new TypeError("createDataFrame() rows must be an array.");
+        }
+        if (!(declared instanceof DeclaredSchema)) {
+            throw new TypeError("createDataFrame() requires a schema declared with schema({...}).");
+        }
+        const data = rows.length === 0
+            ? undefined
+            : encodeLocalRelation(rows as ReadonlyArray<Record<string, unknown>>, declared.def);
+        const ddl = declared.toDDL();
+        const rowCount = rows.length;
+        const prog: DFProgram<R, E, G> = DF => DF.localRelation(ddl, data, rowCount);
+        return new ReadChainedDataFrame<InferSchema<D>, R, E, G>(prog, this, false, declared.def);
     }
 
     static builder(): SparkSessionBuilder {
