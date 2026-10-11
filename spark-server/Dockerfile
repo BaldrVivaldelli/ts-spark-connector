@@ -23,9 +23,67 @@ RUN curl --fail --show-error --location \
       --output "/opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" \
  && echo "$SPARK_AVRO_SHA256  /opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" | sha256sum --check --strict
 
+# Lakehouse formats, pinned per Spark minor and verified by checksum.
+# Delta 4.4.1 publishes one build per supported Spark minor; Iceberg 1.12.0
+# ships Spark 4.0 and 4.1 runtimes and none for 4.2 yet, so a 4.2 image
+# carries Delta only and the E2E suite gates its Iceberg cases on the
+# server version.
+ARG DELTA_VERSION=4.4.1
+ARG ICEBERG_VERSION=1.12.0
+RUN set -eu; \
+    minor="${SPARK_VERSION%.*}"; \
+    case "$minor" in \
+      4.0) delta_artifact="delta-spark_4.0_2.13"; \
+           delta_sha="d0766b4b0ace348dca7a5851418767e1eea170c7303c4771cda2934f49627ce8"; \
+           iceberg_artifact="iceberg-spark-runtime-4.0_2.13"; \
+           iceberg_sha="3f50e93e8ed322ae0da0e380f1b6c27116404329c62e55f0586697b1b8378306" ;; \
+      4.1) delta_artifact="delta-spark_4.1_2.13"; \
+           delta_sha="ef0e152d6f43a22a4fed7b65a1b7508cee1e20a70f7d301fb53c6a9225e1b979"; \
+           iceberg_artifact="iceberg-spark-runtime-4.1_2.13"; \
+           iceberg_sha="3123c3798af642dd537230923548e013ef41cc28b6626e5225808cf5670a0f82" ;; \
+      4.2) delta_artifact="delta-spark_2.13"; \
+           delta_sha="2b1d2cd411bf0bbced64b96fe621f8ffce7bb6e394c8064ab783fc6edce449be"; \
+           iceberg_artifact=""; \
+           iceberg_sha="" ;; \
+      *) echo "No pinned lakehouse artifacts for Spark ${SPARK_VERSION}." >&2; exit 1 ;; \
+    esac; \
+    curl --fail --show-error --location \
+      "https://repo1.maven.org/maven2/io/delta/${delta_artifact}/${DELTA_VERSION}/${delta_artifact}-${DELTA_VERSION}.jar" \
+      --output "/opt/spark/jars/${delta_artifact}-${DELTA_VERSION}.jar"; \
+    echo "${delta_sha}  /opt/spark/jars/${delta_artifact}-${DELTA_VERSION}.jar" | sha256sum --check --strict; \
+    curl --fail --show-error --location \
+      "https://repo1.maven.org/maven2/io/delta/delta-storage/${DELTA_VERSION}/delta-storage-${DELTA_VERSION}.jar" \
+      --output "/opt/spark/jars/delta-storage-${DELTA_VERSION}.jar"; \
+    echo "f585818d646cb3625b305270ec24f3e6f0b6ea63ed9bac1ae8f340f8faaeae8f  /opt/spark/jars/delta-storage-${DELTA_VERSION}.jar" | sha256sum --check --strict; \
+    if [ -n "$iceberg_artifact" ]; then \
+      curl --fail --show-error --location \
+        "https://repo1.maven.org/maven2/org/apache/iceberg/${iceberg_artifact}/${ICEBERG_VERSION}/${iceberg_artifact}-${ICEBERG_VERSION}.jar" \
+        --output "/opt/spark/jars/${iceberg_artifact}-${ICEBERG_VERSION}.jar"; \
+      echo "${iceberg_sha}  /opt/spark/jars/${iceberg_artifact}-${ICEBERG_VERSION}.jar" | sha256sum --check --strict; \
+    fi
+
 # TLS is the default profile. docker-compose.plain.yml selects conf-plain.
 COPY --chown=spark:spark ./spark-server/conf/spark-defaults.conf $SPARK_HOME/conf/spark-defaults.conf
 COPY --chown=spark:spark ./spark-server/conf-plain/spark-defaults.conf /opt/spark/conf-plain/spark-defaults.conf
+
+# Register the lakehouse formats in both configuration profiles: the Delta
+# extension always, the Iceberg extension and catalog only when this image
+# carries its runtime jar (Spark 4.2 ships without one).
+RUN set -eu; \
+    for conf in "$SPARK_HOME/conf/spark-defaults.conf" /opt/spark/conf-plain/spark-defaults.conf; do \
+      if ls /opt/spark/jars/iceberg-spark-runtime-* >/dev/null 2>&1; then \
+        printf '\n%s\n%s\n%s\n%s\n%s\n' \
+          'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions' \
+          'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+          'spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog' \
+          'spark.sql.catalog.iceberg.type=hadoop' \
+          'spark.sql.catalog.iceberg.warehouse=/data/dest/iceberg' >> "$conf"; \
+      else \
+        printf '\n%s\n%s\n' \
+          'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
+          'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' >> "$conf"; \
+      fi; \
+    done
 COPY --chown=spark:spark ./example_data /data
 COPY --chown=spark:spark ./spark-server/certs/ca.crt /opt/certs/ca.crt
 COPY --chown=spark:spark ./spark-server/certs/cert.crt /opt/certs/cert.crt
