@@ -7,7 +7,9 @@ import { UnknownSchema } from "../schema/schema-model";
 import { validateTableIdentifier } from "../utils/identifiers";
 import { SqlCap } from "../algebra/read/batch-capabilities";
 
+/** @public */
 export type Opts = Record<string, string>;
+/** @public */
 export type ReaderOptionValue = string | number | boolean | bigint;
 
 function nonEmpty(value: string, label: string): string {
@@ -31,6 +33,7 @@ function oneOrManyPaths(paths: string[]): string | string[] {
     return paths.length === 1 ? paths[0]! : paths;
 }
 
+/** @public */
 export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
     private readonly fmt?: string;
     private readonly opts: Opts;

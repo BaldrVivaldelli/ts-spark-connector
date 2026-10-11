@@ -4,12 +4,14 @@ import type {
     OutputModeCap, TriggerCap, CheckpointCap, QueryNameCap, StreamLiftCap, StreamFormatCap
 } from "./write-stream-capabilities";
 
+/** @internal */
 export type BatchWriterAlg<R> =
     WriteCore<R, WBatch> &
     BatchFormatCap<WBatch> &
     BucketSortCap<WBatch> &
     ViewsCap<WBatch>;
 
+/** @internal */
 export type StreamWriterAlg<R> =
     WriteCore<R, WStream> &
     StreamLiftCap<R> &         // ← writeStream(df)

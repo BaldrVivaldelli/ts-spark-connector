@@ -33,10 +33,17 @@ import {
     UsableColumnType,
 } from "../schema/schema-model";
 import type { Aggregation as AggregationShape } from "../schema/schema-transforms";
-import { Columns, makeColumns, NumericValue } from "./typed-column";
+import { Columns, ExprThunk, makeColumns, NumericValue } from "./typed-column";
 
-/** Un *thunk* que construye la expresión `E` del intérprete a partir del álgebra. */
-export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
+/**
+ * Alias of the `ExprThunk` declared in `./typed-column`, kept for compatibility.
+ *
+ * @deprecated Use `TypedColumnExprThunk`; both names describe the same
+ * `(EX: ExprAlg<E>) => E` thunk. This alias will be removed from the root entry
+ * point in the next major release.
+ * @internal
+ */
+export type AggregationExprThunk<E> = ExprThunk<E>;
 
 // ---------------------------------------------------------------------------
 // Aggregation<Alias, T, E>
@@ -51,6 +58,7 @@ export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
  * Implementa la forma estructural mínima `AggregationShape<Alias, T>` de
  * `schema-transforms`, de modo que esta clase concreta y la interfaz que usa la
  * inferencia de schema no puedan divergir.
+ * @public
  */
 export class Aggregation<Alias extends string, T extends ColumnType, E>
     implements AggregationShape<Alias, T>
@@ -81,6 +89,7 @@ export class Aggregation<Alias extends string, T extends ColumnType, E>
 /**
  * Una agregación cuyo alias todavía no se eligió. Se materializa nombrándola con
  * `.as(alias)`, que produce la `Aggregation<Alias, T, E>` final.
+ * @internal
  */
 export class PendingAggregation<T extends ColumnType, E> {
     /** @internal */
@@ -105,23 +114,28 @@ export class PendingAggregation<T extends ColumnType, E> {
  * Referencia a una columna a agregar: o bien un nombre de columna del schema
  * (validado contra `keyof S`), o bien una `TypedColumn<T, E>` ya construida
  * (p. ej. la que produce el accesor `Columns<S, E>` del camino tipado).
+ * @internal
  */
 export type BuildableColumn<E> = { build(EX: ExprAlg<E>): E };
 
+/** @internal */
 export type NumericColumnKey<S extends SchemaShape> = {
     [K in UsableColumnKey<S>]: NonNull<UsableColumnType<S, K>> extends NumericValue
         ? K
         : never;
 }[UsableColumnKey<S>];
 
+/** @internal */
 export type NumericResult<S extends SchemaShape, K extends NumericColumnKey<S>> = Extract<
     NonNull<UsableColumnType<S, K>>,
     NumericValue
 >;
 
+/** @internal */
 export type SumResult<S extends SchemaShape, K extends NumericColumnKey<S>> =
     NumericResult<S, K> extends bigint ? bigint : number | bigint;
 
+/** @internal */
 export type ColRef<
     S extends SchemaShape,
     E,
@@ -154,6 +168,7 @@ function resolve<S extends SchemaShape, E>(ref: ColRef<S, E>, EX: ExprAlg<E>): E
  *
  * COUNT/COUNT DISTINCT se modelan como `bigint`, acorde al BIGINT de Spark. Se
  * usa la función canónica `count_distinct`, no `count(col)`.
+ * @public
  */
 export type AggFactory<S extends SchemaShape, E> = {
     count(): PendingAggregation<bigint, E>;
@@ -168,6 +183,7 @@ export type AggFactory<S extends SchemaShape, E> = {
  * Crea un `AggFactory<S, E>`. Las agregaciones nullables comparten la misma
  * forma (una función agregada de un solo argumento), por lo que se factoriza en
  * `nullableFn`.
+ * @internal
  */
 export function makeAggFactory<S extends SchemaShape, E>(): AggFactory<S, E> {
     const nullableNumberFn = (

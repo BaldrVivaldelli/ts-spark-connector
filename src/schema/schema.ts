@@ -24,7 +24,10 @@
 // Tokens y fuente de verdad token -> tipo TS / token -> DDL
 // ---------------------------------------------------------------------------
 
-/** Tokens de tipo de columna admitidos. */
+/**
+ * Tokens de tipo de columna admitidos.
+ * @public
+ */
 export type TypeToken =
     | "int"
     | "long"
@@ -35,7 +38,10 @@ export type TypeToken =
     | "date"
     | "timestamp";
 
-/** Mapea cada token al tipo de valor TS usado en el schema. */
+/**
+ * Mapea cada token al tipo de valor TS usado en el schema.
+ * @internal
+ */
 export interface TokenToTs {
     int: number;
     long: bigint;
@@ -47,7 +53,10 @@ export interface TokenToTs {
     timestamp: string;
 }
 
-/** Decimal exacto: se expone como string para no introducir redondeo IEEE-754. */
+/**
+ * Decimal exacto: se expone como string para no introducir redondeo IEEE-754.
+ * @public
+ */
 export interface DecimalSpec {
     readonly kind: "decimal";
     readonly precision: number;
@@ -55,12 +64,14 @@ export interface DecimalSpec {
     readonly nullable?: boolean;
 }
 
+/** @public */
 export interface ArraySpec<Element extends FieldSpec = FieldSpec> {
     readonly kind: "array";
     readonly element: Element;
     readonly nullable?: boolean;
 }
 
+/** @public */
 export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldSpec = FieldSpec> {
     readonly kind: "map";
     readonly key: Key;
@@ -68,6 +79,7 @@ export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldS
     readonly nullable?: boolean;
 }
 
+/** @public */
 export interface StructSpec<Fields extends SchemaDef = SchemaDef> {
     readonly kind: "struct";
     readonly fields: Fields;
@@ -78,6 +90,7 @@ export interface StructSpec<Fields extends SchemaDef = SchemaDef> {
  * Mapea cada token a su nombre de tipo DDL de Spark. Es la otra mitad de la
  * fuente de verdad única (junto con `TokenToTs`): el tipo y el DDL derivan de
  * la misma declaración, evitando el drift.
+ * @internal
  */
 export const TOKEN_TO_DDL: Record<TypeToken, string> = {
     int: "INT",
@@ -94,19 +107,34 @@ export const TOKEN_TO_DDL: Record<TypeToken, string> = {
 // Declaración de campos y schema
 // ---------------------------------------------------------------------------
 
-/** Un token sufijado con `?` que marca la columna como nullable. */
+/**
+ * Un token sufijado con `?` que marca la columna como nullable.
+ * @public
+ */
 export type NullableToken = `${TypeToken}?`;
 
-/** Una declaración de campo: un token de tipo, opcionalmente nullable (`?`). */
+/**
+ * Una declaración de campo: un token de tipo, opcionalmente nullable (`?`).
+ * @public
+ */
 export type ComplexSpec = DecimalSpec | ArraySpec | MapSpec | StructSpec;
 
-/** Declaración de campo primitivo o complejo, opcionalmente nullable. */
+/**
+ * Declaración de campo primitivo o complejo, opcionalmente nullable.
+ * @public
+ */
 export type FieldSpec = TypeToken | NullableToken | ComplexSpec;
 
-/** Alias histórico conservado para consumidores que solo usan primitivas. */
+/**
+ * Alias histórico conservado para consumidores que solo usan primitivas.
+ * @public
+ */
 export type FieldToken = TypeToken | NullableToken;
 
-/** Una declaración de schema: mapa nombre de columna -> token de campo. */
+/**
+ * Una declaración de schema: mapa nombre de columna -> token de campo.
+ * @public
+ */
 export interface SchemaDef {
     readonly [name: string]: FieldSpec;
 }
@@ -114,6 +142,7 @@ export interface SchemaDef {
 /**
  * Infiere el tipo TS de un campo, agregando `| null` para los tokens nullables
  * (sufijo `?`). El `?` final marca nullabilidad y se propaga al tipo.
+ * @internal
  */
 export type InferNonNullable<F extends FieldSpec> = F extends `${infer B}?`
     ? B extends TypeToken
@@ -134,6 +163,7 @@ export type InferNonNullable<F extends FieldSpec> = F extends `${infer B}?`
               ? InferNestedSchema<Fields>
               : never;
 
+/** @public */
 export type InferField<F extends FieldSpec> = F extends `${TypeToken}?`
     ? InferNonNullable<F> | null
     : F extends { readonly nullable: true }
@@ -145,12 +175,16 @@ export type InferField<F extends FieldSpec> = F extends `${TypeToken}?`
  * `ArrayType.containsNull` or `MapType.valueContainsNull` for nested values.
  * Model nested values conservatively so the TypeScript row contract never
  * promises non-null where Spark's parsed DDL defaults to nullable.
+ * @internal
  */
 export type InferNestedSchema<D extends SchemaDef> = {
     [K in keyof D]: InferField<D[K]> | null;
 };
 
-/** Infiere el schema de runtime (nombre -> tipo TS) de una declaración de tokens. */
+/**
+ * Infiere el schema de runtime (nombre -> tipo TS) de una declaración de tokens.
+ * @public
+ */
 export type InferSchema<D extends SchemaDef> = { [K in keyof D]: InferField<D[K]> };
 
 // ---------------------------------------------------------------------------
@@ -161,6 +195,7 @@ export type InferSchema<D extends SchemaDef> = { [K in keyof D]: InferField<D[K]
  * Un schema declarado. Lleva la definición de tokens original (para generar el
  * DDL) y, en el sistema de tipos, los tipos de columna inferidos vía el phantom
  * `__schema`.
+ * @public
  */
 export class DeclaredSchema<D extends SchemaDef> {
     /** @internal phantom: nunca se lee en runtime, solo lleva el tipo. */
@@ -195,14 +230,22 @@ export class DeclaredSchema<D extends SchemaDef> {
  * @example
  *   const People = schema({ id: "int", name: "string", age: "int" });
  *   // DeclaredSchema con tipo inferido { id: number; name: string; age: number }
+ * @public
  */
 export function schema<D extends SchemaDef>(def: D): DeclaredSchema<D> {
     return new DeclaredSchema<D>(def);
 }
 
-/** Crea un descriptor DECIMAL exacto, validando los límites de Spark. */
+/**
+ * Marca de nulabilidad que agregan `decimalType`/`arrayType`/`mapType`/`structType` cuando `nullable` es `true`.
+ * @public
+ */
 export type NullableFlag<N extends boolean> = N extends true ? { readonly nullable: true } : object;
 
+/**
+ * Crea un descriptor DECIMAL exacto, validando los límites de Spark.
+ * @public
+ */
 export function decimalType<
     const P extends number,
     const S extends number,
@@ -222,6 +265,7 @@ export function decimalType<
         DecimalSpec & { readonly precision: P; readonly scale: S } & NullableFlag<N>;
 }
 
+/** @public */
 export function arrayType<const Element extends FieldSpec, const N extends boolean = false>(
     element: Element,
     nullable?: N,
@@ -230,6 +274,7 @@ export function arrayType<const Element extends FieldSpec, const N extends boole
         ArraySpec<Element> & NullableFlag<N>;
 }
 
+/** @public */
 export function mapType<
     const Key extends FieldSpec,
     const Value extends FieldSpec,
@@ -244,6 +289,7 @@ export function mapType<
         MapSpec<Key, Value> & NullableFlag<N>;
 }
 
+/** @public */
 export function structType<const Fields extends SchemaDef, const N extends boolean = false>(
     fields: Fields,
     nullable?: N,

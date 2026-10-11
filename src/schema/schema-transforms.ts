@@ -37,6 +37,7 @@ export type { AmbiguousColumn } from "./schema-model";
  * Postcondición: el schema resultante contiene *exactamente* las claves `K`
  * con sus tipos originales. Como `K extends keyof S`, cualquier nombre que no
  * pertenezca a `S` no compila en el llamador (Requirement 5.1, 5.2).
+ * @internal
  */
 export type Selected<S extends SchemaShape, K extends keyof S> = {
     [P in K]: S[P];
@@ -51,6 +52,7 @@ export type Selected<S extends SchemaShape, K extends keyof S> = {
  *
  * Se elimina la clave de origen y se agrega la de destino con el mismo tipo;
  * el resto de columnas queda intacto (Requirement 5.4).
+ * @internal
  */
 export type Renamed<
     S extends SchemaShape,
@@ -68,6 +70,7 @@ export type Renamed<
  * Si `Name` ya existía, su tipo se reemplaza por `T`; si no, se agrega. El
  * `Omit` previo garantiza el reemplazo limpio incluso cuando la clave ya estaba
  * presente (Requirement 5.3).
+ * @internal
  */
 export type WithColumn<
     S extends SchemaShape,
@@ -81,6 +84,7 @@ export type WithColumn<
 
 /**
  * Schema tras eliminar las columnas nombradas en `K` (Requirement 5.5).
+ * @internal
  */
 export type Dropped<S extends SchemaShape, K extends keyof S> = Prettify<
     Omit<S, K>
@@ -101,6 +105,7 @@ export type Dropped<S extends SchemaShape, K extends keyof S> = Prettify<
  * concreto que la implementa (`count`/`sum`/`avg`/… con su `.as(alias)`) se
  * crea en `src/typed/aggregations.ts`. Cualquier clase que exponga un
  * `readonly __out: { [Alias]: Out }` es asignable a este tipo.
+ * @internal
  */
 export interface Aggregation<
     Alias extends string = string,
@@ -117,6 +122,7 @@ export interface Aggregation<
  *
  * Postcondición: `dom(resultado) = K ∪ { alias | agg ∈ A }`. El conjunto de
  * claves no depende del orden de las claves de agrupación (Requirement 5.6).
+ * @internal
  */
 export type Aggregated<
     S extends SchemaShape,
@@ -137,9 +143,12 @@ export type Aggregated<
  * El join en sí compila; el error aparece solo *donde se usa mal* la columna
  * ambigua. El usuario lo resuelve renombrando antes del join
  * (`withColumnRenamed`) o accediendo por lado (Requirement 6.2, 6.3).
+ * @internal
  */
 export type NullableColumn<T> = T extends ColumnType ? T | null : T;
+/** @internal */
 export type JoinName<J extends string> = Uppercase<J>;
+/** @internal */
 export type IsLeftNullable<J extends string> = JoinName<J> extends
     | "RIGHT"
     | "RIGHT_OUTER"
@@ -148,6 +157,7 @@ export type IsLeftNullable<J extends string> = JoinName<J> extends
     | "FULL_OUTER"
     ? true
     : false;
+/** @internal */
 export type IsRightNullable<J extends string> = JoinName<J> extends
     | "LEFT"
     | "LEFT_OUTER"
@@ -162,6 +172,7 @@ export type IsRightNullable<J extends string> = JoinName<J> extends
  * tipo de join. `LEFT_SEMI`/`LEFT_ANTI` solo devuelven las columnas del lado
  * izquierdo, tal como hace Spark. Las colisiones de los demás joins siguen
  * marcadas como ambiguas y nunca se vuelven columnas utilizables.
+ * @internal
  */
 export type JoinedForSingle<
     L extends SchemaShape,
@@ -188,6 +199,7 @@ export type JoinedForSingle<
  * conditional, `JoinTypeInput` was treated as a single value and both sides
  * incorrectly remained non-null even though the runtime value could be an
  * outer join (or could omit the right side for semi/anti joins).
+ * @internal
  */
 export type JoinedFor<
     L extends SchemaShape,
@@ -195,7 +207,10 @@ export type JoinedFor<
     J extends string,
 > = J extends unknown ? JoinedForSingle<L, R, J> : never;
 
-/** INNER join por defecto, conservado como alias de compatibilidad. */
+/**
+ * INNER join por defecto, conservado como alias de compatibilidad.
+ * @internal
+ */
 export type Joined<L extends SchemaShape, R extends SchemaShape> = JoinedFor<
     L,
     R,

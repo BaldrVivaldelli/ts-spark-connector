@@ -36,8 +36,9 @@ Spark's plaintext backend loopback-only on port 15003.
 - When editing README examples, imports should be from the package name (not `./src/...`).
 
 ## Compatibility
-- Spark Connect protocol descriptors remain pinned to 4.0.4; E2E covers server
-  versions 4.0.0 and 4.0.4.
+- Spark Connect protocol descriptors remain pinned to 4.0.4 (the oldest fully
+  supported line); the E2E matrix covers server versions 4.0.0, 4.0.4, 4.1.3
+  and 4.2.0, with the newer servers verified behaviorally.
 - Do not claim another version until its full behavior suite is green in the CI
   compatibility matrix.
 - TypeScript 7 is the build compiler. The aliased TypeScript 6 package exists
@@ -55,3 +56,8 @@ Spark's plaintext backend loopback-only on port 15003.
 - Repo uses semantic-release. Use Conventional Commits:
     - `fix: ...` / `feat: ...` / `docs: ...` etc.
 - Do not manually bump versions in commits unless the release tooling requires it.
+- `main` is the only release branch: once the unit (Node 22/24),
+  publishable-tarball and Spark E2E jobs are green on a push to `main`,
+  semantic-release publishes to npm with provenance and tags the release, then
+  `scripts/observe-release.mjs` installs the exact published version and
+  re-checks it. `latest` is the only dist-tag that receives releases.

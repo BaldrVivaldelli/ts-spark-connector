@@ -32,7 +32,10 @@ import {
 } from "../schema/schema-model";
 import { NullsOrder, SortDirection, SortOrder } from "../types";
 
-/** Un *thunk* que construye la expresión `E` del intérprete a partir del álgebra. */
+/**
+ * Un *thunk* que construye la expresión `E` del intérprete a partir del álgebra.
+ * @internal
+ */
 export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
 
 /**
@@ -40,6 +43,7 @@ export type ExprThunk<E> = (EX: ExprAlg<E>) => E;
  * por un join se excluyen del mapped type: existen en el schema resultante para
  * informar el conflicto, pero no se pueden usar como si fueran columnas
  * resueltas. Las columnas numéricas exponen además las operaciones aritméticas.
+ * @public
  */
 export type Columns<S extends SchemaShape, E> = {
     readonly [K in UsableColumnKey<S>]: [NonNull<UsableColumnType<S, K>>] extends [NumericValue]
@@ -47,11 +51,15 @@ export type Columns<S extends SchemaShape, E> = {
         : TypedColumn<UsableColumnType<S, K>, E>;
 };
 
+/** @public */
 export type NumericValue = number | bigint;
+/** @internal */
 export type NumericBase<T> = Extract<NonNull<T>, NumericValue>;
 
+/** @internal */
 export type NumericOperand<E> = NumericValue | TypedColumn<NumericValue | null, E>;
 
+/** @internal */
 export type NumericOperandValue<O> = O extends TypedColumn<infer V, infer _E>
     ? Extract<NonNull<V>, NumericValue>
     : O extends bigint
@@ -64,6 +72,7 @@ export type NumericOperandValue<O> = O extends TypedColumn<infer V, infer _E>
               : number
         : never;
 
+/** @internal */
 export type PromotedNumeric<L, O> = number extends NumericBase<L>
     ? number
     : NumericOperandValue<O> extends bigint
@@ -72,6 +81,7 @@ export type PromotedNumeric<L, O> = number extends NumericBase<L>
         ? number
         : number | bigint;
 
+/** @internal */
 export type Coalesced<T extends ColumnType, U extends ColumnType> = null extends T
     ? null extends U
         ? NonNull<T> | null
@@ -101,6 +111,7 @@ export function makeColumns<S extends SchemaShape, E>(planId?: number): Columns<
  * Una expresión booleana usable en `filter`, componible con `and`/`or`. Como el
  * resto de builders, no construye nada hasta que se la interpreta con un
  * `ExprAlg<E>` concreto.
+ * @public
  */
 export class Condition<E> {
     /**
@@ -134,6 +145,7 @@ export class Condition<E> {
  * Clave de orden producida por `TypedColumn.asc`/`desc`, consumida por
  * `orderBy`. Lleva el thunk de la expresión más la dirección y el orden de
  * nulos elegidos.
+ * @public
  */
 export class SortKey<E> {
     /** @internal */
@@ -164,6 +176,7 @@ export class SortKey<E> {
  * columna (o bien otra columna de tipo compatible), de modo que, por ejemplo,
  * `c.age.gt("x")` se rechaza en compilación cuando `age` es numérica
  * (Requirement 8.3).
+ * @public
  */
 export class TypedColumn<T extends ColumnType, E> {
     /**
@@ -273,6 +286,7 @@ export class TypedColumn<T extends ColumnType, E> {
  * entre dos operandos posiblemente nulos es a su vez nullable (`null` se propaga
  * en Spark). Además conserva/promueve la familia numérica que realmente devuelve
  * Spark; la división siempre produce `number`.
+ * @public
  */
 export class NumericColumn<T extends NumericValue | null, E> extends TypedColumn<T, E> {
     /**

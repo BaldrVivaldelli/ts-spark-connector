@@ -152,8 +152,8 @@ export type {
     WindowSpec,
 } from "./types";
 export type {
-    FrameBoundary as WindowFrameBoundary,
     FrameType,
+    WindowFrameBoundary,
 } from "./types/window";
 
 export {
@@ -247,7 +247,7 @@ export type {
     AggFactory,
     BuildableColumn,
     ColRef,
-    ExprThunk as AggregationExprThunk,
+    AggregationExprThunk,
     NumericColumnKey,
     NumericResult,
     SumResult,

@@ -58,7 +58,10 @@ TypeScript API. Spark `BIGINT` is exposed as `bigint`; dates and timestamps as
 ISO strings; decimals as exact strings; arrays, maps, and structs as recursive
 JavaScript collections. Because Spark DDL does not preserve nested nullability,
 array elements, map values, and struct fields are typed conservatively as
-possibly null.
+possibly null. File sources (CSV, JSON, Parquet, ORC, Avro) always report
+their columns as nullable, so a column declared non-null is verified against
+the data instead: `collect()` decodes it as long as no row carries a null and
+throws a schema mismatch naming the column otherwise.
 
 ```ts
 import {
@@ -105,9 +108,11 @@ console.log(explain);
 
 ## Spark Connect server
 
-The repo includes a version-parameterized Spark 4.0.x Docker setup under
-`spark-server/`. It defaults to 4.0.4, starts a TLS-enabled endpoint, and uses
-the development CA shown in the quick start.
+The repo includes a version-parameterized Spark 4.x Docker setup under
+`spark-server/`. It defaults to 4.0.4, builds every version covered by the E2E
+matrix (4.0.0, 4.0.4, 4.1.3 and 4.2.0) through `SPARK_VERSION` and
+`SPARK_AVRO_SHA256`, starts a TLS-enabled endpoint, and uses the development CA
+shown in the quick start.
 
 ```bash
 docker compose up --build
@@ -248,8 +253,7 @@ npm run examples:run
 ```
 
 See [`docs/examples/README.md`](docs/examples/README.md) for the complete setup.
-Upgrade guidance and the canary promotion contract live in
-[`MIGRATION.md`](MIGRATION.md).
+Upgrade guidance and the release flow live in [`MIGRATION.md`](MIGRATION.md).
 
 ## Connection resiliency
 
@@ -306,8 +310,10 @@ await session.conf.unset("spark.sql.shuffle.partitions");
 
 The currently verified compatibility targets are:
 
-- Vendored Spark Connect protocol descriptors from 4.0.4
-- Spark Connect servers 4.0.0 and 4.0.4 in the Docker E2E matrix
+- Vendored Spark Connect protocol descriptors from 4.0.4 (pinned to the oldest
+  fully supported line; newer servers are verified behaviorally)
+- Spark Connect servers 4.0.0, 4.0.4, 4.1.3 and 4.2.0 covered by the Docker E2E
+  matrix
 - Scala 2.13 artifacts on the server image
 - Node.js 22 and 24
 - TypeScript 7 for compilation; TypeScript 6 API compatibility only for
@@ -341,15 +347,21 @@ smoke-tested from the packed tarball, together with NodeNext declarations and
 all `docs/examples`. Only the root import (`ts-spark-connector`) is a supported
 export; deep imports are intentionally blocked by `package.json#exports`.
 
-`npm run api:check` compares declarations with the committed API Extractor
-[report](etc/ts-spark-connector.api.md). `npm run package:lint` validates the
+`npm run api:check` compares the `@public` declarations with the committed API
+Extractor [report](etc/ts-spark-connector.public.api.md); declarations
+documented `@internal` are exported for typing convenience only and are not
+part of that contract. `npm run package:lint` validates the
 packed tarball with Publint and Are The Types Wrong, and
 `npm run test:coverage` enforces the current coverage baseline.
 
 CI publishes a JUnit report, a machine-readable JSON result and a Markdown
-summary for every Spark E2E matrix entry. Canary releases use the npm `next`
-dist-tag and must pass the automated observation and 24-hour soak gate before a
-stable release is eligible.
+summary for every Spark E2E matrix entry. Releases are cut from `main` only:
+when a Conventional Commit lands there and the unit (Node.js 22 and 24),
+publishable-tarball and Spark E2E jobs are green, semantic-release publishes
+the package to npm with provenance and tags the release, and the workflow then
+installs that exact version from the registry and re-runs the CommonJS, ESM,
+TypeScript 7 declaration and production-audit checks against it. There is no
+prerelease channel: `latest` is the only dist-tag that receives releases.
 
 ## License
 

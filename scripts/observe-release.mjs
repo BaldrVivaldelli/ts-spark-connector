@@ -34,31 +34,46 @@ const run = (command, args, options = {}) => {
 };
 
 // registry.npmjs.org sits behind a CDN, so a packument read moments after a publish
-// can still come from a stale edge cache and 404 on the brand new dist-tag.
+// can still come from a stale edge cache and 404 on the brand new version. How long
+// that lasts is up to the CDN, not us: 3.0.0 was still invisible after eight counted
+// attempts (~74 s), so each registry read retries against a wall-clock budget instead.
 const retryableRegistryFailure =
     /E404|No match found|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|registry returned 5\d\d/iu;
-const registryAttempts = Number(process.env.CANARY_REGISTRY_ATTEMPTS ?? 8);
+const registryTimeoutMs = Number(process.env.RELEASE_OBSERVE_TIMEOUT_MS ?? 10 * 60_000);
 assert.ok(
-    Number.isInteger(registryAttempts) && registryAttempts >= 1,
-    "CANARY_REGISTRY_ATTEMPTS must be a positive integer",
+    Number.isInteger(registryTimeoutMs) && registryTimeoutMs >= 1,
+    "RELEASE_OBSERVE_TIMEOUT_MS must be a positive integer of milliseconds",
 );
 
 const sleep = milliseconds => {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 };
 
+const seconds = milliseconds => `${Math.round(milliseconds / 100) / 10}s`;
+
 const runAgainstRegistry = (command, args, options = {}) => {
+    const startedAt = Date.now();
     for (let attempt = 1; ; attempt += 1) {
         try {
             return run(command, args, options);
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error);
-            if (attempt >= registryAttempts || !retryableRegistryFailure.test(detail)) {
+            if (!retryableRegistryFailure.test(detail)) {
                 throw error;
             }
-            const backoff = Math.min(2 ** attempt * 1_000, 15_000);
+            const elapsed = Date.now() - startedAt;
+            if (elapsed >= registryTimeoutMs) {
+                process.stderr.write(
+                    `Registry read still failing after ${seconds(elapsed)} (attempt ${attempt}); giving up\n`,
+                );
+                throw error;
+            }
+            // Exponential backoff capped at 15 s, and never past the deadline, so the
+            // last attempt runs when the budget expires rather than some seconds early.
+            const backoff = Math.min(2 ** attempt * 1_000, 15_000, registryTimeoutMs - elapsed);
             process.stderr.write(
-                `Registry read failed (attempt ${attempt}/${registryAttempts}); retrying in ${backoff / 1_000}s\n`,
+                `Registry read failed (attempt ${attempt}, ${seconds(elapsed)} elapsed of ` +
+                `${seconds(registryTimeoutMs)}); retrying in ${seconds(backoff)}\n`,
             );
             sleep(backoff);
         }

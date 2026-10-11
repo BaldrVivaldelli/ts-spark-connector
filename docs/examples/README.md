@@ -35,5 +35,5 @@ docker compose down --volumes
 ```
 
 `npm run typecheck:examples` validates every example without requiring a
-running Spark server. CI additionally executes `join.ts` against both supported
-Spark versions.
+running Spark server. CI additionally executes `join.ts` against every Spark
+version covered by the E2E matrix (4.0.0, 4.0.4, 4.1.3 and 4.2.0).

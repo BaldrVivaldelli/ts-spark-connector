@@ -33,7 +33,7 @@ describe("trace interpreters", () => {
         let dataframe = TraceDFAlg.relation("csv", "/input");
         expect(TraceDFAlg.relation("json", ["/a", "/b"], {}, "id INT").label)
             .toContain(",schema");
-        dataframe = TraceDFAlg.withPlanId(dataframe, 10);
+        dataframe = TraceDFAlg.withPlanId!(dataframe, 10);
         dataframe = TraceDFAlg.select(dataframe, [col, coalesced]);
         dataframe = TraceDFAlg.filter(dataframe, binary);
         dataframe = TraceDFAlg.withColumn(dataframe, "computed", alias);
@@ -41,7 +41,7 @@ describe("trace interpreters", () => {
             dataframe,
             TraceDFAlg.sql("SELECT 1"),
             binary,
-            "inner",
+            "INNER",
         );
         const grouped = TraceDFAlg.groupBy(dataframe, [col]);
         dataframe = TraceDFAlg.agg(grouped, { total: call });
@@ -70,13 +70,8 @@ describe("trace interpreters", () => {
         const stream = TraceDFAlg.readStream("rate", { rowsPerSecond: "1" });
         expect(streamWithoutOptions.label).not.toContain(",opts");
         dataframe = TraceDFAlg.withWatermark(stream, col, "1 minute");
-        expect(TraceDFAlg.withTrigger(dataframe, { once: true }).label).toContain("once");
-        expect(TraceDFAlg.withTrigger(dataframe, { processingTimeMs: 500 }).label)
-            .toContain("500ms");
-        expect(TraceDFAlg.withTrigger(dataframe, {}).label).toContain("withTrigger()");
-        dataframe = TraceDFAlg.withOutputMode(dataframe, "append");
 
-        expect(toJSON(dataframe)).toContain("outputMode");
+        expect(toJSON(dataframe)).toContain("withWatermark(1 minute)");
     });
 
     it("serializes shared and quoted trace nodes to Mermaid exactly once", () => {
@@ -342,5 +337,19 @@ describe("protobuf writer interpreter", () => {
                 trigger: invalid,
             },
         })).toThrow(/invalid streaming trigger/i);
+    });
+});
+
+describe("trace writer nodes with absent optional collections", () => {
+    it("adds options and partition columns to a minimal node and renders it", () => {
+        const node: Parameters<typeof writerToClientASTMermaid>[0] = {
+            kind: "batchWrite",
+            child: {},
+            target: { kind: "none" },
+        };
+        expect(TraceWriterAlg.option(node, "key", "value").options).toEqual({ key: "value" });
+        expect(TraceWriterAlg.options(node, { other: "value" }).options).toEqual({ other: "value" });
+        expect(TraceWriterAlg.partitionBy(node, "day").partitionBy).toEqual(["day"]);
+        expect(writerToClientASTMermaid(node)).toContain("partitionBy=-");
     });
 });

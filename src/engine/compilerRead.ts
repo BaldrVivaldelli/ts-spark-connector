@@ -693,23 +693,15 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
     }),
 };
 
-export const ProtoExec: DFExec<unknown> = {
-    async collect(root, session) {
+export const ProtoExec: DFExec<ProtoRel> = {
+    async collect(root: ProtoRel, session: SparkSession) {
         const executor = await applyPendingAnalyzeActions(root, session);
-        // SparkConnectExecutor is shared with the client-side LogicalPlan
-        // interpreter, but at this boundary it transports an already-compiled
-        // protobuf relation. The executor never inspects the plan shape.
-        return executor.execute(
-            root as unknown as Parameters<SparkConnectExecutor["execute"]>[0]
-        );
+        return executor.execute(root);
     },
 
     async explain(root: ProtoRel, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<string> {
         const executor = await applyPendingAnalyzeActions(root, session);
-        return executor.explain(
-            root as unknown as Parameters<SparkConnectExecutor["explain"]>[0],
-            mode,
-        );
+        return executor.explain(root, mode);
     }
 };
 

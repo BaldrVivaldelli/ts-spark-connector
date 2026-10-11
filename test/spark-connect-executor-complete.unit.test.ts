@@ -5,7 +5,7 @@ import {
     type StreamingQueryHandle,
 } from "../src/client/sparkClient";
 import { SparkConnectExecutor } from "../src/client/sparkConnectExecutor";
-import type { LogicalPlan } from "../src/engine/logicalPlan";
+import type { ProtoRel } from "../src/engine/compilerRead";
 import type { ProtoWriteRoot } from "../src/write/compilerWrite";
 
 function handle(serverSideSessionId?: string): StreamingQueryHandle {
@@ -39,7 +39,7 @@ function fakeSession(serverId?: string) {
     };
 }
 
-const plan = { type: "Sql", query: "SELECT 1" } as LogicalPlan;
+const plan: ProtoRel = { sql: { query: "SELECT 1" } };
 const batchRoot: ProtoWriteRoot = {
     child: plan,
     writerKind: "batch",

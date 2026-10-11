@@ -98,6 +98,7 @@ describe("SparkSession complete behavior", () => {
         const session = SparkSession.builder().getOrCreate();
         expect(() => session.observeServerSideSessionId(null)).not.toThrow();
         expect(() => session.observeServerSideSessionId({})).not.toThrow();
+        expect(() => session.observeServerSideSessionId({ session_id: "" })).not.toThrow();
         expect(() => session.observeServerSideSessionId({
             sessionId: session.getSessionId(),
             serverSideSessionId: "",

@@ -1,5 +1,6 @@
 import type * as grpc from "@grpc/grpc-js";
 
+/** @public */
 export type SparkConnectErrorOptions = {
     operation: string;
     code?: number;
@@ -12,17 +13,26 @@ export type SparkConnectErrorOptions = {
     cause?: unknown;
 };
 
-/** Structured payload returned by Spark Connect's FetchErrorDetails RPC. */
+/**
+ * Structured payload returned by Spark Connect's FetchErrorDetails RPC.
+ * @public
+ */
 export type SparkErrorDetails = Record<string, unknown>;
 
-/** google.rpc.ErrorInfo carried inside grpc-status-details-bin. */
+/**
+ * google.rpc.ErrorInfo carried inside grpc-status-details-bin.
+ * @public
+ */
 export type SparkGrpcErrorInfo = {
     reason?: string;
     domain?: string;
     metadata: Record<string, string>;
 };
 
-/** Error raised by a Spark Connect RPC with stable transport context attached. */
+/**
+ * Error raised by a Spark Connect RPC with stable transport context attached.
+ * @public
+ */
 export class SparkConnectError extends Error {
     readonly operation: string;
     readonly code?: number;

@@ -3,15 +3,13 @@
 
 
 import {ExprAlg, LiteralValue} from "../algebra/read";
-import {NullsOrder, SortDirection, WindowSpec} from "../types";
+import {FrameBoundary, NullsOrder, SortDirection, WindowSpec} from "../types";
 
-export type FrameBoundary =
-    | { type: "UnboundedPreceding" }
-    | { type: "UnboundedFollowing" }
-    | { type: "CurrentRow" }
-    | { type: "ValuePreceding"; value: number }
-    | { type: "ValueFollowing"; value: number };
+// `FrameBoundary` used to be declared twice (here and in ../types/window). The
+// window frame boundary that `WindowSpec` uses is the single declaration now.
+export type { FrameBoundary };
 
+/** @public */
 export type EBuilder = {
     build<E>(EX: ExprAlg<E>): E;
 
@@ -52,6 +50,7 @@ const toE =
                     ? EX.col(x)
                     : EX.lit(x);
 
+/** @public */
 export type SortKeyBuilder = <E>(EX: ExprAlg<E>) => { expr: E; direction: SortDirection; nulls?: NullsOrder };
 
 const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
@@ -88,37 +87,47 @@ const EB = (f: <E>(EX: ExprAlg<E>) => E): EBuilder => {
     };
 };
 
+/** @public */
 export function call(name: string, args: (EBuilder | string | number | boolean)[]): EBuilder {
     return EB(EX => EX.call(name, args.map(arg => toE(arg)(EX))));
 }
 
+/** @public */
 export const map_keys = (mapCol: EBuilder): EBuilder =>
     call("map_keys", [mapCol]);
 
+/** @public */
 export const map_values = (mapCol: EBuilder): EBuilder =>
     call("map_values", [mapCol]);
 
+/** @public */
 export const elementAt = (mapCol: EBuilder, key: EBuilder | string | number): EBuilder =>
     call("element_at", [mapCol, key]);
+/** @public */
 export function split(input: EBuilder, delimiter: string | EBuilder): EBuilder {
     return call("split", [input, delimiter]);
 }
 
+/** @public */
 export function getField(structCol: EBuilder, field: string): EBuilder {
     return EB(EX => EX.getField(structCol.build(EX), field));
 }
 
+/** @public */
 export function to_json(expr: EBuilder): EBuilder {
     return EB(EX => EX.to_json(expr.build(EX)));
 }
 
+/** @public */
 export function from_json(jsonExpr: EBuilder, schema: string): EBuilder {
     return EB(EX => EX.from_json(jsonExpr.build(EX), schema));
 }
+/** @public */
 export function struct(...fields: EBuilder[]): EBuilder {
     return call("struct", fields);
 }
 
+/** @public */
 export function getItem(collection: EBuilder, key: EBuilder | string | number): EBuilder {
     return EB(EX =>
         EX.getItem(
@@ -130,33 +139,47 @@ export function getItem(collection: EBuilder, key: EBuilder | string | number): 
     );
 }
 
+/** @public */
 export function explode(col: EBuilder | string): EBuilder {
     return EB(EX => EX.explode(toE(col)(EX)));
 }
 
+/** @public */
 export function posexplode(col: EBuilder | string): EBuilder {
     return EB(EX => EX.posexplode(toE(col)(EX)));
 }
 
+/** @public */
 export function isNull(x: EBuilder | string): EBuilder {
     return EB(EX => EX.isNull(toE(x)(EX)));
 }
 
+/** @public */
 export function isNotNull(x: EBuilder | string): EBuilder {
     return EB(EX => EX.isNotNull(toE(x)(EX)));
 }
+/** @public */
 export function coalesce(...xs: Array<EBuilder | string | number | boolean>): EBuilder {
     return EB(EX => EX.coalesce(xs.map(x => toE(x)(EX))));
 }
 
+/** @public */
 export const col = (name: string): EBuilder => EB(EX => EX.col(name));
+/** @public */
 export const lit = (v: LiteralValue): EBuilder => EB(EX => EX.lit(v));
 
+/**
+ * Untyped `when(...).when(...).otherwise(...)` chain returned by `when()`.
+ * Exported as `ExpressionCaseChain`; it is distinct from `TypedCaseChain`, the
+ * schema-aware chain produced by `typedWhen()`.
+ * @public
+ */
 export type CaseChain = {
     when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain;
     otherwise(val: EBuilder | string | number | boolean): EBuilder;
 };
 
+/** @public */
 export function when(cond: EBuilder, val: EBuilder | string | number | boolean): CaseChain {
     // acumulamos ramas en forma inmutable
     const branches: Array<{ when: EBuilder; then: EBuilder }> = [
@@ -177,6 +200,7 @@ export function when(cond: EBuilder, val: EBuilder | string | number | boolean):
     return make(branches);
 }
 
+/** @public */
 export const Window = {
     partitionBy: (...keys: (string | EBuilder)[]) => ({
         orderBy: (...ords: Array<string | EBuilder | SortKeyBuilder>) => ({

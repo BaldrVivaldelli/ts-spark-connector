@@ -2,6 +2,7 @@ import { DFCore } from "./df-core";
 import {CacheCap, DescribeCap, HintCap, RepartitionCap, SamplingCap, SqlCap, SummaryCap} from "./batch-capabilities";
 
 // Caps "batch" por defecto (lo que ya tenías)
+/** @internal */
 export type DFBatchCaps<R, E, G> =
     & DFCore<R, E, G>
     & CacheCap<R>
@@ -13,5 +14,6 @@ export type DFBatchCaps<R, E, G> =
     & SummaryCap<R, E>;
 
 // DFAlg abierto: le podés inyectar categorías nuevas sin tocar este archivo
+/** @internal */
 export type DFAlg<R, E, G = unknown, ExtraCaps = {}> =
     DFBatchCaps<R, E, G> & ExtraCaps;

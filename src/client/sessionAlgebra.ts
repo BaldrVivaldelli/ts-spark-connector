@@ -3,6 +3,7 @@ import {SqlCap} from "../algebra/read/batch-capabilities";
 import {StreamingMark, StreamingReadCap} from "../algebra/read";
 import { UnknownSchema } from "../schema/schema-model";
 
+/** @internal */
 export interface SessionAlgebra {
     sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
     table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;

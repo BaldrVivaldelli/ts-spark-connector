@@ -1,9 +1,10 @@
 # Local Spark Connect server
 
 The repository ships a Dockerized Spark Connect server for development and
-end-to-end tests. It defaults to **Apache Spark 4.0.4** and CI also exercises
-**4.0.0** for backwards compatibility, always with the matching Scala 2.13
-Avro artifact. TLS is enabled by default on port `15002`.
+end-to-end tests. It defaults to **Apache Spark 4.0.4**; the CI E2E matrix also
+exercises **4.0.0**, **4.1.3** and **4.2.0**, always with the matching Scala
+2.13 Avro artifact (the version/checksum table lives in
+[`TESTING.md`](../TESTING.md)). TLS is enabled by default on port `15002`.
 
 Spark Connect 4.0.x exposes a plaintext gRPC listener. The container therefore
 binds Spark only to `127.0.0.1:15003` and uses HAProxy to terminate TLS/ALPN
@@ -42,12 +43,13 @@ From the repository root:
 docker compose up --build
 ```
 
-The default uses Spark 4.0.4. To select the backwards-compatibility matrix
-entry instead:
+The default uses Spark 4.0.4. To select another matrix entry, pass its version
+and the SHA-256 of the matching `spark-avro_2.13` jar from the table in
+`TESTING.md`, for example:
 
 ```bash
-SPARK_VERSION=4.0.0 \
-SPARK_AVRO_SHA256=083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709 \
+SPARK_VERSION=4.2.0 \
+SPARK_AVRO_SHA256=4c186cedc03cbe4ee356a94b32232b347ef48611c3209400b3a77e4fe4abff4f \
 docker compose up --build
 ```
 

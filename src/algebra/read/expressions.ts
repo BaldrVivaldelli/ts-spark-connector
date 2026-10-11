@@ -1,7 +1,9 @@
 import { NullsOrder, SortDirection, WindowSpec } from "../../types";
 
+/** @internal */
 export type LiteralValue = string | number | boolean | bigint | null;
 
+/** @internal */
 export interface ExprAlg<E> {
     col(name: string, planId?: number): E;
     lit(v: LiteralValue): E;

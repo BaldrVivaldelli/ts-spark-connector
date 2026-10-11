@@ -56,8 +56,12 @@ export function assertRpcResponseSessionIntegrity(
     } | null;
     const expectedSessionId = request.session_id;
     const actualSessionId = carrier?.session_id ?? carrier?.sessionId;
+    // proto3 serializes an unset string as "" and proto-loader materializes that
+    // default, so an empty id (FetchErrorDetailsResponse never sets one) is
+    // "absent", not a foreign session.
     if (
         actualSessionId !== undefined
+        && actualSessionId !== ""
         && typeof expectedSessionId === "string"
         && actualSessionId !== expectedSessionId
     ) {

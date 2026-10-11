@@ -3,7 +3,6 @@ import { createSparkSession, SparkSession } from "../src/client/session";
 import { getClientReferenceCount, sparkGrpcClient } from "../src/client/sparkClient";
 import { SparkConnectExecutor } from "../src/client/sparkConnectExecutor";
 import { SparkConnectError } from "../src/client/errors";
-import type { LogicalPlan } from "../src/engine/logicalPlan";
 
 describe("SparkSession remote configuration", () => {
     afterEach(() => vi.restoreAllMocks());
@@ -184,7 +183,7 @@ describe("SparkSession remote configuration", () => {
             server_side_session_id: "server-session-explain",
         }));
 
-        await expect(SparkConnectExecutor.for(session).explain({} as LogicalPlan, "simple"))
+        await expect(SparkConnectExecutor.for(session).explain({}, "simple"))
             .resolves.toBe("== Physical Plan ==");
         expect(session.getServerSideSessionId()).toBe("server-session-explain");
         expect(explain).toHaveBeenCalledTimes(1);

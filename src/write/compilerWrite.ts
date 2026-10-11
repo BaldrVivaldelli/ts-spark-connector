@@ -108,7 +108,7 @@ function appendWriterOptions<T extends ProtoWriterNode>(
 ): T {
     return updateWriterSpec(writer, {
         options: {
-            ...(writer.spec.options ?? {}),
+            ...writer.spec.options,
             ...options,
         },
     });
@@ -140,7 +140,7 @@ const protoWritingAlg = {
 
     partitionBy<T extends ProtoWriterNode>(writer: T, ...columns: string[]): T {
         return updateWriterSpec(writer, {
-            partitionBy: [...(writer.spec.partitionBy ?? []), ...columns],
+            partitionBy: [...writer.spec.partitionBy, ...columns],
         });
     },
 
@@ -179,7 +179,7 @@ const protoWritingAlg = {
             ...writer,
             spec: {
                 ...writer.spec,
-                sortBy: [...(writer.spec.sortBy ?? []), col, ...cols],
+                sortBy: [...writer.spec.sortBy, col, ...cols],
             },
         });
     },
@@ -264,7 +264,7 @@ function toStreamTriggerV1(trigger?: StreamTriggerShape): ProtoMessage | undefin
 
     const kind = ("kind" in trigger ? trigger.kind : undefined)?.toLowerCase();
     if (kind === "processingtime") {
-        const intervalMs = Number((trigger as { intervalMs?: number }).intervalMs ?? 0);
+        const intervalMs = Number((trigger as { intervalMs?: number }).intervalMs);
         if (Number.isFinite(intervalMs) && intervalMs > 0) {
             return { processing_time_interval: `${intervalMs} milliseconds` };
         }
@@ -274,7 +274,7 @@ function toStreamTriggerV1(trigger?: StreamTriggerShape): ProtoMessage | undefin
     }
     if (kind === "continuous") {
         const checkpointIntervalMs = Number(
-            (trigger as { checkpointIntervalMs?: number }).checkpointIntervalMs ?? 0
+            (trigger as { checkpointIntervalMs?: number }).checkpointIntervalMs
         );
         if (Number.isFinite(checkpointIntervalMs) && checkpointIntervalMs > 0) {
             return { continuous_checkpoint_interval: `${checkpointIntervalMs} milliseconds` };
@@ -295,11 +295,11 @@ function appendIfDefined(
 }
 
 function buildStreamingWriteOperation(root: ProtoWriteRoot, input: ProtoRel): ProtoMessage {
-    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+    const spec = root.spec;
     const operation: ProtoMessage = {
         input,
-        options: spec.options ?? {},
-        partitioning_column_names: spec.partitionBy ?? [],
+        options: spec.options,
+        partitioning_column_names: spec.partitionBy,
     };
 
     appendIfDefined(operation, "format", spec.format);
@@ -320,13 +320,13 @@ function buildStreamingWriteOperation(root: ProtoWriteRoot, input: ProtoRel): Pr
 }
 
 function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
-    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+    const spec = root.spec;
     const operation: ProtoMessage = {
         input: root.child,
         mode: toSaveModeV1(spec.mode),
-        options: spec.options ?? {},
-        partitioning_columns: spec.partitionBy ?? [],
-        sort_column_names: spec.sortBy ?? [],
+        options: spec.options,
+        partitioning_columns: spec.partitionBy,
+        sort_column_names: spec.sortBy,
     };
 
     appendIfDefined(operation, "source", spec.format);
@@ -351,7 +351,7 @@ function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
 }
 
 export function protoWriteRootToPlan(root: ProtoWriteRoot): ProtoPlan | ProtoPlan[] {
-    const spec = root.spec ?? { options: {}, partitionBy: [], sortBy: [] };
+    const spec = root.spec;
 
     if (spec.registerView) {
         return {

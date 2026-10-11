@@ -6,6 +6,7 @@ import type { BatchWriterAlg, StreamWriterAlg } from "./dataframe";
 /**
  * Programa genérico de escritura (batch o streaming).
  * WRALG = álgebra concreta del writer (BatchWriterAlg<R> o StreamWriterAlg<R>).
+ * @internal
  */
 export type WProgram<
     R, E, G,            // tipos del mundo DF
@@ -19,12 +20,18 @@ export type WProgram<
     EX: ExprAlg<E> & CEX
 ) => W;
 
-/** Programa especializado para BATCH */
+/**
+ * Programa especializado para BATCH
+ * @internal
+ */
 export type BatchWProgram<
     R, E, G, CDF = unknown, CEX = unknown
 > = WProgram<R, E, G, WBatch, CDF, CEX, BatchWriterAlg<R>>;
 
-/** Programa especializado para STREAMING */
+/**
+ * Programa especializado para STREAMING
+ * @internal
+ */
 export type StreamWProgram<
     R, E, G, CDF = unknown, CEX = unknown
 > = WProgram<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>;

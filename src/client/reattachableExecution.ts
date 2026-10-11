@@ -223,7 +223,8 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
 
                 for await (const response of readBoundedStream(call, options.signal)) {
                     const returnedSessionId = response.session_id ?? response.sessionId;
-                    if (returnedSessionId !== undefined && returnedSessionId !== sessionId) {
+                    // "" is proto3's unset string, not a foreign session.
+                    if (returnedSessionId !== undefined && returnedSessionId !== "" && returnedSessionId !== sessionId) {
                         throw invalidSessionError(
                             `ExecutePlan returned session_id ${String(returnedSessionId)}; expected ${sessionId}.`
                         );

@@ -56,8 +56,9 @@ docker compose down
 
 📖 **For detailed testing instructions, see [TESTING.md](./TESTING.md)**
 
-The E2E gate currently covers Spark Connect 4.0.0 and 4.0.4 over TLS. Other
-versions are not claimed as supported until their full behavior suite is green.
+The E2E matrix currently covers Spark Connect 4.0.0, 4.0.4, 4.1.3 and 4.2.0
+over TLS. Other versions are not claimed as supported until their full behavior
+suite is green.
 
 ## Pull Requests
 
@@ -92,9 +93,12 @@ npm run test:package
 active. The TypeScript 6 package is retained only as the programmatic API
 compatibility layer required by the current `typescript-eslint` release.
 
-Canaries are published from `next`. Do not promote one to `main` until both
-Spark E2E artifacts are green and the registry observation has completed its
-24-hour soak; see [MIGRATION.md](./MIGRATION.md).
+Releases are published from `main` only. Once a PR with a Conventional Commit
+title is merged and the unit (Node.js 22 and 24), publishable-tarball and
+Spark E2E jobs are green, semantic-release publishes the package to npm with
+provenance and tags the release; the workflow then installs that exact version
+from the registry and verifies it. A red job blocks the publish until a fix
+lands on `main`; see the release flow in [MIGRATION.md](./MIGRATION.md).
 
 ## Code of Conduct
 
