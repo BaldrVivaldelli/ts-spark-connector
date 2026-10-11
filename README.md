@@ -363,6 +363,36 @@ Scalar operations (`currentCatalog`, `currentDatabase`, `databaseExists`,
 their single result. Catalog plans print through the same inspection surface
 as any other DataFrame (`toProtoJSON`, Mermaid, client AST).
 
+## Delta Lake and Iceberg
+
+The bundled Spark server bakes in checksum-pinned Delta Lake and Iceberg
+runtimes, registers their session extensions, replaces `spark_catalog` with
+Delta's catalog, and exposes an Iceberg Hadoop catalog named `iceberg`. Both
+formats then work through the ordinary reader/writer surface:
+
+```ts
+// Delta: path-based tables, including time travel.
+await df.write().format("delta").mode("overwrite").save("/data/dest/events");
+const current = await session.read.format("delta").load("/data/dest/events").collect();
+const v0 = await session.read
+  .format("delta")
+  .option("versionAsOf", 0)
+  .load("/data/dest/events")
+  .collect();
+
+// Iceberg: catalog tables plus metadata tables.
+await df.write().format("iceberg").saveAsTable("iceberg.db.events");
+const rows = await session.table("iceberg.db.events").collect();
+const snapshots = await session.sql("SELECT * FROM iceberg.db.events.snapshots").collect();
+```
+
+Delta is exercised by the E2E matrix on every covered Spark version. Iceberg
+publishes no Spark 4.2 runtime yet, so its suite runs on the 4.0 and 4.1
+servers and skips on 4.2; the 4.2 image carries Delta only. Against your own
+Spark Connect server, both formats require the matching jars and catalog
+configuration server-side — see `spark-server/Dockerfile` for the exact
+pinned artifacts.
+
 ## Compatibility
 
 The currently verified compatibility targets are:
@@ -387,6 +417,7 @@ Implemented and exposed in the public API:
 
 - Reads: CSV / JSON / Parquet / ORC / Avro
 - Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
+- Lakehouse formats against the bundled server: Delta Lake on every matrix version (reads, writes, time travel) and Iceberg on Spark 4.0/4.1 (Hadoop catalog and metadata tables)
 - Transformations: `select`, `filter`, `join`, `groupBy().agg()`, `sort`, `limit`, `distinct`, `dropDuplicates`, `withColumn`, `withColumnRenamed`, `withColumnsRenamed`, `drop`, `sample`, `randomSplit`, `repartition`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
 - SQL / temp views
@@ -396,7 +427,7 @@ Implemented and exposed in the public API:
 
 Not exposed as stable public API yet:
 
-- JDBC / Delta / Iceberg / Hudi
+- JDBC / Hudi
 - MLlib
 
 ## Package contract

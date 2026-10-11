@@ -16,6 +16,13 @@ image layer.
 Other releases may work, but are not claimed as supported until they have a
 green compatibility matrix.
 
+The image also bakes in checksum-pinned lakehouse runtimes, selected per Spark
+minor in the `Dockerfile`: Delta Lake on every version (its session extension
+is registered and `spark_catalog` is replaced by Delta's catalog) and Iceberg
+on 4.0/4.1 as a Hadoop catalog named `iceberg` with its warehouse under
+`/data/dest/iceberg`. Iceberg publishes no Spark 4.2 runtime yet, so the 4.2
+image carries Delta only and the Iceberg E2E suite skips itself there.
+
 ## Files
 
 ```text
