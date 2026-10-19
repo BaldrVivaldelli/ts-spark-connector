@@ -51,6 +51,18 @@ export type {
     WindowSpecBuilder,
 } from "./engine/column";
 
+// The PySpark-style function library. `functions` holds every function
+// (`import { functions as F } from "ts-spark-connector"`); the root entry also
+// exports each one by name, except where a name above or below already
+// exports a different helper (`abs`, `concat`, `length`, `lower`, `round`,
+// `upper` are the schema-aware typed functions, and `coalesce`, `explode`,
+// `from_json`, `map_keys`, `map_values`, `posexplode`, `split`, `struct`,
+// `to_json` keep their original signatures). ES module semantics give explicit
+// exports precedence over `export *`, so those names resolve to the helpers
+// declared here and their library versions are reached through `functions`.
+export * as functions from "./functions";
+export * from "./functions";
+
 // Unified schema-aware DataFrame surface. The same classes retain the lax path
 // when no schema is declared; these exports do not introduce a parallel engine.
 export { GroupedDataFrameTF, ReadChainedDataFrame } from "./read/readChainedDataFrame";

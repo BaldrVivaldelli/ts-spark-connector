@@ -18,6 +18,9 @@ Thanks for considering a contribution to **ts-spark-connector**!
 - Tests: Vitest (`npm test` for unit tests)
 - Build: TypeScript 7 (`npm run build`)
 - Executable examples: `npm run examples:run -- join`
+- Function library: `functions` is generated from `scripts/functions/catalog.mjs`;
+  edit the catalog (or `src/functions/special.ts` for hand-written functions)
+  and run `npm run functions:generate`
 
 ## Testing
 
