@@ -24,6 +24,7 @@ export {
     col,
     elementAt,
     explode,
+    expr,
     from_json,
     getField,
     getItem,
@@ -40,9 +41,14 @@ export {
 } from "./engine/column";
 export type {
     CaseChain as ExpressionCaseChain,
+    ColumnOperand,
     EBuilder,
     FrameBoundary,
+    FrameBoundaryInput,
     SortKeyBuilder,
+    WindowOrderInput,
+    WindowPartitionInput,
+    WindowSpecBuilder,
 } from "./engine/column";
 
 // Unified schema-aware DataFrame surface. The same classes retain the lax path
