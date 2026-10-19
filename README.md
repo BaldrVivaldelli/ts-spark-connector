@@ -312,7 +312,11 @@ Notes:
 - `explain` and `interrupt` are unary and idempotent, so they are always safe to retry.
 - Every `executePlan` has a stable operation UUID and requests reattachable execution. Recovery uses `ReattachExecute` from the last response id and never resends the original read, SQL, DDL, or write plan; `ReleaseExecute` cleans server buffers afterward.
 - `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits.
+- By default each ExecutePlan/ReattachExecute stream gets its own `rpcTimeoutMs` deadline, so a query that streams for longer than that fails. `withExecuteTimeout(ms)` instead bounds the whole execution, across every reattach and retry, while unary RPCs keep `rpcTimeoutMs`; `withExecuteTimeout(Infinity)` keeps short unary deadlines without capping query time.
 - Spark closes every reattachable response stream after `spark.connect.execute.reattachable.senderMaxStreamDuration` (two minutes by default), even while a long job has not produced a row yet. The client follows such idle streams for as long as the job runs; only streams that end empty immediately, which indicates a broken server, are limited.
+- Cleanup RPCs (`ReleaseExecute`, `ReleaseSession`, `FetchErrorDetails`) never use the caller's signal and are bounded by a 10 s deadline (or `rpcTimeoutMs`, when shorter), so an unreachable server cannot hold an aborted query or `close()` open.
+- `close()` always releases local state. When `ReleaseSession` fails, the session is still closed and its channel released; the failure is rethrown so the caller knows the server may keep the session until its idle timeout.
+- Provider credentials (`withAuth({ type: "provider" })`) are resolved again for every ReattachExecute and ReleaseExecute, so a query can outlive the token it started with.
 - gRPC send and receive limits default to 128 MiB, avoiding grpc-js's small default for normal Arrow batches; advanced callers can override the validated `grpcMaxReceiveMessageBytes` / `grpcMaxSendMessageBytes` connection options before the first RPC.
 - Client session ids and operation ids are UUIDs. If the compatibility helper `createSparkSession(id)` is given an explicit id, it must be a canonical UUID.
 

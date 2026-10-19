@@ -13,11 +13,13 @@ import {
 } from "./reattachableExecution";
 import { emitTelemetry } from "./telemetry";
 import {
-    buildCallOptions,
+    buildStreamCallOptions,
     callUnary,
     callUnaryWithRetry,
+    cleanupConnectionConfig,
     emitExecuteCleanupTelemetry,
     enrichSparkConnectError,
+    resolveExecuteDeadline,
 } from "./rpcLifecycle";
 export {
     assertRpcResponseSessionIntegrity,
@@ -536,8 +538,9 @@ export const sparkGrpcClient = {
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
         const { client, metadata } = await getClientContext(config);
         let latestObservedServerSessionId = request.client_observed_server_side_session_id;
-        const cleanupConfig = config ? { ...config, signal: undefined } : undefined;
+        const cleanupConfig = cleanupConnectionConfig(config);
         const startedAt = Date.now();
+        const executeDeadline = resolveExecuteDeadline(config, startedAt);
         let responseCount = 0;
         emitTelemetry(config, "spark.execute.start", "debug", {
             operationId: request.operation_id,
@@ -547,24 +550,27 @@ export const sparkGrpcClient = {
                 execute: executeRequest => client.executePlan(
                     executeRequest,
                     metadata,
-                    buildCallOptions(config)
+                    buildStreamCallOptions(config, executeDeadline)
                 ),
-                reattach: reattachRequest => {
+                // Continuations of a long query can outlive the credentials the
+                // initial stream used, so provider headers are resolved again
+                // (the provider cache makes this free while they are fresh).
+                reattach: async reattachRequest => {
                     emitTelemetry(config, "spark.execute.reattach", "info", {
                         operationId: reattachRequest.operation_id,
                         lastResponseId: reattachRequest.last_response_id,
                     });
                     return client.reattachExecute(
                         reattachRequest,
-                        metadata,
-                        buildCallOptions(config)
+                        await buildMetadata(config),
+                        buildStreamCallOptions(config, executeDeadline)
                     );
                 },
                 release: releaseRequest => withRetry(
-                    () => callUnary(
+                    async () => callUnary(
                         client.releaseExecute.bind(client),
                         releaseRequest,
-                        metadata,
+                        await buildMetadata(cleanupConfig),
                         cleanupConfig,
                         "ReleaseExecute"
                     ),
@@ -573,6 +579,9 @@ export const sparkGrpcClient = {
             }, {
                 retry: resolveRetryConfig(config),
                 signal: config?.signal,
+                ...(executeDeadline !== undefined && Number.isFinite(executeDeadline)
+                    ? { deadline: executeDeadline }
+                    : {}),
                 onCleanupError: cleanupError =>
                     emitExecuteCleanupTelemetry(config, request.operation_id, cleanupError),
             })) {

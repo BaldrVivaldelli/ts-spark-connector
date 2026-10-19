@@ -5,9 +5,13 @@ import type { RpcMessage } from "../src/client/reattachableExecution";
 import {
     assertRpcResponseSessionIntegrity,
     buildCallOptions,
+    buildStreamCallOptions,
     callUnary,
     callUnaryWithRetry,
+    CLEANUP_RPC_TIMEOUT_MS,
+    cleanupConnectionConfig,
     enrichSparkConnectError,
+    resolveExecuteDeadline,
     type UnaryMethod,
 } from "../src/client/rpcLifecycle";
 import type { SparkConnectionConfig } from "../src/client/session";
@@ -381,5 +385,32 @@ describe("RPC lifecycle completion", () => {
             errorId: "final-id",
             remoteDetails: { detail: true },
         });
+    });
+});
+
+describe("cleanup and execution deadlines", () => {
+    it("strips the caller signal and caps cleanup RPC deadlines", () => {
+        const signal = new AbortController().signal;
+        expect(cleanupConnectionConfig()).toEqual({ signal: undefined, rpcTimeoutMs: CLEANUP_RPC_TIMEOUT_MS });
+        expect(cleanupConnectionConfig({ address: "sc://a:1", signal, rpcTimeoutMs: 250 }))
+            .toEqual({ address: "sc://a:1", signal: undefined, rpcTimeoutMs: 250 });
+        expect(cleanupConnectionConfig({ rpcTimeoutMs: 600_000 }).rpcTimeoutMs).toBe(CLEANUP_RPC_TIMEOUT_MS);
+    });
+
+    it("resolves the execution deadline once from executeTimeoutMs", () => {
+        expect(resolveExecuteDeadline(undefined, 1_000)).toBeUndefined();
+        expect(resolveExecuteDeadline({ rpcTimeoutMs: 5 }, 1_000)).toBeUndefined();
+        expect(resolveExecuteDeadline({ executeTimeoutMs: 500 }, 1_000)).toBe(1_500);
+        expect(resolveExecuteDeadline({ executeTimeoutMs: Number.POSITIVE_INFINITY }, 1_000))
+            .toBe(Number.POSITIVE_INFINITY);
+    });
+
+    it("derives stream call options from the execution deadline", () => {
+        const now = Date.now();
+        expect(buildStreamCallOptions(undefined, undefined)).toEqual({});
+        expect(buildStreamCallOptions({ rpcTimeoutMs: 1_000 }, undefined).deadline as number)
+            .toBeGreaterThanOrEqual(now + 1_000);
+        expect(buildStreamCallOptions({ rpcTimeoutMs: 1_000 }, 42)).toEqual({ deadline: 42 });
+        expect(buildStreamCallOptions({ rpcTimeoutMs: 1_000 }, Number.POSITIVE_INFINITY)).toEqual({});
     });
 });

@@ -23,6 +23,47 @@ export function buildCallOptions(config?: SparkConnectionConfig): Grpc.CallOptio
         : { deadline: Date.now() + config.rpcTimeoutMs };
 }
 
+/**
+ * Upper bound for each best-effort cleanup RPC (ReleaseExecute,
+ * ReleaseSession, FetchErrorDetails). Cleanup runs without the caller's
+ * AbortSignal, so without a deadline an unreachable server would hold an
+ * aborted query or `close()` open indefinitely.
+ */
+export const CLEANUP_RPC_TIMEOUT_MS = 10_000;
+
+/** Connection config for cleanup RPCs: no caller signal, bounded deadline. */
+export function cleanupConnectionConfig(config?: SparkConnectionConfig): SparkConnectionConfig {
+    return {
+        ...(config ?? {}),
+        signal: undefined,
+        rpcTimeoutMs: Math.min(config?.rpcTimeoutMs ?? CLEANUP_RPC_TIMEOUT_MS, CLEANUP_RPC_TIMEOUT_MS),
+    };
+}
+
+/**
+ * Resolves the absolute deadline of one ExecutePlan, shared by the initial
+ * stream and every ReattachExecute. `undefined` keeps the legacy behaviour
+ * (each stream gets its own `rpcTimeoutMs` deadline); `Infinity` means the
+ * streams carry no deadline at all.
+ */
+export function resolveExecuteDeadline(
+    config: SparkConnectionConfig | undefined,
+    startedAt: number,
+): number | undefined {
+    const timeoutMs = config?.executeTimeoutMs;
+    if (timeoutMs === undefined) return undefined;
+    return timeoutMs === Number.POSITIVE_INFINITY ? timeoutMs : startedAt + timeoutMs;
+}
+
+/** gRPC call options for ExecutePlan/ReattachExecute streams. */
+export function buildStreamCallOptions(
+    config: SparkConnectionConfig | undefined,
+    executeDeadline: number | undefined,
+): Grpc.CallOptions {
+    if (executeDeadline === undefined) return buildCallOptions(config);
+    return Number.isFinite(executeDeadline) ? { deadline: executeDeadline } : {};
+}
+
 function createAbortError(reason?: unknown): Error {
     const error = new Error(
         reason === undefined
@@ -192,7 +233,7 @@ export async function enrichSparkConnectError(
             }
             : {}),
     };
-    const cleanupConfig = config ? { ...config, signal: undefined } : undefined;
+    const cleanupConfig = cleanupConnectionConfig(config);
     try {
         const details = await withRetry(
             () => callUnary(

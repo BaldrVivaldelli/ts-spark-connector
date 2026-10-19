@@ -14,6 +14,7 @@ import { StreamWriterAlg } from "../algebra/write/dataframe";
 import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
+import { cleanupConnectionConfig } from "./rpcLifecycle";
 import {
     AuthDraft,
     LEGACY_AUTH_KEYS,
@@ -28,6 +29,7 @@ import {
     normalizeConnectionConfig,
     syncAuthFromDraft,
     syncTlsFromDraft,
+    validateExecuteTimeout,
     validateSessionId,
 } from "./sessionConfig";
 
@@ -170,6 +172,14 @@ export type SparkConnectionConfig = {
     allowInsecureAuth?: boolean;
     /** Per-RPC deadline in milliseconds. */
     rpcTimeoutMs?: number;
+    /**
+     * Wall-clock budget in milliseconds for one query execution: the
+     * ExecutePlan stream plus every ReattachExecute that continues it. When
+     * set, it replaces `rpcTimeoutMs` for execution streams while unary RPCs
+     * keep `rpcTimeoutMs`; `Infinity` lets executions run without a client
+     * deadline. Unset, every execution stream gets its own `rpcTimeoutMs`.
+     */
+    executeTimeoutMs?: number;
     /** Cancels RPCs and retry backoff when aborted. */
     signal?: AbortSignal;
     /** Maximum serialized gRPC response size. Defaults to 128 MiB. */
@@ -418,14 +428,21 @@ export class SparkSession implements SessionAlgebra {
         return this.serverSideSessionId;
     }
 
-    /** Releases remote session state and closes the cached gRPC channel. Idempotent. */
+    /**
+     * Releases remote session state and closes the cached gRPC channel.
+     * Idempotent. Local state is released even when the server cannot be
+     * reached: the session is closed afterwards and the ReleaseSession failure
+     * is rethrown so the caller knows remote state may linger until Spark's
+     * session timeout.
+     */
     async close(): Promise<void> {
         if (this.closed) return;
         if (this.closePromise) return this.closePromise;
         const config = this.getConnectionConfigUnchecked();
-        const cleanupConfig = { ...config, signal: undefined };
+        const cleanupConfig = cleanupConnectionConfig(config);
 
         this.closePromise = (async () => {
+            let releaseFailure: { error: unknown } | undefined;
             if (this.remoteTouched && !this.invalidatedError) {
                 try {
                     const response = await sparkGrpcClient.releaseSession({
@@ -436,10 +453,9 @@ export class SparkSession implements SessionAlgebra {
                     this.observeServerSideSessionId(response);
                 } catch (error) {
                     this.observeRemoteError(error);
-                    if (!this.invalidatedError) throw error;
-                    // The server has already rejected this stale identity. There
-                    // is no valid remote session left to release, so continue
-                    // with deterministic local channel cleanup.
+                    // A stale identity has no remote session left to release;
+                    // any other failure is reported after local cleanup.
+                    if (!this.invalidatedError) releaseFailure = { error };
                 }
             }
             this.closed = true;
@@ -448,6 +464,7 @@ export class SparkSession implements SessionAlgebra {
                 this.clientRetained = false;
                 this.clientCacheIdentity = undefined;
             }
+            if (releaseFailure) throw releaseFailure.error;
         })().finally(() => {
             this.closePromise = undefined;
         });
@@ -654,6 +671,7 @@ export class SparkSessionBuilder {
     private s3CredentialsConfigured = false;
     private insecureAuthAllowed = false;
     private rpcTimeoutMs?: number;
+    private executeTimeoutMs?: number;
     private signal?: AbortSignal;
     private readonly authDraft: AuthDraft = {};
     private tls?: TLSConfig;
@@ -761,6 +779,18 @@ export class SparkSessionBuilder {
         return this;
     }
 
+    /**
+     * Bounds each query execution as a whole, across ReattachExecute
+     * continuations, instead of per stream. Pass `Infinity` to keep a
+     * `withRpcTimeout()` deadline for unary RPCs without capping how long a
+     * query may run.
+     */
+    withExecuteTimeout(timeoutMs: number): this {
+        validateExecuteTimeout(timeoutMs);
+        this.executeTimeoutMs = timeoutMs;
+        return this;
+    }
+
     /** Associates an AbortSignal with RPCs and retry waits created by this session. */
     withAbortSignal(signal: AbortSignal): this {
         this.signal = signal;
@@ -805,6 +835,7 @@ export class SparkSessionBuilder {
                 auth: this.auth,
                 allowInsecureAuth: this.insecureAuthAllowed,
                 rpcTimeoutMs: this.rpcTimeoutMs,
+                executeTimeoutMs: this.executeTimeoutMs,
                 signal: this.signal,
                 tls: this.tls,
                 retry: this.retry,

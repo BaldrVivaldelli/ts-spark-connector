@@ -202,6 +202,14 @@ function validateAuthConfig(auth?: AuthConfig): void {
     validateRefreshSkew(auth.refreshSkewMs);
 }
 
+/** Accepts a positive safe integer, or `Infinity` for "no execution deadline". */
+export function validateExecuteTimeout(timeoutMs: number): void {
+    if (timeoutMs !== Number.POSITIVE_INFINITY
+        && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) {
+        throw new RangeError("executeTimeoutMs must be a positive safe integer or Infinity.");
+    }
+}
+
 export function normalizeConnectionConfig(
     config?: SparkConnectionConfig,
 ): SparkConnectionConfig {
@@ -217,6 +225,7 @@ export function normalizeConnectionConfig(
         && (!Number.isSafeInteger(config.rpcTimeoutMs) || config.rpcTimeoutMs <= 0)) {
         throw new RangeError("rpcTimeoutMs must be a positive safe integer.");
     }
+    if (config?.executeTimeoutMs !== undefined) validateExecuteTimeout(config.executeTimeoutMs);
     validateGrpcMessageLimit("grpcMaxReceiveMessageBytes", config?.grpcMaxReceiveMessageBytes);
     validateGrpcMessageLimit("grpcMaxSendMessageBytes", config?.grpcMaxSendMessageBytes);
 

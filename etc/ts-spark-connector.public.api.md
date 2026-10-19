@@ -802,6 +802,7 @@ export type SparkConnectionConfig = {
     auth?: AuthConfig;
     allowInsecureAuth?: boolean;
     rpcTimeoutMs?: number;
+    executeTimeoutMs?: number;
     signal?: AbortSignal;
     grpcMaxReceiveMessageBytes?: number;
     grpcMaxSendMessageBytes?: number;
@@ -917,6 +918,7 @@ export class SparkSessionBuilder {
     withAuth(auth: AuthConfig): this;
     // (undocumented)
     withAuthAndTLS(auth: AuthConfig, tls: TLSConfig): this;
+    withExecuteTimeout(timeoutMs: number): this;
     withLogger(logger: SparkLogger): this;
     withMetrics(observer: SparkMetricObserver): this;
     // (undocumented)

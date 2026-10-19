@@ -3,6 +3,8 @@ import { createSparkSession, SparkSession } from "../src/client/session";
 import { getClientReferenceCount, sparkGrpcClient } from "../src/client/sparkClient";
 import { SparkConnectExecutor } from "../src/client/sparkConnectExecutor";
 import { SparkConnectError } from "../src/client/errors";
+import { CLEANUP_RPC_TIMEOUT_MS } from "../src/client/rpcLifecycle";
+import { normalizeConnectionConfig } from "../src/client/sessionConfig";
 
 describe("SparkSession remote configuration", () => {
     afterEach(() => vi.restoreAllMocks());
@@ -92,25 +94,42 @@ describe("SparkSession remote configuration", () => {
         sparkGrpcClient.close(session.getConnectionConfig());
     });
 
-    it("ignores an operation abort during cleanup and allows retrying a failed release", async () => {
+    it("ignores an operation abort during cleanup and bounds the release deadline", async () => {
         const controller = new AbortController();
         controller.abort("query cancelled");
+        const release = vi.spyOn(sparkGrpcClient, "releaseSession").mockResolvedValue({});
+        vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
+        const unbounded = SparkSession.builder().withAbortSignal(controller.signal).getOrCreate();
+        unbounded.markRemoteTouched();
+        const slow = SparkSession.builder().withRpcTimeout(600_000).getOrCreate();
+        slow.markRemoteTouched();
+        const fast = SparkSession.builder().withRpcTimeout(250).getOrCreate();
+        fast.markRemoteTouched();
+
+        await unbounded.close();
+        await slow.close();
+        await fast.close();
+        expect(release.mock.calls[0][1]?.signal).toBeUndefined();
+        expect(release.mock.calls.map(call => call[1]?.rpcTimeoutMs))
+            .toEqual([CLEANUP_RPC_TIMEOUT_MS, CLEANUP_RPC_TIMEOUT_MS, 250]);
+    });
+
+    it("releases local state even when ReleaseSession fails, then reports the failure", async () => {
         const release = vi.spyOn(sparkGrpcClient, "releaseSession")
-            .mockRejectedValueOnce(new Error("temporary cleanup failure"))
-            .mockResolvedValueOnce({});
+            .mockRejectedValueOnce(new Error("temporary cleanup failure"));
         const closeChannel = vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
-        const session = SparkSession.builder().withAbortSignal(controller.signal).getOrCreate();
+        const session = SparkSession.builder().getOrCreate();
         session.markRemoteTouched();
 
         await expect(session.close()).rejects.toThrow(/cleanup failure/);
-        expect(release.mock.calls[0][1]?.signal).toBeUndefined();
-        expect(closeChannel).not.toHaveBeenCalled();
-        expect(() => session.read).not.toThrow();
-
-        await session.close();
-        expect(release).toHaveBeenCalledTimes(2);
-        expect(closeChannel).toHaveBeenCalledTimes(1);
+        expect(closeChannel).toHaveBeenCalledOnce();
         expect(() => session.read).toThrow(/closed/i);
+
+        // The session is closed for good: a second close() is a no-op and
+        // never sends another ReleaseSession for the same identity.
+        await expect(session.close()).resolves.toBeUndefined();
+        expect(release).toHaveBeenCalledOnce();
+        expect(closeChannel).toHaveBeenCalledOnce();
     });
 
     it("requires canonical UUID session ids at the public constructor boundary", () => {
@@ -188,5 +207,23 @@ describe("SparkSession remote configuration", () => {
         expect(session.getServerSideSessionId()).toBe("server-session-explain");
         expect(explain).toHaveBeenCalledTimes(1);
         await session.close();
+    });
+});
+
+describe("execution timeout configuration", () => {
+    it("accepts positive safe integers and Infinity", () => {
+        expect(() => SparkSession.builder().withExecuteTimeout(1)).not.toThrow();
+        expect(SparkSession.builder().withExecuteTimeout(Number.POSITIVE_INFINITY).getOrCreate()
+            .getConnectionConfig().executeTimeoutMs).toBe(Number.POSITIVE_INFINITY);
+        expect(SparkSession.builder().withExecuteTimeout(30_000).getOrCreate()
+            .getConnectionConfig().executeTimeoutMs).toBe(30_000);
+        expect(normalizeConnectionConfig({ executeTimeoutMs: 5 }).executeTimeoutMs).toBe(5);
+    });
+
+    it("rejects other values from the builder and the raw config", () => {
+        for (const invalid of [0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+            expect(() => SparkSession.builder().withExecuteTimeout(invalid)).toThrow(RangeError);
+            expect(() => normalizeConnectionConfig({ executeTimeoutMs: invalid })).toThrow(RangeError);
+        }
     });
 });

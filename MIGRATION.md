@@ -1,5 +1,14 @@
 # Migration guide
 
+## After 3.2.0: `close()` always closes
+
+`SparkSession.close()` used to leave the session open when `ReleaseSession`
+failed, so a second `close()` could retry the release. It now releases local
+state (the session becomes unusable and its gRPC channel is released) and then
+rethrows the `ReleaseSession` failure. Callers that retried `close()` in a loop
+should log the error instead; the server drops the session after its idle
+timeout.
+
 ## 3.0: one authentication source, loud header collisions
 
 Authentication misconfigurations that previous releases resolved silently are

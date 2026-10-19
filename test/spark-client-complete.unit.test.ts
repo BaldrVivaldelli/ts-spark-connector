@@ -16,6 +16,7 @@ import type {
     RpcReadable,
 } from "../src/client/reattachableExecution";
 import type { SparkConnectionConfig } from "../src/client/session";
+import { CLEANUP_RPC_TIMEOUT_MS } from "../src/client/rpcLifecycle";
 
 type StreamEvent =
     | { kind: "data"; value: ReattachableResponse }
@@ -33,7 +34,9 @@ class FakeStream implements RpcReadable<ReattachableResponse> {
     readonly resume = vi.fn();
 
     constructor(events: StreamEvent[]) {
-        queueMicrotask(() => {
+        // Like a real gRPC stream, events arrive from I/O on a later turn of
+        // the event loop, never inside the microtasks that opened the call.
+        setImmediate(() => {
             for (const event of events) {
                 if (event.kind === "data") {
                     this.listeners.data.forEach(listener => listener(event.value));
@@ -493,6 +496,106 @@ describe("spark gRPC client complete behavior", () => {
         expect(instance?.close).toHaveBeenCalledOnce();
         sparkGrpcClient.close(config);
     });
+    it("shares one absolute execution deadline across ExecutePlan and every ReattachExecute", async () => {
+        const config = connection({
+            rpcTimeoutMs: 50,
+            executeTimeoutMs: 60_000,
+            retry: { maxRetries: 1, initialBackoffMs: 0 },
+        });
+        const request = executeRequest();
+        state.executeStreams.push([
+            { kind: "data", value: { operation_id: request.operation_id as string, response_id: "r1" } },
+            { kind: "error", error: Object.assign(new Error("connection lost"), { code: 14 }) },
+        ]);
+        state.reattachStreams.push(complete(request, { response_id: "r2" }));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(2);
+
+        const execute = state.calls.find(call => call.name === "executePlan")!;
+        const reattach = state.calls.find(call => call.name === "reattachExecute")!;
+        const deadline = execute.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + 60_000);
+        expect(deadline).toBeLessThan(before + 61_000);
+        // The continuation does not restart the clock (a per-RPC rpcTimeoutMs would).
+        expect(reattach.options.deadline).toBe(deadline);
+        // Unary cleanup keeps the (bounded) per-RPC deadline.
+        const release = state.calls.find(call => call.name === "releaseExecute")!;
+        expect(release.options.deadline as number).toBeLessThanOrEqual(Date.now() + 50);
+        sparkGrpcClient.close(config);
+    });
+
+    it("lets executions run without a stream deadline while unary RPCs keep rpcTimeoutMs", async () => {
+        const config = connection({ rpcTimeoutMs: 50, executeTimeoutMs: Number.POSITIVE_INFINITY });
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(1);
+        expect(state.calls.find(call => call.name === "executePlan")?.options).toEqual({});
+        expect(state.calls.find(call => call.name === "releaseExecute")?.options.deadline)
+            .toEqual(expect.any(Number));
+        sparkGrpcClient.close(config);
+    });
+
+    it("keeps the legacy per-stream rpcTimeoutMs deadline when no execution timeout is set", async () => {
+        const config = connection({ rpcTimeoutMs: 5_000 });
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await sparkGrpcClient.executePlan(request, config);
+        const deadline = state.calls.find(call => call.name === "executePlan")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + 5_000);
+        expect(deadline).toBeLessThan(before + 6_000);
+        sparkGrpcClient.close(config);
+    });
+
+    it("bounds ReleaseExecute with the cleanup deadline when no rpcTimeoutMs is set", async () => {
+        const config = connection();
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await sparkGrpcClient.executePlan(request, config);
+        expect(state.calls.find(call => call.name === "executePlan")?.options).toEqual({});
+        const deadline = state.calls.find(call => call.name === "releaseExecute")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + CLEANUP_RPC_TIMEOUT_MS);
+        expect(deadline).toBeLessThan(before + CLEANUP_RPC_TIMEOUT_MS + 1_000);
+        sparkGrpcClient.close(config);
+    });
+
+    it("resolves provider credentials again for every continuation and release", async () => {
+        let issued = 0;
+        const provider = vi.fn(async () => {
+            issued += 1;
+            // Already inside the refresh window, so every resolution refreshes.
+            return { headers: { authorization: `Bearer token-${issued}` }, expiresAt: Date.now() };
+        });
+        const config = connection({
+            auth: { type: "provider", provider },
+            allowInsecureAuth: true,
+            retry: { maxRetries: 1, initialBackoffMs: 0 },
+        });
+        const request = executeRequest();
+        state.executeStreams.push([
+            { kind: "data", value: { operation_id: request.operation_id as string, response_id: "r1" } },
+            { kind: "error", error: Object.assign(new Error("connection lost"), { code: 14 }) },
+        ]);
+        state.reattachStreams.push(complete(request, { response_id: "r2" }));
+        setUnary("releaseExecute", {});
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(2);
+        const tokens = ["executePlan", "reattachExecute", "releaseExecute"].map(name =>
+            state.calls.find(call => call.name === name)?.metadata.get("authorization")[0]
+        );
+        expect(tokens).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-3"]);
+        sparkGrpcClient.close(config);
+    });
+
 });
 
 describe("streaming handle completion", () => {
@@ -635,4 +738,5 @@ describe("streaming handle completion", () => {
             client_observed_server_side_session_id: "server-from-request",
         });
     });
+
 });
