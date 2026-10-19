@@ -6,8 +6,7 @@ Every unchecked item is a self-contained contribution: the
 column names the Spark Connect message to start from. Items that need a
 server newer than 4.0 must be gated on `session.requireServerVersion()`.
 
-Legend: ✅ available · 🚧 in an open branch · ⬜ open · ➖ not applicable to a
-TypeScript client.
+Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 
 ## Session
 
@@ -52,7 +51,7 @@ TypeScript client.
 | `stat.corr/cov/crosstab/freqItems/approxQuantile/sampleBy` | ✅ | `corr`, `cov` and `approxQuantile` execute and return numbers |
 | `unpivot`/`melt`, `toDF`, `alias`, `offset`, `transpose`, `withColumns`, `crossJoin` | ✅ | reshaping operations fall back to the untyped schema |
 | `repartition(n?, ...cols)`, `repartitionByRange` | ✅ | `RepartitionByExpression` |
-| `selectExpr`, `filter("sql")` | 🚧 | `feat/function-library` |
+| `selectExpr`, `filter("sql")`, `where` | ✅ | `ExpressionString` |
 | `colRegex`, `metadataColumn` | ⬜ | `UnresolvedRegex`, `UnresolvedAttribute.is_metadata_column` |
 | `lateralJoin`, `asOfJoin` | ⬜ | `LateralJoin`, `AsOfJoin` |
 | `observe` | ⬜ | `CollectMetrics` plus the observed metrics in `ExecutePlanResponse` |
@@ -92,12 +91,14 @@ TypeScript client.
 | PySpark | Status | Notes / protocol |
 | --- | --- | --- |
 | `col`, `lit`, `when/otherwise`, `coalesce`, `isNull/isNotNull`, comparisons, `and/or`, `alias`, `asc/desc` | ✅ | |
-| Window functions with `Window.partitionBy().orderBy().rowsBetween()` | ✅ | ⬜ `rangeBetween` and partial specs 🚧 `feat/function-library` |
-| `cast`, arithmetic, `isin`, `between`, `like`/`rlike`, `substr`, `withField`/`dropFields` | 🚧 | `feat/function-library` |
-| `pyspark.sql.functions` (aggregate, window, string, date, math, array, map, JSON, hashing) | 🚧 | `feat/function-library`; today: `call(name, args)` reaches any Spark SQL function |
-| Higher-order functions (`transform`, `filter`, `aggregate`, …) | 🚧 | `feat/function-library` (`LambdaFunction`) |
-| `expr` | 🚧 | `feat/function-library` (`ExpressionString`) |
-| Typed (schema-aware) builders | ✅ | `length`, `upper`, `lower`, `concat`, `abs`, `round`, `typedWhen`, typed aggregates |
+| Window specs: `partitionBy`, `orderBy`, `rowsBetween`, `rangeBetween`, partial specs, `over()` without a spec | ✅ | |
+| Column methods: arithmetic, `neq`, `eqNullSafe`, `cast`/`tryCast`, `isin`, `between`, `like`/`ilike`/`rlike`, `startsWith`/`endsWith`/`contains`, `substr`, `getItem`/`getField`, `withField`/`dropFields`, bitwise ops | ✅ | |
+| `pyspark.sql.functions` | ✅ | 438 entries in `functions` (407 generated from `scripts/functions/catalog.mjs`); `call(name, args)` still reaches anything else |
+| Higher-order functions (`transform`, `filter`, `exists`, `forall`, `aggregate`, `zip_with`, `array_sort`, `map_filter`, `transform_keys`/`values`, `map_zip_with`) with JS lambdas | ✅ | `LambdaFunction` |
+| `expr` | ✅ | `ExpressionString` |
+| Partition transforms for `writeTo` (`years`, `months`, `days`, `hours`, `bucket`) | ⬜ | `UnresolvedFunction` names used by `WriteOperationV2.partitioning_columns` |
+| `call_function`, `colRegex` | ⬜ | `CallFunction`, `UnresolvedRegex` |
+| Typed (schema-aware) builders | ✅ | `length`, `upper`, `lower`, `concat`, `abs`, `round`, `typedWhen`; typed aggregates `count`, `countDistinct`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collectList`, `collectSet`, `stddev`, `variance`, `approxCountDistinct`, `countIf` |
 
 ## Catalog
 
