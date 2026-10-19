@@ -130,21 +130,29 @@ export function window(
 
 // Higher-order functions ------------------------------------------------------
 
-let lambdaVariables = 0;
+/** Nesting depth of the callback being built; names are unique per scope. */
+let lambdaDepth = 0;
 
 const isBuilder = (x: unknown): x is EBuilder =>
     typeof x === "object" && x !== null && "build" in x;
 
 /**
- * Turns a JS callback into a Spark lambda. Each parameter gets a fresh name
- * so nested lambdas never capture each other's variables.
+ * Turns a JS callback into a Spark lambda. Parameters are named by nesting
+ * depth (`x_1` outside, `x_2` inside), so nested lambdas never capture each
+ * other's variables and the same code always encodes the same plan.
  */
 function lambda(
     fn: (...params: EBuilder[]) => EBuilder,
     names: readonly string[],
 ): Arg {
-    const variables = names.map(name => `${name}_${++lambdaVariables}`);
-    const body = fn(...variables.map(variable => exprBuilder(EX => EX.lambdaVar(variable))));
+    lambdaDepth += 1;
+    const variables = names.map(name => `${name}_${lambdaDepth}`);
+    let body: unknown;
+    try {
+        body = fn(...variables.map(variable => exprBuilder(EX => EX.lambdaVar(variable))));
+    } finally {
+        lambdaDepth -= 1;
+    }
     if (!isBuilder(body)) {
         throw new TypeError("A higher-order function callback must return a column expression.");
     }

@@ -181,7 +181,7 @@ const outputs = [[SOURCE, renderSource(catalog)], [FIXTURE, renderFixture(catalo
 if (process.argv.includes("--check")) {
     const stale = outputs.filter(([file, content]) => {
         try {
-            return readFileSync(file, "utf8") !== content;
+            return readFileSync(file, "utf8").replace(/\r\n/g, "\n") !== content;
         } catch {
             return true;
         }

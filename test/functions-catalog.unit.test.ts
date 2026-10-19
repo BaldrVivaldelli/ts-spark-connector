@@ -85,4 +85,17 @@ describe("generated function library", () => {
         expect(Root.collect_list).toBe(F.collect_list);
         expect(Root.functions.when).toBe(Root.when);
     });
+
+    it("re-exports every library function from the root except the documented collisions", () => {
+        const root = Root as unknown as Record<string, unknown>;
+        const diverging = Object.keys(F)
+            .filter(name => root[name] !== (F as unknown as Record<string, unknown>)[name])
+            .sort();
+        // Adding a root helper that shadows a library function must be a
+        // deliberate change to this list (and to the comment in src/index.ts).
+        expect(diverging).toEqual([
+            "abs", "coalesce", "concat", "explode", "from_json", "length", "lower",
+            "map_keys", "map_values", "posexplode", "round", "split", "struct", "to_json", "upper",
+        ]);
+    });
 });
