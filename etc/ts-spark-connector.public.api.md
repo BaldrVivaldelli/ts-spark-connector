@@ -262,8 +262,14 @@ export function bround(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
 // @public
 export function btrim(str: ColumnOrName, trim?: string | EBuilder): EBuilder;
 
+// @public
+export function bucket(numBuckets: number, col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export function call(name: string, args: (EBuilder | string | number | boolean)[]): EBuilder;
+
+// @public
+export function call_function(name: string, ...cols: ColumnOrName[]): EBuilder;
 
 // @public
 export function cardinality(col: ColumnOrName): EBuilder;
@@ -830,6 +836,9 @@ export function dayofweek(col: ColumnOrName): EBuilder;
 
 // @public
 export function dayofyear(col: ColumnOrName): EBuilder;
+
+// @public
+export function days(col: ColumnOrName): EBuilder;
 
 // @public
 export interface DecimalSpec {
@@ -1492,6 +1501,12 @@ declare namespace functions {
         transform_keys,
         transform_values,
         map_zip_with,
+        years,
+        months,
+        days,
+        hours,
+        bucket,
+        call_function,
         col,
         expr,
         lit,
@@ -1571,6 +1586,9 @@ export function hll_union_agg(col: ColumnOrName, allowDifferentLgConfigK?: boole
 
 // @public
 export function hour(col: ColumnOrName): EBuilder;
+
+// @public
+export function hours(col: ColumnOrName): EBuilder;
 
 // @public
 export function hypot(col1: ColumnOrNumber, col2: ColumnOrNumber): EBuilder;
@@ -1871,6 +1889,9 @@ export function month(col: ColumnOrName): EBuilder;
 
 // @public
 export function monthname(col: ColumnOrName): EBuilder;
+
+// @public
+export function months(col: ColumnOrName): EBuilder;
 
 // @public
 export function months_between(date1: ColumnOrName, date2: ColumnOrName, roundOff?: boolean | EBuilder): EBuilder;
@@ -2249,6 +2270,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void>;
     // (undocumented)
     toSparkLogicalPlanJSON(): string;
+    transform<Out>(func: (df: this) => Out): Out;
     transpose(indexColumn?: ColumnName<S> | DataFrameExpressionBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     treeString(level?: number): Promise<string>;
     // (undocumented)
@@ -3416,6 +3438,9 @@ export function xxhash64(...cols: ColumnOrName[]): EBuilder;
 
 // @public
 export function year(col: ColumnOrName): EBuilder;
+
+// @public
+export function years(col: ColumnOrName): EBuilder;
 
 // @public
 export function zeroifnull(col: ColumnOrName): EBuilder;
