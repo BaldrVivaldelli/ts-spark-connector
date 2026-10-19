@@ -25,6 +25,7 @@ import {
     type ArtifactUpload,
 } from "./artifacts";
 import { SparkUdfRegistration } from "./udf";
+import { StreamingQueryManager } from "./streamingQueryManager";
 import { compareSparkVersions, UnsupportedServerVersionError } from "./serverVersion";
 import {
     assertOperationId,
@@ -285,6 +286,7 @@ export class SparkSession implements SessionAlgebra {
     private serverVersion?: Promise<string>;
     private readonly observations = new Map<string, Observation>();
     private readonly cachedRelationIds = new Set<string>();
+    private streamingQueryManager?: StreamingQueryManager;
 
     constructor(
         sessionId?: string,
@@ -430,6 +432,17 @@ export class SparkSession implements SessionAlgebra {
     get conf(): SparkRuntimeConfig {
         this.assertOpen();
         return this.runtimeConfig;
+    }
+
+    /** The streaming queries of this session: Spark's `StreamingQueryManager`. */
+    get streams(): StreamingQueryManager {
+        this.assertOpen();
+        return this.streamingQueryManager ??= new StreamingQueryManager(this);
+    }
+
+    /** @internal Forwards a query-started event to the listeners of `streams`. */
+    notifyStreamingQueryStarted(eventJson: string): void {
+        this.streamingQueryManager?.dispatchQueryStarted(eventJson);
     }
 
     getSessionId(): string {
@@ -846,6 +859,9 @@ export class SparkSession implements SessionAlgebra {
 
         this.closePromise = (async () => {
             let releaseFailure: { error: unknown } | undefined;
+            // The listener bus holds a long-running execution; stop following
+            // it before the session that owns it is released.
+            if (this.streamingQueryManager) await this.streamingQueryManager.shutdown();
             if (this.remoteTouched && !this.invalidatedError) {
                 // Only when something was checkpointed: the extra await would
                 // otherwise delay ReleaseSession by a microtask for nothing.

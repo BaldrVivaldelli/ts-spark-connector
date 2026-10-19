@@ -142,7 +142,18 @@ export type {
     StreamTriggerInput,
     WriterOptionValue,
 } from "./write/dataFrameWriterTF";
+export type { JdbcReadOptions } from "./read/dataFrameReaderTF";
 export type { StreamingQueryHandle } from "./client/sparkClient";
+export { StreamingQueryError } from "./client/streamingProtocol";
+export type { StreamingQueryProgress, StreamingQueryStatus } from "./client/streamingProtocol";
+export { StreamingQueryManager } from "./client/streamingQueryManager";
+export type {
+    QueryIdleEvent,
+    QueryProgressEvent,
+    QueryStartedEvent,
+    QueryTerminatedEvent,
+    StreamingQueryListener,
+} from "./client/streamingQueryManager";
 export type {
     BatchWriterFormat,
     SaveMode,
@@ -159,6 +170,7 @@ export type {
 } from "./algebra/write/write-stream-capabilities";
 export type {
     BatchFormatCap,
+    InsertIntoCap,
     BucketSortCap,
     ViewsCap,
 } from "./algebra/write/write-batch-capabilities";

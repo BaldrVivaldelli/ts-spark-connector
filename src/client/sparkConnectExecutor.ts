@@ -3,6 +3,7 @@ import { SparkConnectionConfig, SparkSession } from "./session";
 import { combineSignals, ResolvedExecution } from "./executionOptions";
 import type { ProtoRel } from "../engine/compilerRead";
 import { sparkGrpcClient, StreamingQueryHandle } from "./sparkClient";
+import type { NormalizedStreamingQueryInstanceId } from "./streamingProtocol";
 import { ProtoPlan, ProtoWriteRoot, protoWriteRootToPlan } from "../write/compilerWrite";
 import { ExplainModeInput, toProtoExplainMode } from "../engine/sparkConnectEnums";
 import { toProtoStorageLevel } from "./storageLevel";
@@ -199,6 +200,58 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return responses;
     }
 
+    /**
+     * Streams the responses of a Spark Connect `Command` that keeps producing
+     * results, such as the streaming listener bus. `unboundedStreams` lifts the
+     * session's per-stream deadline, since such a command never completes on
+     * its own.
+     */
+    async *streamCommand(
+        command: Record<string, unknown>,
+        execution: ResolvedExecution = this.session.resolveExecution(),
+        options: { unboundedStreams?: boolean } = {},
+    ): AsyncGenerator<ExecutePlanResponse, void, void> {
+        await this.prepareSession();
+        const request = {
+            plan: { command },
+            session_id: this.session.getSessionId(),
+            user_context: this.session.getUserContext(),
+            client_type: "ts-spark-connector" as const,
+            operation_id: execution.operationId,
+            ...(execution.tags.length > 0 ? { tags: execution.tags } : {}),
+            ...this.observedServerSessionField(),
+        };
+        const config = options.unboundedStreams
+            ? { ...this.connectionConfigFor(execution), executeTimeoutMs: Number.POSITIVE_INFINITY }
+            : this.connectionConfigFor(execution);
+        try {
+            for await (const response of sparkGrpcClient.executePlanStream(request, config)) {
+                this.session.observeServerSideSessionId(response);
+                yield response;
+            }
+        } catch (error) {
+            this.session.observeRemoteError(error);
+            throw error;
+        }
+    }
+
+    /** Control handle of a streaming query the server already runs, e.g. one listed by `session.streams`. */
+    streamingQueryHandle(queryId: NormalizedStreamingQueryInstanceId, name: string): StreamingQueryHandle {
+        const raw = sparkGrpcClient.streamingQueryHandle({
+            request: {
+                session_id: this.session.getSessionId(),
+                user_context: this.session.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...this.observedServerSessionField(),
+            },
+            config: this.session.getConnectionConfig(),
+            queryId,
+            name,
+            serverSideSessionId: this.session.getServerSideSessionId(),
+        });
+        return this.wrapStreamingHandle(raw);
+    }
+
     async runWrite(
         root: ProtoWriteRoot,
         execution: ResolvedExecution = this.session.resolveExecution(),
@@ -255,6 +308,11 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         }, connectionConfig));
         this.syncStreamingIdentity(rawHandle);
         const handle = this.wrapStreamingHandle(rawHandle);
+        // Spark attaches the QueryStartedEvent only while this session has a
+        // listener bus; the manager forwards it to the registered listeners.
+        if (rawHandle.startedEventJson !== undefined) {
+            this.session.notifyStreamingQueryStarted(rawHandle.startedEventJson);
+        }
 
         if (root.awaitTermination) {
             await handle.awaitTermination();
@@ -318,23 +376,32 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     }
 
     private wrapStreamingHandle(handle: StreamingQueryHandle): StreamingQueryHandle {
-        const awaitTermination = (async (timeoutMs?: number): Promise<void | boolean> => {
-            const result = timeoutMs === undefined
-                ? await this.remote<void>(() => handle.awaitTermination())
-                : await this.remote<boolean>(() => handle.awaitTermination(timeoutMs));
-            this.syncStreamingIdentity(handle);
-            return result;
-        }) as StreamingQueryHandle["awaitTermination"];
-
-        return {
-            name: handle.name,
-            get serverSideSessionId() { return handle.serverSideSessionId; },
-            awaitTermination,
-            stop: async () => {
-                const result = await this.remote(() => handle.stop());
+        const remote = <T>(operation: () => Promise<T>): Promise<T> =>
+            this.remote(operation).then(result => {
                 this.syncStreamingIdentity(handle);
                 return result;
-            },
+            });
+        const awaitTermination = ((timeoutMs?: number): Promise<void | boolean> =>
+            timeoutMs === undefined
+                ? remote<void>(() => handle.awaitTermination())
+                : remote<boolean>(() => handle.awaitTermination(timeoutMs))
+        ) as StreamingQueryHandle["awaitTermination"];
+
+        return {
+            id: handle.id,
+            runId: handle.runId,
+            name: handle.name,
+            get serverSideSessionId() { return handle.serverSideSessionId; },
+            ...(handle.startedEventJson !== undefined ? { startedEventJson: handle.startedEventJson } : {}),
+            awaitTermination,
+            stop: () => remote(() => handle.stop()),
+            isActive: () => remote(() => handle.isActive()),
+            status: () => remote(() => handle.status()),
+            lastProgress: () => remote(() => handle.lastProgress()),
+            recentProgress: () => remote(() => handle.recentProgress()),
+            explain: extended => remote(() => handle.explain(extended)),
+            exception: () => remote(() => handle.exception()),
+            processAllAvailable: () => remote(() => handle.processAllAvailable()),
         };
     }
 

@@ -631,6 +631,7 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
     csv(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
     format(fmt: string): DataFrameReaderTF<R, E, G>;
+    jdbc(url: string, table: string, options?: JdbcReadOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
     json(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
@@ -710,6 +711,10 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
     static fromStreamProgram<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>, prog: StreamWProgram<R, E, G, CDF, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>;
     // (undocumented)
     fromTempView(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
+    insertInto(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, table: string, overwrite?: boolean): Promise<void>;
+    // (undocumented)
+    insertInto(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, table: string, overwrite: boolean | undefined, impl: WriterBackendImplementation<R, E, G, WBatch, CDF, CEX, WRALG>): Promise<void>;
+    jdbc(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, url: string, table: string, mode?: SaveMode, properties?: Record<string, WriterOptionValue>): Promise<void>;
     // (undocumented)
     json(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>): DataFrameWriterTF<R, E, G, WBatchBrand, CDF, CEX, WRALG>;
     // (undocumented)
@@ -778,6 +783,7 @@ export class DataFrameWriterV2 {
     replace(): Promise<void>;
     tableProperty(property: string, value: string): DataFrameWriterV2;
     using(provider: string): DataFrameWriterV2;
+    withSchemaEvolution(): DataFrameWriterV2;
 }
 
 // @public
@@ -1630,6 +1636,16 @@ export function isnull(col: ColumnOrName): EBuilder;
 // @public
 export function java_method(...cols: ColumnOrName[]): EBuilder;
 
+// @public
+export type JdbcReadOptions = {
+    column?: string;
+    lowerBound?: number | bigint | string;
+    upperBound?: number | bigint | string;
+    numPartitions?: number;
+    predicates?: readonly string[];
+    properties?: Record<string, ReaderOptionValue>;
+};
+
 // @public (undocumented)
 export type JoinHintName = "broadcast" | "merge" | "shuffle_hash" | "shuffle_replicate_nl";
 
@@ -2003,6 +2019,34 @@ export function product(col: ColumnOrName): EBuilder;
 
 // @public
 export function quarter(col: ColumnOrName): EBuilder;
+
+// @public
+export type QueryIdleEvent = {
+    id: string;
+    runId: string;
+    timestamp: string;
+} & Record<string, unknown>;
+
+// @public
+export type QueryProgressEvent = {
+    progress: StreamingQueryProgress;
+};
+
+// @public
+export type QueryStartedEvent = {
+    id: string;
+    runId: string;
+    name: string | null;
+    timestamp: string;
+} & Record<string, unknown>;
+
+// @public
+export type QueryTerminatedEvent = {
+    id: string;
+    runId: string;
+    exception?: string | null;
+    errorClassName?: string | null;
+} & Record<string, unknown>;
 
 // @public
 export function radians(col: ColumnOrName): EBuilder;
@@ -2695,6 +2739,7 @@ export class SparkSession implements SessionAlgebra {
     // (undocumented)
     sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
     stop(): Promise<void>;
+    get streams(): StreamingQueryManager;
     // (undocumented)
     table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
     get udf(): SparkUdfRegistration;
@@ -2804,17 +2849,89 @@ export type StorageLevel = {
 // @public
 export function str_to_map(text: ColumnOrName, pairDelim?: string | EBuilder, keyValueDelim?: string | EBuilder): EBuilder;
 
-// @public (undocumented)
+// @public
+export class StreamingQueryError extends Error {
+    constructor(message: string, options?: {
+        errorClass?: string;
+        remoteStack?: string;
+    });
+    // (undocumented)
+    readonly errorClass?: string;
+    // (undocumented)
+    readonly remoteStack?: string;
+}
+
+// @public
 export interface StreamingQueryHandle {
     // (undocumented)
     awaitTermination(): Promise<void>;
     // (undocumented)
     awaitTermination(timeoutMs: number): Promise<boolean>;
+    exception(): Promise<StreamingQueryError | undefined>;
+    explain(extended?: boolean): Promise<string>;
+    readonly id: string;
+    isActive(): Promise<boolean>;
+    lastProgress(): Promise<StreamingQueryProgress | undefined>;
     // (undocumented)
     name: string;
+    processAllAvailable(): Promise<void>;
+    recentProgress(): Promise<StreamingQueryProgress[]>;
+    readonly runId: string;
+    // (undocumented)
+    status(): Promise<StreamingQueryStatus>;
     // (undocumented)
     stop(): Promise<unknown>;
 }
+
+// @public
+export interface StreamingQueryListener {
+    // (undocumented)
+    onQueryIdle?(event: QueryIdleEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryProgress?(event: QueryProgressEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryStarted?(event: QueryStartedEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryTerminated?(event: QueryTerminatedEvent): void | Promise<void>;
+}
+
+// @public
+export class StreamingQueryManager {
+    active(): Promise<StreamingQueryHandle[]>;
+    addListener(listener: StreamingQueryListener): Promise<void>;
+    awaitAnyTermination(): Promise<void>;
+    // (undocumented)
+    awaitAnyTermination(timeoutMs: number): Promise<boolean>;
+    get(id: string): Promise<StreamingQueryHandle | undefined>;
+    getListeners(): readonly StreamingQueryListener[];
+    removeListener(listener: StreamingQueryListener): Promise<void>;
+    resetTerminated(): Promise<void>;
+}
+
+// @public
+export type StreamingQueryProgress = {
+    id: string;
+    runId: string;
+    name: string | null;
+    timestamp: string;
+    batchId: number;
+    numInputRows?: number;
+    inputRowsPerSecond?: number;
+    processedRowsPerSecond?: number;
+    durationMs?: Record<string, number>;
+    sources?: Array<Record<string, unknown>>;
+    sink?: Record<string, unknown>;
+    stateOperators?: Array<Record<string, unknown>>;
+    observedMetrics?: Record<string, unknown>;
+} & Record<string, unknown>;
+
+// @public
+export type StreamingQueryStatus = {
+    message: string;
+    isDataAvailable: boolean;
+    isTriggerActive: boolean;
+    isActive: boolean;
+};
 
 // @public (undocumented)
 export type StreamTriggerInput = {
