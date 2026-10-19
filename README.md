@@ -13,7 +13,7 @@ It builds Spark logical plans in TypeScript and executes them against a Spark Co
 - Client-side plan inspection in JSON / Mermaid / proto JSON
 - Spark Connect execution over gRPC
 - Batch reads, projections, filters, joins, aggregates, sorting, limits, unions, temp views, and writes
-- Structured Streaming reads/writes with query handles, termination timeouts, stop, watermark, triggers, and output modes
+- Structured Streaming reads/writes with query handles (status, progress, plans), the session's query manager, lifecycle listeners, termination timeouts, stop, watermark, triggers, and output modes
 
 ## Installation
 
@@ -600,6 +600,65 @@ await updates
 
 Both are verified against the bundled Delta catalog on every E2E matrix
 version; see [`docs/examples/merge.ts`](docs/examples/merge.ts).
+`writeTo(...).withSchemaEvolution()` lets an append add the columns the table
+lacks; it needs Spark 4.1 and rejects older servers with
+`UnsupportedServerVersionError` before sending anything.
+
+## JDBC tables and insertInto
+
+`df.write().insertInto(table, overwrite?)` inserts rows into an existing table
+by column position, like PySpark; `overwrite` picks the overwrite or append
+save mode. JDBC goes through Spark's `jdbc` data source, so the driver must be
+on the server's classpath:
+
+```ts
+const url = "jdbc:postgresql://db:5432/shop";
+const properties = { driver: "org.postgresql.Driver", user: "shop", password };
+
+await orders.write().jdbc(url, "orders", "append", properties);
+
+const all = session.read.jdbc(url, "orders", { properties });
+const split = session.read.jdbc(url, "orders", {
+  column: "id", lowerBound: 1, upperBound: 1_000_000, numPartitions: 8, properties,
+});
+const byPredicate = session.read.jdbc(url, "orders", {
+  predicates: ["status = 'open'", "status <> 'open'"], properties,
+});
+```
+
+The E2E suite exercises both against the embedded Derby database that ships
+with Spark.
+
+## Streaming query control
+
+The handle returned by `start()` and `toTable()` mirrors Spark's
+`StreamingQuery`: `id`, `runId`, `isActive()`, `status()`, `lastProgress()`,
+`recentProgress()`, `explain(extended?)`, `exception()` and
+`processAllAvailable()`, next to `awaitTermination()` and `stop()`.
+`session.streams` is the `StreamingQueryManager`:
+
+```ts
+const query = await events.writeStream().format("memory").queryName("events").start();
+console.log(await query.status(), (await query.lastProgress())?.batchId);
+
+for (const active of await session.streams.active()) console.log(active.name);
+const same = await session.streams.get(query.id);
+await session.streams.awaitAnyTermination(60_000);
+
+await session.streams.addListener({
+  onQueryStarted: event => console.log("started", event.name),
+  onQueryProgress: event => console.log("batch", event.progress.batchId),
+  onQueryIdle: event => console.log("idle", event.id),
+  onQueryTerminated: event => console.log("terminated", event.exception ?? "cleanly"),
+});
+```
+
+Listeners receive the events of every query of the session over one
+long-running execution that the client keeps alive (the session's
+`rpcTimeoutMs` does not cut it). The first listener opens it, the last
+`removeListener()` closes it, and `close()` drops it with the session. A
+listener that throws is reported through the session logger and never stops
+the stream. See [`docs/examples/streamingQueries.ts`](docs/examples/streamingQueries.ts).
 
 ## Compatibility
 
@@ -651,13 +710,14 @@ Implemented and exposed in the public API:
 - SQL / temp views, including global temp views (`createGlobalTempView`, `createOrReplaceGlobalTempView`)
 - Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables, columns and functions, `getDatabase`/`getTable`/`getFunction`, existence checks, temp-view drops, `createTable`/`createExternalTable`, cache management (`cacheTable`, `uncacheTable`, `isCached`, `clearCache`) and refreshes (`refreshTable`, `refreshByPath`, `recoverPartitions`)
 - Sessions: `newSession()`, `cloneSession()` (4.1+), `version()`, `getStatus()` (4.2+), artifact upload (`addArtifact`, `addArtifacts`, `artifactStatus`) and Java UDF registration (`session.udf`)
-- Batch writes plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
+- Batch writes, `insertInto`, JDBC reads/writes, plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
+- Streaming query control: `status`, `lastProgress`/`recentProgress`, `explain`, `exception`, `processAllAvailable`; `session.streams` (`active`, `get`, `awaitAnyTermination`, `resetTerminated`) and query lifecycle listeners
 - Table writes through `writeTo(table)` (DataFrameWriterV2: `create`, `replace`, `createOrReplace`, `append`, `overwrite(condition)`, `overwritePartitions`) and `mergeInto(table, condition)` (`MERGE INTO` with matched / not-matched / not-matched-by-source clauses)
 - `explain(...)`
 
 Not exposed as stable public API yet:
 
-- JDBC / Hudi
+- Hudi
 - MLlib
 
 ## Package contract

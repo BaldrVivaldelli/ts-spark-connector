@@ -27,7 +27,7 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `addArtifact(s)` (jars, files, archives), `cacheArtifact` / `isArtifactCached` | ✅ | `AddArtifacts` (batched / chunked, CRC-32 per chunk); `ArtifactStatus` reports only `cache/<hash>` blobs |
 | `udf.registerJavaFunction`, `udf.registerJavaUDAF` | ✅ | `CommonInlineUserDefinedFunction.java_udf` in a `register_function` command |
 | Python / pandas UDFs, `mapInPandas`, `applyInPandas` | ➖ | need a Python worker on the server |
-| `spark.streams` (StreamingQueryManager) | ⬜ | `streaming_query_manager_command` |
+| `spark.streams` (StreamingQueryManager) | ✅ | `session.streams` |
 | `spark.dataSource.register` | ➖ | Python data sources |
 | Operation status (`session.getStatus`) | ✅ | Spark 4.2+ `GetStatus` RPC, gated on the server version |
 
@@ -79,9 +79,9 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | PySpark | Status | Notes / protocol |
 | --- | --- | --- |
 | `write.format/mode/option(s)/partitionBy/bucketBy/sortBy/save/saveAsTable` | ✅ | csv, json, parquet, orc, avro, text, Delta, Iceberg |
-| `write.insertInto` | ⬜ | `WriteOperation.table.save_method = INSERT_INTO` |
-| `write.jdbc`, `read.jdbc` | ⬜ | options-based `jdbc` source |
-| `writeTo` (DataFrameWriterV2: `using`, `tableProperty`, `partitionedBy`, `clusterBy`, `create`, `replace`, `createOrReplace`, `append`, `overwrite`, `overwritePartitions`) | ✅ | `WriteOperationV2` |
+| `write.insertInto` | ✅ | `WriteOperation.table.save_method = INSERT_INTO` |
+| `write.jdbc`, `read.jdbc` (properties, partition column, predicates) | ✅ | `jdbc` data source, `DataSource.predicates`; verified against the Derby jars shipped with Spark |
+| `writeTo` (DataFrameWriterV2: `using`, `tableProperty`, `partitionedBy`, `clusterBy`, `create`, `replace`, `createOrReplace`, `append`, `overwrite`, `overwritePartitions`, `withSchemaEvolution` on Spark 4.1+) | ✅ | `WriteOperationV2` |
 | `mergeInto` (`whenMatched`, `whenNotMatched`, `whenNotMatchedBySource`, `withSchemaEvolution`) | ✅ | `MergeIntoTableCommand` |
 | `writeStream` (start, toTable, triggers, output modes, sinks) | ✅ | |
 | `writeStream.foreach`, `foreachBatch` | ➖ | need Python on the server |
@@ -115,9 +115,9 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | PySpark | Status | Notes / protocol |
 | --- | --- | --- |
 | `readStream` sources, `writeStream` sinks, triggers, `awaitTermination`, `stop` | ✅ | |
-| `StreamingQuery.id/runId/status/lastProgress/recentProgress/explain/exception/processAllAvailable` | ⬜ | `streaming_query_command` |
-| `StreamingQueryManager` (`active`, `get`, `awaitAnyTermination`, `resetTerminated`) | ⬜ | `streaming_query_manager_command` |
-| Query listeners | ⬜ | `streaming_query_listener_bus_command` |
+| `StreamingQuery.id/runId/isActive/status/lastProgress/recentProgress/explain/exception/processAllAvailable` | ✅ | `streaming_query_command` |
+| `StreamingQueryManager` (`session.streams`: `active`, `get`, `awaitAnyTermination`, `resetTerminated`) | ✅ | `streaming_query_manager_command` |
+| Query listeners (`addListener`/`removeListener`, started/progress/idle/terminated events) | ✅ | `streaming_query_listener_bus_command` plus the start event on `WriteStreamOperationStartResult` |
 
 ## Not planned yet
 
