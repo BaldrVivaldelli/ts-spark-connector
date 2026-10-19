@@ -38,7 +38,7 @@ void withExampleSession(async spark => {
     console.log("getFunction:", await spark.catalog.getFunction("upper"));
     console.log("getDatabase:", await spark.catalog.getDatabase("default"));
 
-    const people = spark.catalog.createTable("example_people_ext", {
+    const people = await spark.catalog.createTable("example_people_ext", {
         path: "/data/people.tsv",
         source: "csv",
         schema: schema({ id: "int", name: "string" }),

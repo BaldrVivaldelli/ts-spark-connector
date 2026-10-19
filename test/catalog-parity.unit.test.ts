@@ -89,40 +89,68 @@ describe("catalog parity: client surface", () => {
         });
         expect(session.catalog.listFunctions()).toBeInstanceOf(ReadChainedDataFrame);
 
+    });
+
+    it("creates tables eagerly, once, and returns the new table as a DataFrame", async () => {
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
         const People = schema({ id: "int", name: "string?" });
-        expect(protoOf(session.catalog.createTable("people", {
+
+        const people = await session.catalog.createTable("people", {
             path: "/data/people",
             source: "parquet",
             schema: People,
             description: "folks",
             options: { mergeSchema: "true" },
-        }))).toEqual({
-            catalog: {
-                create_table: {
-                    table_name: "people",
-                    path: "/data/people",
-                    source: "parquet",
-                    description: "folks",
-                    schema: { unparsed: { data_type_string: "id INT NOT NULL, name STRING" } },
-                    options: { mergeSchema: "true" },
+        });
+        expect(execute).toHaveBeenCalledTimes(1);
+        expect((execute.mock.calls[0]![0].plan as { root: unknown }).root).toEqual({
+            limit: {
+                limit: 0,
+                input: {
+                    catalog: {
+                        create_table: {
+                            table_name: "people",
+                            path: "/data/people",
+                            source: "parquet",
+                            description: "folks",
+                            schema: { unparsed: { data_type_string: "id INT NOT NULL, name STRING" } },
+                            options: { mergeSchema: "true" },
+                        },
+                    },
                 },
             },
         });
-        expect(protoOf(session.catalog.createTable("bare"))).toEqual({ catalog: { create_table: { table_name: "bare", options: {} } } });
-        expect(protoOf(session.catalog.createExternalTable("ext", { path: "/data/ext", schema: "a INT" }))).toEqual({
+        // Actions on the result read the table; they never re-send the creation.
+        expect(people).toBeInstanceOf(ReadChainedDataFrame);
+        expect(protoOf(people)).toEqual({ read: { named_table: { unparsed_identifier: "people", options: {} } } });
+        await people.collectRaw();
+        await people.collectRaw();
+        expect(execute).toHaveBeenCalledTimes(3);
+        expect((execute.mock.calls[2]![0].plan as { root: unknown }).root).toEqual(protoOf(people));
+
+        const bare = await session.catalog.createTable("bare");
+        expect((execute.mock.calls[3]![0].plan as { root: { limit: { input: unknown } } }).root.limit.input)
+            .toEqual({ catalog: { create_table: { table_name: "bare", options: {} } } });
+        expect(protoOf(bare)).toMatchObject({ read: { named_table: { unparsed_identifier: "bare" } } });
+
+        const ext = await session.catalog.createExternalTable("ext", { path: "/data/ext", schema: "a INT" });
+        expect((execute.mock.calls[4]![0].plan as { root: { limit: { input: unknown } } }).root.limit.input).toEqual({
             catalog: { create_external_table: { table_name: "ext", path: "/data/ext", schema: { unparsed: { data_type_string: "a INT" } }, options: {} } },
         });
+        expect(protoOf(ext)).toMatchObject({ read: { named_table: { unparsed_identifier: "ext" } } });
     });
 
-    it("validates create-table options before building a plan", () => {
-        expect(() => session.catalog.createTable("")).toThrow(/tableName/);
-        expect(() => session.catalog.createTable("t", { path: " " })).toThrow(/path/);
-        expect(() => session.catalog.createTable("t", { source: "" })).toThrow(/source/);
-        expect(() => session.catalog.createTable("t", { schema: " " })).toThrow(/schema/);
-        expect(() => session.catalog.createTable("t", { description: "" })).toThrow(/description/);
-        expect(() => session.catalog.createTable("t", { options: { "": "x" } })).toThrow(/option name/);
-        expect(() => session.catalog.createTable("t", { options: { k: 1 as never } })).toThrow(/option "k" must be a string/);
-        expect(() => session.catalog.createExternalTable("", { path: "/p" })).toThrow(/tableName/);
+    it("validates create-table options before any RPC", async () => {
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan");
+        await expect(session.catalog.createTable("")).rejects.toThrow(/tableName/);
+        await expect(session.catalog.createTable("t", { path: " " })).rejects.toThrow(/path/);
+        await expect(session.catalog.createTable("t", { source: "" })).rejects.toThrow(/source/);
+        await expect(session.catalog.createTable("t", { schema: " " })).rejects.toThrow(/schema/);
+        await expect(session.catalog.createTable("t", { description: "" })).rejects.toThrow(/description/);
+        await expect(session.catalog.createTable("t", { options: { "": "x" } })).rejects.toThrow(/option name/);
+        await expect(session.catalog.createTable("t", { options: { k: 1 as never } })).rejects.toThrow(/option "k" must be a string/);
+        await expect(session.catalog.createExternalTable("", { path: "/p" })).rejects.toThrow(/tableName/);
+        expect(execute).not.toHaveBeenCalled();
     });
 
     it("unwraps single-row results and rejects an empty one", async () => {

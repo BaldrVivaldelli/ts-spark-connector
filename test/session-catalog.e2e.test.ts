@@ -135,16 +135,19 @@ describe("catalog metadata, tables and caching (E2E)", () => {
 
     it("creates an external table from a file and manages its cache", async () => {
         const People = schema({ id: "int", name: "string" });
-        const rows = await session.catalog
-            .createTable(external, {
-                path: "/data/people.tsv",
-                source: "csv",
-                schema: People,
-                options: { header: "true", delimiter: "\t" },
-            })
-            .collect();
-        expect(rows.length).toBeGreaterThan(0);
+        const people = await session.catalog.createTable(external, {
+            path: "/data/people.tsv",
+            source: "csv",
+            schema: People,
+            options: { header: "true", delimiter: "\t" },
+        });
+        // The table exists before any action on the returned DataFrame ...
+        expect(await session.catalog.tableExists(external)).toBe(true);
         expect(await session.catalog.getTable(external)).toMatchObject({ name: external, tableType: "EXTERNAL" });
+        // ... and that DataFrame can be acted on repeatedly without re-creating it.
+        const rows = await people.collect();
+        expect(rows.length).toBeGreaterThan(0);
+        expect(await people.count()).toBe(BigInt(rows.length));
         expect(await session.table(external).count()).toBe(BigInt(rows.length));
 
         expect(await session.catalog.isCached(external)).toBe(false);

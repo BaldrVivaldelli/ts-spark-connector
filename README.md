@@ -467,13 +467,13 @@ unwrap their single result; `getDatabase`, `getTable` and `getFunction` resolve
 to one typed row and reject when the object does not exist. `listFunctions`
 lists registered functions. Tables are created from data sources with
 `createTable(name, { path, source, schema, description, options })` (external
-when `path` is given) or `createExternalTable`, both returning the new table
-as a DataFrame; `cacheTable(name, storageLevel?)`, `uncacheTable`, `clearCache`,
+when `path` is given) or `createExternalTable`; both create the table right
+away and resolve with it as a DataFrame; `cacheTable(name, storageLevel?)`, `uncacheTable`, `clearCache`,
 `refreshTable`, `refreshByPath` and `recoverPartitions` manage caches and
 metadata:
 
 ```ts
-const people = session.catalog.createTable("people", {
+const people = await session.catalog.createTable("people", {
   path: "/data/people.tsv",
   source: "csv",
   schema: schema({ id: "int", name: "string" }),

@@ -4,6 +4,7 @@ import { DFProgram } from "../algebra/read";
 import { CatalogOperation } from "../types/catalog";
 import { DeclaredSchema, InferSchema, SchemaDef, arrayType, schema } from "../schema/schema";
 import { UnknownSchema } from "../schema/schema-model";
+import type { SqlCap } from "../algebra/read/batch-capabilities";
 
 /**
  * Row shape of `catalog.listCatalogs()`.
@@ -316,26 +317,37 @@ export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
 
     /**
      * Creates a table from a data source (an external table when `path` is
-     * given, a managed one otherwise) and returns it as a DataFrame.
+     * given, a managed one otherwise). Like PySpark, the table is created
+     * right away; the result is the new table as a DataFrame.
      */
-    createTable(tableName: string, options: CreateTableOptions = {}): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.plan({
+    async createTable(
+        tableName: string,
+        options: CreateTableOptions = {},
+    ): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>> {
+        const name = requireName(tableName, "createTable() tableName");
+        await this.createNow({
             method: "createTable",
-            tableName: requireName(tableName, "createTable() tableName"),
+            tableName: name,
             ...createTableFields("createTable()", options),
             ...(options.description !== undefined
                 ? { description: requireName(options.description, "createTable() description") }
                 : {}),
         });
+        return this.session.table<R, E, G>(name);
     }
 
-    /** Creates an external table backed by `path` and returns it as a DataFrame. */
-    createExternalTable(tableName: string, options: CreateTableOptions = {}): ReadChainedDataFrame<UnknownSchema, R, E, G> {
-        return this.plan({
+    /** Creates an external table backed by `path` right away and returns it as a DataFrame. */
+    async createExternalTable(
+        tableName: string,
+        options: CreateTableOptions = {},
+    ): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>> {
+        const name = requireName(tableName, "createExternalTable() tableName");
+        await this.createNow({
             method: "createExternalTable",
-            tableName: requireName(tableName, "createExternalTable() tableName"),
+            tableName: name,
             ...createTableFields("createExternalTable()", options),
         });
+        return this.session.table<R, E, G>(name);
     }
 
     /** Caches a table in memory (or at the given storage level, e.g. `DISK_ONLY`). */
@@ -415,6 +427,15 @@ export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
             throw new TypeError(`catalog.${op.method} expected a single row but received none.`);
         }
         return row as Row;
+    }
+
+    /**
+     * Runs a create-table operation once. Spark creates the table while it
+     * plans the relation, so a `limit(0)` performs the side effect without
+     * reading the new table back.
+     */
+    private async createNow(op: CatalogOperation): Promise<void> {
+        await this.plan(op).limit(0).collectRaw();
     }
 
     /** Runs an operation executed only for its server-side effect. */
