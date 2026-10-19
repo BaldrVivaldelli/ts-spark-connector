@@ -5,24 +5,41 @@ import { sparkGrpcClient } from "../src/client/sparkClient";
 
 type Response = Record<string, unknown>;
 
-/** A long-running ExecutePlan stream the test feeds, which ends on abort like a real cancelled call. */
-function busStream() {
-    const queue: Response[] = [];
-    let wake: (() => void) | undefined;
-    let ended = false;
-    let failure: unknown;
-    let signal: AbortSignal | undefined;
-    const notify = () => { const w = wake; wake = undefined; w?.(); };
-    const stream = {
-        requests: [] as Array<{ request: Response; config: Record<string, unknown> | undefined }>,
-        push(response: Response) { queue.push(response); notify(); },
-        end() { ended = true; notify(); },
-        fail(error: unknown) { failure = error; notify(); },
-        get aborted() { return signal?.aborted ?? false; },
+/** One long-running ExecutePlan stream the test feeds; it ends on abort like a real cancelled call. */
+type Connection = {
+    push(response: Response): void;
+    end(): void;
+    fail(error: unknown): void;
+    readonly aborted: boolean;
+};
+
+/** A factory of listener-bus streams: every `executePlanStream` call opens a new connection. */
+function busStreams() {
+    const connections: Connection[] = [];
+    const requests: Array<{ request: Response; config: Record<string, unknown> | undefined }> = [];
+    const latest = () => connections[connections.length - 1]!;
+    const facade = {
+        connections,
+        requests,
+        push: (response: Response) => latest().push(response),
+        end: () => latest().end(),
+        fail: (error: unknown) => latest().fail(error),
+        get aborted() { return latest().aborted; },
         generator: async function* (request: Response, config?: Record<string, unknown>) {
-            stream.requests.push({ request, config });
-            signal = config?.signal as AbortSignal | undefined;
+            const queue: Response[] = [];
+            let wake: (() => void) | undefined;
+            let ended = false;
+            let failure: unknown;
+            const signal = config?.signal as AbortSignal | undefined;
+            const notify = () => { const w = wake; wake = undefined; w?.(); };
             signal?.addEventListener("abort", () => { ended = true; notify(); }, { once: true });
+            connections.push({
+                push(response) { queue.push(response); notify(); },
+                end() { ended = true; notify(); },
+                fail(error) { failure = error; notify(); },
+                get aborted() { return signal?.aborted ?? false; },
+            });
+            requests.push({ request, config });
             for (;;) {
                 if (failure !== undefined) throw failure;
                 if (queue.length > 0) { yield queue.shift()!; continue; }
@@ -31,7 +48,7 @@ function busStream() {
             }
         },
     };
-    return stream;
+    return facade;
 }
 
 function newSession(events: SparkTelemetryEvent[] = []) {
@@ -51,6 +68,11 @@ const progressEvent = (batchId: number) => ({
             event_type: "QUERY_PROGRESS_EVENT",
             event_json: JSON.stringify({ progress: { id: "q", runId: "r", name: null, timestamp: "t", batchId } }),
         }],
+    },
+});
+const idleEvent = (timestamp: string) => ({
+    streaming_query_listener_events_result: {
+        events: [{ event_type: "QUERY_IDLE_EVENT", event_json: JSON.stringify({ id: "q", runId: "r", timestamp }) }],
     },
 });
 
@@ -150,7 +172,7 @@ describe("streaming query listeners", () => {
     it("opens one unbounded listener bus for the first listener and dispatches every event kind", async () => {
         const events: SparkTelemetryEvent[] = [];
         const session = newSession(events);
-        const bus = busStream();
+        const bus = busStreams();
         vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
         const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
         const received: Array<[string, unknown]> = [];
@@ -233,10 +255,100 @@ describe("streaming query listeners", () => {
         await session.close();
     });
 
+    it("serialises add, remove and add so one bus is closed before the next opens", async () => {
+        const session = newSession();
+        const bus = busStreams();
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+        const first: StreamingQueryListener = { onQueryIdle: vi.fn() };
+        const second: StreamingQueryListener = { onQueryIdle: vi.fn() };
+
+        const addingFirst = session.streams.addListener(first);
+        await settled();
+        const removingFirst = session.streams.removeListener(first);
+        const addingSecond = session.streams.addListener(second);
+        await settled();
+        // The second registration waits: the first bus is still being acknowledged.
+        expect(bus.connections).toHaveLength(1);
+        expect(session.streams.getListeners()).toEqual([first]);
+
+        bus.connections[0]!.push(ack);
+        await addingFirst;
+        await removingFirst;
+        await settled();
+        expect(execute).toHaveBeenCalledOnce();
+        expect(bus.connections[0]!.aborted).toBe(true);
+        expect(bus.connections).toHaveLength(2);
+        expect(bus.connections[1]!.aborted).toBe(false);
+
+        bus.connections[1]!.push(ack);
+        await addingSecond;
+        expect(session.streams.getListeners()).toEqual([second]);
+        bus.connections[1]!.push(idleEvent("later"));
+        await settled();
+        expect(second.onQueryIdle).toHaveBeenCalledWith({ id: "q", runId: "r", timestamp: "later" });
+        expect(first.onQueryIdle).not.toHaveBeenCalled();
+        await session.close();
+    });
+
+    it("still closes the bus when the server rejects the remove command", async () => {
+        const events: SparkTelemetryEvent[] = [];
+        const session = newSession(events);
+        const bus = busStreams();
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
+        vi.spyOn(sparkGrpcClient, "executePlan").mockRejectedValue(new Error("server unavailable"));
+        const listener: StreamingQueryListener = { onQueryIdle: vi.fn() };
+
+        const adding = session.streams.addListener(listener);
+        await settled();
+        bus.push(ack);
+        await adding;
+
+        await expect(session.streams.removeListener(listener)).resolves.toBeUndefined();
+        expect(bus.aborted).toBe(true);
+        expect(events.map(event => [event.name, event.attributes.reason])).toEqual([
+            ["spark.streaming.listener_bus_remove_error", "server unavailable"],
+        ]);
+        expect(session.streams.getListeners()).toEqual([]);
+        await session.close();
+    });
+
+    it("never waits for listener callbacks and reports the ones that reject", async () => {
+        const events: SparkTelemetryEvent[] = [];
+        const session = newSession(events);
+        const bus = busStreams();
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
+        vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+        const stuck: StreamingQueryListener = { onQueryIdle: () => new Promise<void>(() => undefined) };
+        const rejecting: StreamingQueryListener = { onQueryIdle: () => Promise.reject(new Error("async failure")) };
+        const after = vi.fn();
+
+        const adding = session.streams.addListener(stuck);
+        await settled();
+        bus.push(ack);
+        await adding;
+        await session.streams.addListener(rejecting);
+        await session.streams.addListener({ onQueryIdle: after });
+
+        bus.push(idleEvent("t1"));
+        bus.push(idleEvent("t2"));
+        await settled();
+        // The stuck callback did not hold back later events or listeners.
+        expect(after).toHaveBeenCalledTimes(2);
+        expect(events.map(event => [event.name, event.attributes.reason])).toEqual([
+            ["spark.streaming.listener_error", "async failure"],
+            ["spark.streaming.listener_error", "async failure"],
+        ]);
+
+        await session.streams.removeListener(stuck);
+        await session.close();
+        expect(bus.aborted).toBe(true);
+    });
+
     it("rejects addListener when the bus ends or fails before the server acknowledges it", async () => {
         const events: SparkTelemetryEvent[] = [];
         const session = newSession(events);
-        const ended = busStream();
+        const ended = busStreams();
         vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementationOnce(ended.generator as never);
         const listener: StreamingQueryListener = { onQueryIdle: () => undefined };
 
@@ -246,7 +358,7 @@ describe("streaming query listeners", () => {
         await expect(adding).rejects.toThrow(/ended before the server acknowledged/);
         expect(session.streams.getListeners()).toEqual([]);
 
-        const failing = busStream();
+        const failing = busStreams();
         vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementationOnce(failing.generator as never);
         const retry = session.streams.addListener(listener);
         await settled();
@@ -262,7 +374,7 @@ describe("streaming query listeners", () => {
     it("drops the listeners and the bus when the session closes, without a remove command", async () => {
         const events: SparkTelemetryEvent[] = [];
         const session = newSession(events);
-        const bus = busStream();
+        const bus = busStreams();
         vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
         const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
         const terminated = vi.fn();
@@ -281,6 +393,21 @@ describe("streaming query listeners", () => {
         await session.close();
         expect(bus.aborted).toBe(true);
         expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("lets close() cancel a bus that is still waiting for its acknowledgement", async () => {
+        const events: SparkTelemetryEvent[] = [];
+        const session = newSession(events);
+        const bus = busStreams();
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(bus.generator as never);
+        const listener: StreamingQueryListener = { onQueryIdle: () => undefined };
+
+        const adding = session.streams.addListener(listener);
+        await settled();
+        await session.close();
+        expect(bus.aborted).toBe(true);
+        await expect(adding).rejects.toThrow(/ended before the server acknowledged/);
+        expect(events).toEqual([]);
     });
 
     it("does not report the abort of a bus it closed on purpose", async () => {

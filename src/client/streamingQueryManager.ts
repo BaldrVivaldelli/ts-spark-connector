@@ -55,9 +55,10 @@ export type QueryTerminatedEvent = {
 
 /**
  * Callbacks for the lifecycle of the session's streaming queries, like
- * PySpark's `StreamingQueryListener`. Every method is optional; a rejected
- * promise or a thrown error is reported through the session logger and never
- * stops the event stream.
+ * PySpark's `StreamingQueryListener`. Every method is optional. Callbacks are
+ * not awaited by the event loop, so a slow one never delays later events or
+ * `removeListener()`; a thrown error or a rejected promise is reported
+ * through the session logger and never stops the event stream.
  * @public
  */
 export interface StreamingQueryListener {
@@ -68,6 +69,14 @@ export interface StreamingQueryListener {
 }
 
 type ListenerMethod = keyof StreamingQueryListener;
+
+type ListenerBus = {
+    abort: AbortController;
+    /** Resolves once the server acknowledged the listener bus. */
+    ready: Promise<void>;
+    /** Settles when the event stream ends. */
+    done: Promise<void>;
+};
 
 /** Reads the first manager result of a command's responses, which every manager command reports. */
 function managerResult(
@@ -103,14 +112,14 @@ function parseEvent(json: string, label: string): Record<string, unknown> {
  * @public
  */
 export class StreamingQueryManager {
-    private readonly listeners: StreamingQueryListener[] = [];
-    private bus?: {
-        abort: AbortController;
-        /** Resolves once the server acknowledged the listener bus. */
-        ready: Promise<void>;
-        /** Settles when the event stream ends. */
-        done: Promise<void>;
-    };
+    private listeners: StreamingQueryListener[] = [];
+    private bus?: ListenerBus;
+    /**
+     * Serialises `addListener`, `removeListener` and `shutdown`, the way
+     * PySpark's listener bus takes a lock: a bus is fully closed before the
+     * next one opens, so the server never sees a remove racing an add.
+     */
+    private operations: Promise<void> = Promise.resolve();
 
     /** @internal Obtained from `session.streams`. */
     constructor(private readonly session: SparkSession) {}
@@ -191,37 +200,52 @@ export class StreamingQueryManager {
         if (listener === null || typeof listener !== "object") {
             throw new TypeError("addListener() requires a listener object.");
         }
-        if (this.listeners.includes(listener)) return;
-        this.listeners.push(listener);
-        if (!this.bus) this.bus = this.openBus();
-        try {
-            await this.bus.ready;
-        } catch (error) {
-            this.listeners.splice(this.listeners.indexOf(listener), 1);
-            throw error;
-        }
+        return this.serialized(async () => {
+            if (this.listeners.includes(listener)) return;
+            this.listeners.push(listener);
+            if (!this.bus) this.bus = this.openBus();
+            try {
+                await this.bus.ready;
+            } catch (error) {
+                this.listeners = this.listeners.filter(known => known !== listener);
+                throw error;
+            }
+        });
     }
 
     /** Unregisters a listener; the last removal closes the event stream. */
-    async removeListener(listener: StreamingQueryListener): Promise<void> {
-        const index = this.listeners.indexOf(listener);
-        if (index < 0) return;
-        this.listeners.splice(index, 1);
-        if (this.listeners.length === 0) await this.closeBus(true);
+    removeListener(listener: StreamingQueryListener): Promise<void> {
+        return this.serialized(async () => {
+            const index = this.listeners.indexOf(listener);
+            if (index < 0) return;
+            this.listeners.splice(index, 1);
+            if (this.listeners.length === 0) await this.closeBus(true);
+        });
     }
 
     /** @internal Delivers the start event Spark attached to a query started by this session. */
     dispatchQueryStarted(eventJson: string): void {
-        void this.dispatch("onQueryStarted", () => parseEvent(eventJson, "query started") as QueryStartedEvent);
+        this.dispatch("onQueryStarted", () => parseEvent(eventJson, "query started") as QueryStartedEvent);
     }
 
     /** @internal Drops the listeners and the event stream when the session closes. */
-    async shutdown(): Promise<void> {
-        this.listeners.length = 0;
-        await this.closeBus(false);
+    shutdown(): Promise<void> {
+        // Cancel a bus that is still waiting for its acknowledgement so a
+        // pending addListener cannot keep the session from closing.
+        this.bus?.abort.abort("streaming listener bus closed");
+        return this.serialized(async () => {
+            this.listeners = [];
+            await this.closeBus(false);
+        });
     }
 
-    private openBus(): NonNullable<StreamingQueryManager["bus"]> {
+    private serialized<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.operations.then(operation, operation);
+        this.operations = run.then(() => undefined, () => undefined);
+        return run;
+    }
+
+    private openBus(): ListenerBus {
         const abort = new AbortController();
         let markReady!: () => void;
         let failReady!: (error: unknown) => void;
@@ -232,7 +256,7 @@ export class StreamingQueryManager {
         // The rejection reaches callers through `addListener`; it must not
         // surface as an unhandled rejection when nobody awaits `ready`.
         ready.catch(() => undefined);
-        const bus = { abort, ready, done: Promise.resolve() };
+        const bus: ListenerBus = { abort, ready, done: Promise.resolve() };
         bus.done = (async () => {
             const executor = SparkConnectExecutor.for(this.session);
             const execution = this.session.resolveExecution({ signal: abort.signal });
@@ -245,7 +269,7 @@ export class StreamingQueryManager {
                     const result = extractListenerEventsResult(response);
                     if (!result) continue;
                     if (result.listener_bus_listener_added ?? result.listenerBusListenerAdded) markReady();
-                    for (const event of result.events ?? []) await this.dispatchBusEvent(event);
+                    for (const event of result.events ?? []) this.dispatchBusEvent(event);
                 }
                 failReady(new Error("The streaming listener bus ended before the server acknowledged it."));
             } catch (error) {
@@ -263,23 +287,29 @@ export class StreamingQueryManager {
         const bus = this.bus;
         if (!bus) return;
         this.bus = undefined;
-        if (notifyServer) {
-            // Spark ends the long-running execution once the bus listener is
-            // removed; the abort below only covers a server that does not.
-            await SparkConnectExecutor.for(this.session).runCommand({
-                streaming_query_listener_bus_command: { remove_listener_bus_listener: true },
-            });
+        try {
+            if (notifyServer) {
+                // Spark ends the long-running execution once the bus listener is
+                // removed; the abort below covers a server that does not, or one
+                // that could not be reached.
+                await SparkConnectExecutor.for(this.session).runCommand({
+                    streaming_query_listener_bus_command: { remove_listener_bus_listener: true },
+                });
+            }
+        } catch (error) {
+            this.report("spark.streaming.listener_bus_remove_error", error);
+        } finally {
+            bus.abort.abort("streaming listener bus closed");
+            await bus.done;
         }
-        bus.abort.abort("streaming listener bus closed");
-        await bus.done;
     }
 
-    private async dispatchBusEvent(event: StreamingQueryListenerEventMessage): Promise<void> {
+    private dispatchBusEvent(event: StreamingQueryListenerEventMessage): void {
         const json = event.event_json ?? event.eventJson ?? "";
         switch (event.event_type ?? event.eventType) {
             case "QUERY_PROGRESS_EVENT":
             case 1:
-                await this.dispatch("onQueryProgress", () => {
+                this.dispatch("onQueryProgress", () => {
                     const parsed = parseEvent(json, "query progress");
                     const progress = parsed.progress;
                     if (progress === null || typeof progress !== "object") {
@@ -290,11 +320,11 @@ export class StreamingQueryManager {
                 return;
             case "QUERY_TERMINATED_EVENT":
             case 2:
-                await this.dispatch("onQueryTerminated", () => parseEvent(json, "query terminated") as QueryTerminatedEvent);
+                this.dispatch("onQueryTerminated", () => parseEvent(json, "query terminated") as QueryTerminatedEvent);
                 return;
             case "QUERY_IDLE_EVENT":
             case 3:
-                await this.dispatch("onQueryIdle", () => parseEvent(json, "query idle") as QueryIdleEvent);
+                this.dispatch("onQueryIdle", () => parseEvent(json, "query idle") as QueryIdleEvent);
                 return;
             default:
                 this.report("spark.streaming.listener_event_ignored", new Error(
@@ -303,10 +333,15 @@ export class StreamingQueryManager {
         }
     }
 
-    private async dispatch<M extends ListenerMethod>(
+    /**
+     * Calls every listener that implements `method`. Callbacks start in
+     * registration order but are never awaited: the event loop, `removeListener`
+     * and `close()` must not depend on user code settling.
+     */
+    private dispatch<M extends ListenerMethod>(
         method: M,
         decode: () => Parameters<NonNullable<StreamingQueryListener[M]>>[0],
-    ): Promise<void> {
+    ): void {
         const targets = this.listeners.filter(listener => typeof listener[method] === "function");
         if (targets.length === 0) return;
         let event: Parameters<NonNullable<StreamingQueryListener[M]>>[0];
@@ -318,7 +353,10 @@ export class StreamingQueryManager {
         }
         for (const listener of targets) {
             try {
-                await (listener[method] as (payload: typeof event) => void | Promise<void>).call(listener, event);
+                const outcome = (listener[method] as (payload: typeof event) => void | Promise<void>).call(listener, event);
+                if (outcome instanceof Promise) {
+                    outcome.catch(error => this.report("spark.streaming.listener_error", error));
+                }
             } catch (error) {
                 this.report("spark.streaming.listener_error", error);
             }
