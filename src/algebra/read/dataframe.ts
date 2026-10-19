@@ -4,9 +4,16 @@ import {
     DescribeCap,
     HintCap,
     NullHandlingCap,
+    AsOfJoinCap,
+    CachedRelationCap,
+    LateralJoinCap,
+    MetadataCap,
+    ObserveCap,
     OffsetCap,
-    ParityCap,
+    PartitionSortCap,
     RepartitionByExpressionCap,
+    SchemaCap,
+    WatermarkDedupCap,
     RepartitionCap,
     ReshapeCap,
     SamplingCap,
@@ -31,7 +38,14 @@ export type DFBatchCaps<R, E, G> =
     & ReshapeCap<R, E>
     & OffsetCap<R>
     & RepartitionByExpressionCap<R, E>
-    & ParityCap<R, E>;
+    & PartitionSortCap<R, E>
+    & WatermarkDedupCap<R, E>
+    & LateralJoinCap<R, E>
+    & AsOfJoinCap<R, E>
+    & ObserveCap<R, E>
+    & CachedRelationCap<R>
+    & SchemaCap<R>
+    & MetadataCap<R, E>;
 
 // DFAlg abierto: le podés inyectar categorías nuevas sin tocar este archivo
 /** @internal */

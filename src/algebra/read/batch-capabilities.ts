@@ -123,21 +123,42 @@ export type AsOfJoinSpec<E> = {
     direction: AsOfDirection;
 };
 
-/** @internal Relations added for PySpark parity (issue #92). */
-export interface ParityCap<R, E> {
-    /** Sorts every partition on its own (`Sort.is_global = false`). */
+/** @internal Sorts every partition on its own (`Sort.is_global = false`). */
+export interface PartitionSortCap<R, E> {
     sortWithinPartitions(plan: R, orders: SortOrder<E>[]): R;
-    /** `dropDuplicates` that also drops late duplicates within the watermark. */
+}
+
+/** @internal `dropDuplicates` that also drops late duplicates within the watermark. */
+export interface WatermarkDedupCap<R, E> {
     dropDuplicatesWithinWatermark(plan: R, cols?: E[]): R;
-    /** `right` may reference columns of `left` (`LateralJoin`). */
+}
+
+/** @internal `right` may reference columns of `left` (`LateralJoin`). */
+export interface LateralJoinCap<R, E> {
     lateralJoin(left: R, right: R, on: E | undefined, joinType: JoinTypeInput): R;
+}
+
+/** @internal Closest-match join on an ordered column (`AsOfJoin`). */
+export interface AsOfJoinCap<R, E> {
     asOfJoin(left: R, right: R, spec: AsOfJoinSpec<E>): R;
-    /** `CollectMetrics`: named metrics evaluated over the rows the plan produces. */
+}
+
+/** @internal `CollectMetrics`: named metrics evaluated over the rows the plan produces. */
+export interface ObserveCap<R, E> {
     observe(plan: R, name: string, metrics: E[]): R;
-    /** A relation checkpointed on the server (`CachedRemoteRelation`). */
+}
+
+/** @internal A relation checkpointed on the server (`CachedRemoteRelation`). */
+export interface CachedRelationCap<R> {
     cachedRemoteRelation(relationId: string): R;
-    /** Reconciles the rows to a DDL schema (`ToSchema`). */
+}
+
+/** @internal Reconciles the rows to a DDL schema (`ToSchema`). */
+export interface SchemaCap<R> {
     toSchema(plan: R, ddl: string): R;
-    /** Re-emits `column` as `name` with JSON column metadata. */
+}
+
+/** @internal Re-emits `column` as `name` with JSON column metadata. */
+export interface MetadataCap<R, E> {
     withMetadata(plan: R, name: string, column: E, metadata: string): R;
 }
