@@ -30,7 +30,9 @@ import {
     SqlCap,
 } from "../algebra/read/batch-capabilities";
 import type { AnalyzeField } from "../client/sparkConnectExecutor";
-import type { SortKeyBuilder } from "../engine/column";
+import type { EBuilder as ColumnExpression, SortKeyBuilder } from "../engine/column";
+import { DataFrameWriterV2 } from "../write/dataFrameWriterV2";
+import { MergeIntoWriter } from "../write/mergeIntoWriter";
 import {
     DataFrameNaFunctions,
     DataFrameStatFunctions,
@@ -1472,6 +1474,37 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     /** Hash of the logical plan; equal for semantically equal plans. */
     async semanticHash(): Promise<number> {
         return Number((await this.analyze("semantic_hash")).result);
+    }
+
+    // ---------------------------------------------------------------------
+    // Table writes (DataFrameWriterV2 and MERGE INTO)
+    // ---------------------------------------------------------------------
+
+    /** Writes to a catalog table through Spark's DataFrameWriterV2. */
+    writeTo(
+        this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>,
+        table: string,
+    ): DataFrameWriterV2 {
+        if (this.streaming) {
+            throw new Error("Cannot use writeTo() on a streaming DataFrame. Use writeStream() instead.");
+        }
+        return new DataFrameWriterV2(this.session, () => this.toProtoRelation(), table);
+    }
+
+    /**
+     * Merges this DataFrame (the source) into `table` on `condition`. Add
+     * `whenMatched` / `whenNotMatched` / `whenNotMatchedBySource` clauses and
+     * finish with `merge()`.
+     */
+    mergeInto(
+        this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>,
+        table: string,
+        condition: ColumnExpression,
+    ): MergeIntoWriter {
+        if (this.streaming) {
+            throw new Error("Cannot use mergeInto() on a streaming DataFrame.");
+        }
+        return new MergeIntoWriter(this.session, () => this.toProtoRelation(), table, condition);
     }
 
     private toProtoRelation(): ProtoRel {

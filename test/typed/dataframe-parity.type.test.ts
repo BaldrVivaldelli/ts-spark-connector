@@ -83,6 +83,12 @@ function typeLevelGuards() {
   void people.approxQuantile("missing", [0.5], 0);
   // @ts-expect-error alias keeps the schema, so unknown columns stay unknown
   people.alias("p").select("missing");
+
+  const stream = session.readStream("rate", { rowsPerSecond: "1" });
+  // @ts-expect-error a streaming DataFrame cannot use writeTo
+  stream.writeTo("t");
+  // @ts-expect-error a streaming DataFrame cannot use mergeInto
+  stream.mergeInto("t", col("a").eq(col("b")));
 }
 
 describe("DataFrame parity typing", () => {

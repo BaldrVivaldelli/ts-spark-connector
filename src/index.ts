@@ -96,6 +96,14 @@ export type {
     ReaderOptionValue,
 } from "./read/dataFrameReaderTF";
 export { DataFrameWriterTF } from "./write/dataFrameWriterTF";
+export { DataFrameWriterV2 } from "./write/dataFrameWriterV2";
+export type { WriterV2Mode } from "./write/dataFrameWriterV2";
+export {
+    MergeIntoWriter,
+    WhenMatched,
+    WhenNotMatched,
+    WhenNotMatchedBySource,
+} from "./write/mergeIntoWriter";
 export type {
     DefaultR as DefaultDataFrameRepresentation,
     Impl as WriterBackendImplementation,

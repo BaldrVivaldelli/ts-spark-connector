@@ -344,6 +344,22 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
 }
 
 // @public
+export class DataFrameWriterV2 {
+    append(): Promise<void>;
+    clusterBy(...cols: string[]): DataFrameWriterV2;
+    create(): Promise<void>;
+    createOrReplace(): Promise<void>;
+    option(key: string, value: WriterOptionValue): DataFrameWriterV2;
+    options(options: Readonly<Record<string, WriterOptionValue>>): DataFrameWriterV2;
+    overwrite(condition: EBuilder): Promise<void>;
+    overwritePartitions(): Promise<void>;
+    partitionedBy(...cols: Array<string | EBuilder>): DataFrameWriterV2;
+    replace(): Promise<void>;
+    tableProperty(property: string, value: string): DataFrameWriterV2;
+    using(provider: string): DataFrameWriterV2;
+}
+
+// @public
 export interface DecimalSpec {
     // (undocumented)
     readonly kind: "decimal";
@@ -516,6 +532,15 @@ export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldS
 export function mapType<const Key extends FieldSpec, const Value extends FieldSpec, const N extends boolean = false>(key: Key, value: Value, nullable?: N): MapSpec<Key, Value> & NullableFlag<N>;
 
 // @public
+export class MergeIntoWriter {
+    merge(): Promise<void>;
+    whenMatched(condition?: EBuilder): WhenMatched;
+    whenNotMatched(condition?: EBuilder): WhenNotMatched;
+    whenNotMatchedBySource(condition?: EBuilder): WhenNotMatchedBySource;
+    withSchemaEvolution(): MergeIntoWriter;
+}
+
+// @public
 export type NAFillValue = string | number | boolean | bigint;
 
 // @public
@@ -638,6 +663,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     melt(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     mergeHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
+    mergeInto(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, table: string, condition: EBuilder): MergeIntoWriter;
     get na(): DataFrameNaFunctions<S, R, E, G, CDF, CEX>;
     offset(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -730,6 +756,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     write(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>): DataFrameWriterTF<R, E, G, WBatch, Exclude<CDF, StreamingMark<R>>, CEX, BatchWriterAlg<R>>;
     // (undocumented)
     writeStream(this: ReadChainedDataFrame<S, R, E, G, CDF & StreamingMark<R>, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>>;
+    writeTo(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, table: string): DataFrameWriterV2;
 }
 
 // @public (undocumented)
@@ -1204,6 +1231,25 @@ export function upper<T extends string | null, E>(col: TypedColumn<T, E>): Typed
 // @public (undocumented)
 export function when(cond: EBuilder, val: EBuilder | string | number | boolean): ExpressionCaseChain;
 
+// @public
+export class WhenMatched {
+    delete(): MergeIntoWriter;
+    update(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+    updateAll(): MergeIntoWriter;
+}
+
+// @public
+export class WhenNotMatched {
+    insert(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+    insertAll(): MergeIntoWriter;
+}
+
+// @public
+export class WhenNotMatchedBySource {
+    delete(): MergeIntoWriter;
+    update(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+}
+
 // @public (undocumented)
 const Window_2: {
     partitionBy: (...keys: (string | EBuilder)[]) => {
@@ -1234,6 +1280,9 @@ export type WindowSpec<E> = {
 
 // @public (undocumented)
 export type WriterOptionValue = string | number | boolean | bigint;
+
+// @public
+export type WriterV2Mode = "create" | "replace" | "createOrReplace" | "append" | "overwrite" | "overwritePartitions";
 
 // (No @packageDocumentation comment for this package)
 

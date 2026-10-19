@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SparkSession, col, lit, schema } from "../src";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
@@ -188,5 +188,67 @@ describe("actions and introspection (E2E)", () => {
         expect(await filtered.sameSemantics(people().filter(col("id").gt(1)))).toBe(true);
         expect(await filtered.sameSemantics(people())).toBe(false);
         expect(await filtered.semanticHash()).toBe(await people().filter(col("id").gt(1)).semanticHash());
+    });
+});
+
+describe("table writes on Delta (E2E)", () => {
+    const Events = schema({ id: "long", name: "string", day: "string" });
+    const events = (rows: Array<{ id: bigint; name: string; day: string }>) => session.createDataFrame(rows, Events);
+    const table = "default.parity_events";
+    const target = "default.parity_target";
+
+    beforeAll(async () => {
+        await session.sql(`DROP TABLE IF EXISTS ${table}`).collectRaw();
+        await session.sql(`DROP TABLE IF EXISTS ${target}`).collectRaw();
+    });
+
+    it("creates, appends to and overwrites a table through writeTo", async () => {
+        await events([{ id: 1n, name: "ada", day: "d1" }])
+            .writeTo(table)
+            .using("delta")
+            .partitionedBy("day")
+            .tableProperty("delta.appendOnly", "false")
+            .create();
+        await events([{ id: 2n, name: "bob", day: "d2" }]).writeTo(table).append();
+        expect(await session.table(table).count()).toBe(2n);
+
+        await events([{ id: 3n, name: "cy", day: "d2" }]).writeTo(table).overwrite(col("day").eq("d2"));
+        const rows = await session.table(table).orderBy("id").collect();
+        expect(rows).toEqual([{ id: 1n, name: "ada", day: "d1" }, { id: 3n, name: "cy", day: "d2" }]);
+
+        await events([{ id: 9n, name: "zed", day: "d9" }]).writeTo(table).using("delta").createOrReplace();
+        expect(await session.table(table).collect()).toEqual([{ id: 9n, name: "zed", day: "d9" }]);
+    });
+
+    it("merges a source DataFrame into a Delta table", async () => {
+        await events([
+            { id: 1n, name: "ada", day: "d1" },
+            { id: 2n, name: "bob", day: "d1" },
+            { id: 4n, name: "old", day: "d0" },
+        ]).writeTo(target).using("delta").create();
+
+        await events([
+            { id: 2n, name: "bobby", day: "d2" },
+            { id: 3n, name: "cy", day: "d2" },
+        ])
+            .alias("s")
+            .mergeInto(target, col("parity_target.id").eq(col("s.id")))
+            .whenMatched().updateAll()
+            .whenNotMatched().insertAll()
+            .whenNotMatchedBySource(col("parity_target.day").eq("d0")).delete()
+            .merge();
+
+        expect(await session.table(target).orderBy("id").collect()).toEqual([
+            { id: 1n, name: "ada", day: "d1" },
+            { id: 2n, name: "bobby", day: "d2" },
+            { id: 3n, name: "cy", day: "d2" },
+        ]);
+
+        await events([{ id: 1n, name: "ignored", day: "d9" }])
+            .alias("s")
+            .mergeInto(target, col("parity_target.id").eq(col("s.id")))
+            .whenMatched().update({ name: lit("ADA") })
+            .merge();
+        expect((await session.table(target).filter(col("id").eq(1)).first())?.name).toBe("ADA");
     });
 });

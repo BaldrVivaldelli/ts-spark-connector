@@ -108,4 +108,51 @@ describe("Spark Connect wire conformance for the DataFrame parity relations", ()
             "SORT_DIRECTION_DESCENDING",
         ]);
     });
+
+    it("encodes WriteOperationV2 commands", () => {
+        const command = people()
+            .writeTo("db.people")
+            .using("delta")
+            .options({ a: "1" })
+            .tableProperty("p", "v")
+            .partitionedBy("age")
+            .clusterBy("name")
+            .buildCommand("overwrite", col("age").gt(30));
+        const decoded = wire({ command }).command;
+        expect(decoded.command_type).toBe("write_operation_v2");
+        expect(decoded.write_operation_v2).toMatchObject({
+            table_name: "db.people",
+            provider: "delta",
+            options: { a: "1" },
+            table_properties: { p: "v" },
+            mode: "MODE_OVERWRITE",
+            clustering_columns: ["name"],
+        });
+        expect(decoded.write_operation_v2.overwrite_condition.unresolved_function.function_name).toBe(">");
+        expect(decoded.write_operation_v2.partitioning_columns).toHaveLength(1);
+    });
+
+    it("encodes MergeIntoTable commands and their actions", () => {
+        const command = people()
+            .alias("s")
+            .mergeInto("t", col("t.id").eq(col("s.id")))
+            .whenMatched(col("s.age").gt(1)).update({ name: col("s.name") })
+            .whenNotMatched().insertAll()
+            .whenNotMatchedBySource().delete()
+            .withSchemaEvolution()
+            .buildCommand();
+        const decoded = wire({ command }).command.merge_into_table_command;
+        expect(decoded.target_table_name).toBe("t");
+        expect(decoded.with_schema_evolution).toBe(true);
+        expect(decoded.match_actions[0].merge_action).toMatchObject({
+            action_type: "ACTION_TYPE_UPDATE",
+            assignments: [{
+                key: { unresolved_attribute: { unparsed_identifier: "name" } },
+                value: { unresolved_attribute: { unparsed_identifier: "s.name" } },
+            }],
+        });
+        expect(decoded.match_actions[0].merge_action.condition.unresolved_function.function_name).toBe(">");
+        expect(decoded.not_matched_actions[0].merge_action.action_type).toBe("ACTION_TYPE_INSERT_STAR");
+        expect(decoded.not_matched_by_source_actions[0].merge_action.action_type).toBe("ACTION_TYPE_DELETE");
+    });
 });
