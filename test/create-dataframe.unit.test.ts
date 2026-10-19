@@ -132,6 +132,13 @@ describe("encodeLocalRelation", () => {
         ]);
     });
 
+    it("keeps trailing fractional zeros beyond the scale but rejects other excess digits", () => {
+        const Def = schema({ v: decimalType(5, 2) });
+        const buffer = Buffer.from(encodeLocalRelation([{ v: "12.500" }, { v: "-0.100000" }], Def.def));
+        expect(rowsFromArrowBuffers([buffer], Def.def)).toEqual([{ v: "12.50" }, { v: "-0.10" }]);
+        expect(() => encodeLocalRelation([{ v: "12.505" }], Def.def)).toThrow(/at most 2 decimals/);
+    });
+
     it.each([
         [decimalType(10, 2), "12.345", /at most 2 decimals/],
         [decimalType(4, 2), "123.45", /within 4 digits/],

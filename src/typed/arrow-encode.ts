@@ -128,9 +128,14 @@ function decimalValue(spec: DecimalSpec, value: unknown, at: string): Uint32Arra
     const text = typeof value === "bigint" ? value.toString() : typeof value === "string" ? value.trim() : undefined;
     const match = text === undefined ? null : /^([+-])?(\d*)(?:\.(\d*))?$/.exec(text);
     if (!match || (match[2] === "" && (match[3] ?? "") === "")) fail(at, expected, value);
-    const [, sign, whole, fraction = ""] = match;
+    const [, sign, whole] = match;
+    let fraction = match[3] ?? "";
     if (fraction.length > spec.scale) {
-        fail(at, `${expected} with at most ${spec.scale} decimals`, value);
+        // "12.500" fits DECIMAL(5,2); only non-zero digits past the scale do not.
+        if (/[1-9]/.test(fraction.slice(spec.scale))) {
+            fail(at, `${expected} with at most ${spec.scale} decimals`, value);
+        }
+        fraction = fraction.slice(0, spec.scale);
     }
     const digits = `${whole}${fraction.padEnd(spec.scale, "0")}`.replace(/^0+(?=\d)/, "");
     if (digits.length > spec.precision) {
