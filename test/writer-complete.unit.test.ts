@@ -204,6 +204,10 @@ describe("DataFrameWriterTF complete behavior", () => {
         expect(bare!.spec).toMatchObject({ format: "jdbc", mode: "ignore", options: { url: "jdbc:derby:memory:db", dbtable: "people" } });
         await expect(writer.jdbc("", "people")).rejects.toThrow(TypeError);
         await expect(writer.jdbc("jdbc:x", " ")).rejects.toThrow(TypeError);
+
+        // Like PySpark, the url and table arguments win over conflicting properties.
+        await writer.jdbc("jdbc:derby:memory:real", "real", undefined, { url: "jdbc:wrong", dbtable: "wrong", driver: "d" });
+        expect(executed()[6]!.spec.options).toEqual({ url: "jdbc:derby:memory:real", dbtable: "real", driver: "d" });
     });
 
     it("executes all stream transformations, shortcuts and actions", async () => {

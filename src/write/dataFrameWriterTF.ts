@@ -484,8 +484,11 @@ export class DataFrameWriterTF<
     ): Promise<void> {
         requireNonEmpty(url, "jdbc() url");
         requireNonEmpty(table, "jdbc() table");
-        let writer = this.format("jdbc").option("url", url).option("dbtable", table);
+        // Like PySpark: connection properties first, so the url and table
+        // arguments always win over a stray `url`/`dbtable` property.
+        let writer = this.format("jdbc");
         if (properties !== undefined) writer = writer.options(properties);
+        writer = writer.option("url", url).option("dbtable", table);
         if (mode !== undefined) writer = writer.mode(mode);
         return writer.save();
     }
