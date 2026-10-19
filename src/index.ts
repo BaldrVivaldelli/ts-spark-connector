@@ -15,6 +15,7 @@ export type {
     OperationState, OperationStatus,
 } from "./client/session";
 export type { ArtifactKind, ArtifactUpload } from "./client/artifacts";
+export { ArtifactUploadError } from "./client/artifacts";
 export { SparkUdfRegistration } from "./client/udf";
 export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";

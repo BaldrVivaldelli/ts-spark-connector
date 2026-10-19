@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { SparkSession, UnsupportedServerVersionError, arrayType } from "../src";
+import { ArtifactUploadError, SparkSession, UnsupportedServerVersionError, arrayType } from "../src";
 import { sparkGrpcClient } from "../src/client/sparkClient";
 import type { RpcMessage } from "../src/client/reattachableExecution";
 
@@ -57,10 +57,13 @@ describe("session.addArtifact(s)", () => {
 
     it("rejects CRC failures, bad arguments and closed sessions", async () => {
         vi.spyOn(sparkGrpcClient, "addArtifacts").mockResolvedValue({
-            artifacts: [{ name: "jars/udfs.jar", is_crc_successful: false }],
+            artifacts: [{ name: "files/ok.txt", is_crc_successful: true }, { name: "jars/udfs.jar", is_crc_successful: false }],
         });
         const spark = session();
-        await expect(spark.addArtifact(jar)).rejects.toThrow(/CRC mismatch/);
+        const failure = await spark.addArtifact(jar).catch(error => error);
+        expect(failure).toBeInstanceOf(ArtifactUploadError);
+        expect(failure).toMatchObject({ uploaded: ["files/ok.txt"], failed: ["jars/udfs.jar"] });
+        expect(failure.message).toMatch(/CRC mismatch/);
         await expect(spark.addArtifacts()).rejects.toThrow(/at least one file/);
         await expect(spark.addArtifact(path.join(dir, "config.json"))).rejects.toThrow(/not a jar/);
         vi.spyOn(sparkGrpcClient, "releaseSession").mockResolvedValue({});
@@ -95,16 +98,31 @@ describe("session.cacheArtifact and isArtifactCached", () => {
 
         const hash = await spark.cacheArtifact("payload");
         expect(hash).toBe("239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5");
+        // The status check comes first; the blob was unknown, so it was uploaded.
+        expect(status.mock.calls[0]![0]!.names).toEqual([`cache/${hash}`]);
+        expect(streams).toHaveLength(1);
         expect(streams[0]![0]).toMatchObject({ session_id: spark.getSessionId(), batch: { artifacts: [{ name: `cache/${hash}` }] } });
         expect(await spark.cacheArtifact(new Uint8Array([1, 2, 3]))).toMatch(/^[0-9a-f]{64}$/);
+        expect(streams).toHaveLength(2);
 
         expect(await spark.isArtifactCached("1".repeat(64))).toBe(true);
         expect(await spark.isArtifactCached("A".repeat(64))).toBe(false);
-        expect(status.mock.calls.map(call => call[0]!.names)).toEqual([[`cache/${"1".repeat(64)}`], [`cache/${"a".repeat(64)}`]]);
+        expect(status.mock.calls.slice(2).map(call => call[0]!.names)).toEqual([[`cache/${"1".repeat(64)}`], [`cache/${"a".repeat(64)}`]]);
+    });
+
+    it("does not upload a blob the server already holds", async () => {
+        const upload = vi.spyOn(sparkGrpcClient, "addArtifacts");
+        vi.spyOn(sparkGrpcClient, "artifactStatus").mockImplementation(async request => ({
+            statuses: Object.fromEntries((request.names as string[]).map(name => [name, { exists: true }])),
+        }));
+        const spark = session();
+        expect(await spark.cacheArtifact("payload")).toBe("239f59ed55e737c77147cf55ad0c1b030b6d7ee748a7426952f9b852d5a935e5");
+        expect(upload).not.toHaveBeenCalled();
     });
 
     it("validates its input and the server's confirmation", async () => {
         vi.spyOn(sparkGrpcClient, "addArtifacts").mockResolvedValue({ artifacts: [{ name: "cache/other", is_crc_successful: true }] });
+        vi.spyOn(sparkGrpcClient, "artifactStatus").mockResolvedValue({ statuses: {} });
         const spark = session();
         await expect(spark.cacheArtifact(7 as never)).rejects.toThrow(/Uint8Array or a string/);
         await expect(spark.cacheArtifact("")).rejects.toThrow(/non-empty blob/);

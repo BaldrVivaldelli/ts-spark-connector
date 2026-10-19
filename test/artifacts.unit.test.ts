@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
     ARTIFACT_CHUNK_SIZE,
+    ArtifactUploadError,
     artifactName,
     artifactRequests,
     cachedArtifactHash,
@@ -123,11 +124,25 @@ describe("cached artifact requests", () => {
 });
 
 describe("upload summaries", () => {
-    it("returns the confirmed names and rejects CRC failures", () => {
+    it("returns the confirmed names and rejects CRC failures with both lists", () => {
         expect(uploadedArtifactNames({ artifacts: [{ name: "jars/a.jar", is_crc_successful: true }] })).toEqual(["jars/a.jar"]);
         expect(uploadedArtifactNames({})).toEqual([]);
-        expect(() => uploadedArtifactNames({
-            artifacts: [{ name: "jars/a.jar", isCrcSuccessful: false }, { name: "files/b", is_crc_successful: true }],
-        })).toThrow(/jars\/a\.jar: CRC mismatch/);
+        const error = (() => {
+            try {
+                uploadedArtifactNames({
+                    artifacts: [{ name: "jars/a.jar", isCrcSuccessful: false }, { name: "files/b", is_crc_successful: true }],
+                });
+            } catch (caught) {
+                return caught;
+            }
+            throw new Error("expected a rejection");
+        })();
+        expect(error).toBeInstanceOf(ArtifactUploadError);
+        expect(error).toMatchObject({
+            name: "ArtifactUploadError",
+            message: "Spark rejected the upload of jars/a.jar: CRC mismatch.",
+            uploaded: ["files/b"],
+            failed: ["jars/a.jar"],
+        });
     });
 });

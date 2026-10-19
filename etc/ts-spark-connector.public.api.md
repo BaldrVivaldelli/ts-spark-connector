@@ -149,6 +149,15 @@ export type ArtifactUpload = {
 };
 
 // @public
+export class ArtifactUploadError extends Error {
+    constructor(uploaded: readonly string[], failed: readonly string[]);
+    // (undocumented)
+    readonly failed: readonly string[];
+    // (undocumented)
+    readonly uploaded: readonly string[];
+}
+
+// @public
 export const asc: (col: ColumnOrName) => SortKeyBuilder;
 
 // @public
@@ -2581,8 +2590,8 @@ export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
     constructor(session: SparkSession);
     cacheTable(tableName: string, storageLevel?: string): Promise<void>;
     clearCache(): Promise<void>;
-    createExternalTable(tableName: string, options?: CreateTableOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
-    createTable(tableName: string, options?: CreateTableOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+    createExternalTable(tableName: string, options?: CreateTableOptions): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>>;
+    createTable(tableName: string, options?: CreateTableOptions): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>>;
     currentCatalog(): Promise<string>;
     currentDatabase(): Promise<string>;
     databaseExists(dbName: string): Promise<boolean>;

@@ -592,7 +592,10 @@ export class SparkSession implements SessionAlgebra {
     /**
      * Uploads several local files in one `AddArtifacts` stream. Small files
      * are batched, large ones chunked, and every chunk is CRC-checked by the
-     * server. Resolves with the server-side artifact names, in order.
+     * server. Resolves with the server-side artifact names, in order; a CRC
+     * failure rejects with `ArtifactUploadError`, which lists the names that
+     * did and did not make it. Uploads are bounded like executions (see
+     * `withExecuteTimeout()`) and cancelled by the session's abort signal.
      */
     async addArtifacts(...uploads: Array<string | ArtifactUpload>): Promise<string[]> {
         this.assertOpen();
@@ -603,8 +606,9 @@ export class SparkSession implements SessionAlgebra {
 
     /**
      * Stores a blob on the server under its SHA-256 (`cache/<hash>`), like
-     * PySpark's `cache_artifact`, and resolves with the hash. Cached blobs are
-     * the one artifact kind the server reports through `isArtifactCached()`.
+     * PySpark's `cache_artifact`, and resolves with the hash; a blob the
+     * server already holds is not sent again. Cached blobs are the one
+     * artifact kind the server reports through `isArtifactCached()`.
      */
     async cacheArtifact(data: Uint8Array | string): Promise<string> {
         this.assertOpen();
@@ -614,6 +618,8 @@ export class SparkSession implements SessionAlgebra {
         const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
         if (bytes.byteLength === 0) throw new TypeError("cacheArtifact() requires a non-empty blob.");
         const { hash, requests } = cachedArtifactRequests(this.requestBase(), bytes);
+        // Same blob, same hash: skip the upload when the server still has it.
+        if (await this.isArtifactCached(hash)) return hash;
         const [name] = await this.uploadArtifacts(requests);
         if (name !== `${CACHE_ARTIFACT_PREFIX}${hash}`) {
             throw new Error(`AddArtifacts confirmed ${String(name)}; expected ${CACHE_ARTIFACT_PREFIX}${hash}.`);

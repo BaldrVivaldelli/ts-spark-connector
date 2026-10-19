@@ -500,9 +500,14 @@ Local files are shipped to the server with `addArtifact(path, kind?)` and
 `addArtifacts(...uploads)`: a `.jar` joins the session's classpath, other
 files need `kind: "file"` or `"archive"`. Uploads stream through the
 `AddArtifacts` RPC (small files batched, large ones chunked, every chunk
-CRC-checked by the server) and resolve with the server-side names.
-`cacheArtifact(bytes)` stores a blob by its SHA-256 (PySpark's
-`cache_artifact`) and `isArtifactCached(hash)` checks it; those hashed blobs
+CRC-checked by the server) and resolve with the server-side names; a CRC
+failure rejects with `ArtifactUploadError`, listing the names that did and
+did not make it. Uploads are bounded like queries, by `withExecuteTimeout()`
+when set and otherwise by the per-stream `withRpcTimeout()` deadline, so give
+large jars an execute timeout (or `Infinity`); the session's abort signal
+cancels them. `cacheArtifact(bytes)` stores a blob by its SHA-256 (PySpark's
+`cache_artifact`, skipping blobs the server already holds) and
+`isArtifactCached(hash)` checks it; those hashed blobs
 are the only artifacts Spark's `ArtifactStatus` reports on, so the raw
 `artifactStatus(...names)` answers `false` for jars and files. User-defined functions
 have to run on the server, so `session.udf.registerJavaFunction(name,

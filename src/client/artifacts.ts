@@ -191,13 +191,32 @@ function* generateRequests(base: RpcMessage, sources: readonly ArtifactSource[])
 
 type ArtifactSummary = { name?: string; is_crc_successful?: boolean; isCrcSuccessful?: boolean };
 
-/** Names confirmed by an `AddArtifactsResponse`; rejects when a CRC check failed. */
+/**
+ * Raised when the server rejected part of an upload: `failed` names did not
+ * pass the CRC check, `uploaded` names did and are available on the server.
+ * @public
+ */
+export class ArtifactUploadError extends Error {
+    readonly uploaded: readonly string[];
+    readonly failed: readonly string[];
+
+    constructor(uploaded: readonly string[], failed: readonly string[]) {
+        super(`Spark rejected the upload of ${failed.join(", ")}: CRC mismatch.`);
+        this.name = "ArtifactUploadError";
+        this.uploaded = uploaded;
+        this.failed = failed;
+    }
+}
+
+/** Names confirmed by an `AddArtifactsResponse`; rejects with `ArtifactUploadError` when a CRC check failed. */
 export function uploadedArtifactNames(response: RpcMessage): string[] {
     const summaries = Array.isArray(response.artifacts) ? response.artifacts as ArtifactSummary[] : [];
-    const failed = summaries.filter(summary => (summary.is_crc_successful ?? summary.isCrcSuccessful) === false);
+    const crcFailed = (summary: ArtifactSummary) => (summary.is_crc_successful ?? summary.isCrcSuccessful) === false;
+    const failed = summaries.filter(crcFailed).map(summary => String(summary.name));
     if (failed.length > 0) {
-        throw new Error(
-            `Spark rejected the upload of ${failed.map(summary => String(summary.name)).join(", ")}: CRC mismatch.`,
+        throw new ArtifactUploadError(
+            summaries.filter(summary => !crcFailed(summary)).map(summary => String(summary.name)),
+            failed,
         );
     }
     return summaries.map(summary => String(summary.name));
