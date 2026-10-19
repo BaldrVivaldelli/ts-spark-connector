@@ -56,7 +56,7 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `lateralJoin`, `asOfJoin` | ✅ | `LateralJoin`, `AsOfJoin` (PySpark `_joinAsOf` parameters) |
 | `observe` | ✅ | `CollectMetrics`; `Observation.get()` resolves with `ExecutePlanResponse.observed_metrics` |
 | `checkpoint`, `localCheckpoint` | ✅ | `checkpoint_command`, `CachedRemoteRelation`; released with `remove_cached_remote_relation_command` on `close()` |
-| `transform(func)` | ⬜ | client-side helper only |
+| `transform(func)` | ✅ | client-side helper |
 | `to(schema)` | ✅ | `ToSchema` with an unparsed DDL type; typed when given a `schema({...})` |
 | `withMetadata` | ✅ | `WithColumns` alias with JSON metadata |
 
@@ -96,8 +96,8 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `pyspark.sql.functions` | ✅ | 438 entries in `functions` (407 generated from `scripts/functions/catalog.mjs`); `call(name, args)` still reaches anything else |
 | Higher-order functions (`transform`, `filter`, `exists`, `forall`, `aggregate`, `zip_with`, `array_sort`, `map_filter`, `transform_keys`/`values`, `map_zip_with`) with JS lambdas | ✅ | `LambdaFunction` |
 | `expr` | ✅ | `ExpressionString` |
-| Partition transforms for `writeTo` (`years`, `months`, `days`, `hours`, `bucket`) | ⬜ | `UnresolvedFunction` names used by `WriteOperationV2.partitioning_columns` |
-| `call_function` | ⬜ | `CallFunction` |
+| Partition transforms for `writeTo` (`years`, `months`, `days`, `hours`, `bucket`) | ✅ | `functions.years(...)` etc.; `UnresolvedFunction` in `WriteOperationV2.partitioning_columns` |
+| `call_function` | ✅ | `functions.call_function(name, ...cols)`; `call(name, args)` when arguments must be literals |
 | Typed (schema-aware) builders | ✅ | `length`, `upper`, `lower`, `concat`, `abs`, `round`, `typedWhen`; typed aggregates `count`, `countDistinct`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collectList`, `collectSet`, `stddev`, `variance`, `approxCountDistinct`, `countIf` |
 
 ## Catalog

@@ -419,3 +419,13 @@ describe("temp views from the DataFrame", () => {
         await expect(people().write().createOrReplaceGlobalTempView(" ")).rejects.toThrow(TypeError);
     });
 });
+
+describe("transform", () => {
+    it("applies a pipeline step and returns its result", () => {
+        const df = session.read.parquet("/data/people.parquet");
+        const onlyAdults = (input: typeof df) => input.filter(col("age").gte(18));
+        expect(proto(df.transform(onlyAdults))).toEqual(proto(onlyAdults(df)));
+        expect(df.transform(input => input.toProtoJSON())).toBe(df.toProtoJSON());
+        expect(() => df.transform("nope" as never)).toThrow(/takes a function/);
+    });
+});

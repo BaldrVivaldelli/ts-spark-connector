@@ -907,6 +907,16 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         return this.chain<CacheCap<R>>((df, _EX, DF) => DF.unpersist(df, blocking));
     }
 
+    /**
+     * Applies `func` to this DataFrame and returns its result, so reusable
+     * pipeline steps chain like PySpark's `DataFrame.transform`:
+     * `df.transform(withTotals).transform(onlyActive)`.
+     */
+    transform<Out>(func: (df: this) => Out): Out {
+        if (typeof func !== "function") throw new TypeError("transform() takes a function.");
+        return func(this);
+    }
+
     runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R {
         return this.prog(DF, EX);
     }
