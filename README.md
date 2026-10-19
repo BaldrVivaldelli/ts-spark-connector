@@ -3,6 +3,10 @@
 TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/spark-connect-overview.html).
 It builds Spark logical plans in TypeScript and executes them against a Spark Connect server.
 
+**Documentation:** [API reference](https://baldrvivaldelli.github.io/ts-spark-connector/) ·
+[Architecture and contributor guide](docs/ARCHITECTURE.md) ·
+[PySpark parity tracker](docs/PARITY.md) · [Migration guide](MIGRATION.md)
+
 ## What is solid today
 
 - Fluent DataFrame-style API in TypeScript

@@ -12,6 +12,16 @@ Thanks for considering a contribution to **ts-spark-connector**!
    npm ci
    ```
 
+## Where to start
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how a DataFrame call
+  becomes a Spark Connect request and lists everything a new operation needs,
+  from the algebra to the E2E test.
+- [docs/PARITY.md](docs/PARITY.md) tracks the PySpark API surface: every
+  unchecked item is an open, self-contained contribution. Issues labelled
+  `good first issue` point at the smallest ones.
+- `npm run docs:api` builds the TypeDoc API reference into `docs-site/`.
+
 ## Development
 
 - Code style: TypeScript + ESLint (`npm run lint`)
