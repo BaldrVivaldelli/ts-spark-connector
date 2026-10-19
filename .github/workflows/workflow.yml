@@ -124,8 +124,9 @@ jobs:
       fail-fast: false
       matrix:
         # avro-sha256 is the SHA-256 of spark-avro_2.13-<spark>.jar on Maven Central.
-        # The vendored protocol descriptors stay pinned to 4.0.4 (oldest fully
-        # supported line); newer servers are verified behaviorally by this matrix.
+        # The vendored protocol descriptors are the newest line (4.2.0); features
+        # newer than a server are gated on its reported version, and this matrix
+        # verifies that every listed server still works with them.
         include:
           - spark: 4.0.0
             avro-sha256: 083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709

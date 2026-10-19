@@ -2,9 +2,10 @@
 
 This project includes Docker configuration for the behavioral E2E gate. The CI
 E2E matrix covers Apache Spark Connect 4.0.0, 4.0.4, 4.1.3 and 4.2.0 over TLS.
-The vendored protocol descriptor remains the exact Apache Spark 4.0.4 set: the
-descriptors follow the oldest fully supported line, and the newer servers are
-verified behaviorally against it.
+The vendored protocol descriptor is the exact Apache Spark 4.2.0 set, the
+newest line in the matrix; the older servers verify that version-gated
+features stay off and everything else keeps working. `SPARK_VERSION` reaches
+the test runner so the suite can assert the version the server reports.
 
 ## Prerequisites
 
