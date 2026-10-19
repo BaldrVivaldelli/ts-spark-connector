@@ -193,17 +193,21 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
      * ...). Like `runWrite`, recovery reattaches with the stable operation id
      * and never replays the command.
      */
-    async runCommand(command: Record<string, unknown>): Promise<ExecutePlanResponse[]> {
+    async runCommand(
+        command: Record<string, unknown>,
+        execution: ResolvedExecution = this.session.resolveExecution(),
+    ): Promise<ExecutePlanResponse[]> {
         await this.prepareSession();
         const request = {
             plan: { command },
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector" as const,
-            operation_id: crypto.randomUUID(),
+            operation_id: execution.operationId,
+            ...(execution.tags.length > 0 ? { tags: execution.tags } : {}),
             ...this.observedServerSessionField(),
         };
-        const config = this.session.getConnectionConfig();
+        const config = this.connectionConfigFor(execution);
         const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
         responses.forEach(response => this.session.observeServerSideSessionId(response));
         return responses;

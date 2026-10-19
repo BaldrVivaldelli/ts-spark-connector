@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SparkSession } from "../src/client/session";
+import { col } from "../src/engine/column";
 import { sparkGrpcClient } from "../src/client/sparkClient";
 import { combineSignals, resolveExecution } from "../src/client/executionOptions";
 
@@ -90,6 +91,27 @@ describe("DataFrame actions carry execution options to ExecutePlan", () => {
         const [request, config] = execute.mock.calls[0]!;
         expect(request).not.toHaveProperty("tags");
         expect(config?.signal).toBeUndefined();
+        await session.close();
+    });
+
+    it("tags writeTo and mergeInto commands with the session tags", async () => {
+        const session = SparkSession.builder().getOrCreate();
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+        vi.spyOn(sparkGrpcClient, "releaseSession").mockResolvedValue({});
+        vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
+        session.addTag("nightly");
+
+        const source = session.read.parquet("/data/updates.parquet");
+        await source.writeTo("catalog.target").append();
+        await source.mergeInto("catalog.target", col("catalog.target.id").eq(col("id")))
+            .whenMatched().updateAll()
+            .merge();
+
+        expect(execute).toHaveBeenCalledTimes(2);
+        for (const [request] of execute.mock.calls) {
+            expect(request).toMatchObject({ tags: ["nightly"], operation_id: expect.any(String) });
+            expect(request.plan).toHaveProperty("command");
+        }
         await session.close();
     });
 
