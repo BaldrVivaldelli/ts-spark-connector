@@ -113,6 +113,65 @@ message, before anything reaches the network. Complex column types (decimal,
 array, map, struct) are not supported yet and are rejected explicitly. An
 empty row array produces an empty, correctly-typed relation.
 
+## Column expressions and functions
+
+Column methods follow PySpark: a bare string on the right-hand side of a method
+is a literal (`col("country").eq("AR")`), while a bare string passed where a
+column is expected is a column name.
+
+```ts
+import { col, expr, functions as F } from "ts-spark-connector";
+
+purchases
+  .filter(col("amount").between(100, 1000).and(col("product").isin("Monitor", "Chair")))
+  .withColumn("total", col("amount").multiply(1.21).cast("decimal(10,2)"))
+  .withColumn("first_tag", F.split("tags", ",").getItem(0))  // 0-based, like PySpark
+  .withColumn("label", expr("upper(product) || '!'"));       // parsed by Spark
+```
+
+SQL text is accepted wherever PySpark accepts it: `df.selectExpr("id", "amount
+* 2 AS doubled")`, `df.filter("amount > 100")` and its alias `df.where(...)`.
+
+The `functions` object mirrors `pyspark.sql.functions` (about 430 functions,
+named as in PySpark). Arguments that are literals in practice (patterns,
+formats, delimiters, sizes) take JS values; every other argument takes a column
+or a column name. Higher-order functions take JS callbacks:
+
+```ts
+import { Window, col, functions as F } from "ts-spark-connector";
+
+const perUser = purchases
+  .withColumn("tags", F.split("tags", ","))
+  .withColumn("tags", F.transform("tags", (tag, i) => F.concat_ws(":", i.cast("string"), F.upper(tag))))
+  .groupBy("user_id")
+  .agg({
+    orders: F.count("*"),
+    products: F.array_sort(F.collect_list("product")),
+    p50: F.percentile_approx("amount", 0.5),
+  });
+
+const ranked = purchases.select(
+  col("user_id"),
+  F.row_number().over(Window.partitionBy("user_id").orderBy(col("amount").desc())).alias("rank"),
+  F.sum("amount").over(Window.partitionBy("user_id").orderBy("year").rowsBetween(-Infinity, 0)).alias("running"),
+);
+```
+
+Every function is also exported from the package root under the same name,
+except where the root already exports a helper with that name: `abs`, `concat`,
+`length`, `lower`, `round` and `upper` at the root are the schema-aware typed
+functions, and `coalesce`, `explode`, `from_json`, `map_keys`, `map_values`,
+`posexplode`, `split`, `struct` and `to_json` keep their original signatures.
+Use `functions.<name>` for the library version. Schema-aware
+`groupBy().agg(a => [...])` adds typed `first`, `last`, `collectList`,
+`collectSet`, `stddev`, `variance`, `approxCountDistinct` and `countIf` to the
+existing `count`, `countDistinct`, `sum`, `avg`, `min` and `max`.
+
+The library is generated from `scripts/functions/catalog.mjs`
+(`npm run functions:generate`); the E2E suite has every Spark server in the
+matrix resolve each catalog function with its required and its full argument
+list.
+
 ## Plan inspection
 
 ```ts
@@ -525,7 +584,8 @@ Implemented and exposed in the public API:
 - Reads: CSV / JSON / Parquet / ORC / Avro
 - Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
 - Lakehouse formats against the bundled server: Delta Lake on every matrix version (reads, writes, time travel) and Iceberg on Spark 4.0/4.1 (Hadoop catalog and metadata tables)
-- Transformations: `select`, `filter`, `join`, `crossJoin`, `groupBy().agg()`, `sort`, `limit`, `offset`, `distinct`, `dropDuplicates`, `withColumn`, `withColumns`, `withColumnRenamed`, `withColumnsRenamed`, `toDF`, `alias`, `drop`, `unpivot` / `melt`, `transpose`, `sample`, `randomSplit`, `repartition` (by count or by columns), `repartitionByRange`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
+- Transformations: `select`, `selectExpr`, `filter`/`where` (expressions or SQL strings), `join`, `crossJoin`, `groupBy().agg()`, `sort`, `limit`, `offset`, `distinct`, `dropDuplicates`, `withColumn`, `withColumns`, `withColumnRenamed`, `withColumnsRenamed`, `toDF`, `alias`, `drop`, `unpivot` / `melt`, `transpose`, `sample`, `randomSplit`, `repartition` (by count or by columns), `repartitionByRange`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
+- Expressions: column methods (arithmetic, comparisons, `isin`, `between`, `like`/`rlike`, `cast`/`tryCast`, `getItem`/`getField`, `withField`/`dropFields`, ...), `expr()` SQL fragments, windows (`partitionBy`, `orderBy`, `rowsBetween`, `rangeBetween`) and the PySpark-style `functions` library: aggregate, window, string, date/time, math, array, map, JSON/CSV/XML, variant, URL, hash and higher-order functions with JS lambdas
 - Null handling (`df.na`, `fillna`, `dropna`, `replace`) and statistics (`df.stat`: `corr`, `cov`, `crosstab`, `freqItems`, `approxQuantile`, `sampleBy`)
 - Actions and introspection: `collect`, `toRows`, `show`, `count`, `first`, `head`, `take`, `tail`, `isEmpty`, `schema`, `columns`, `dtypes`, `printSchema` / `treeString`, `isLocal`, `isStreaming`, `inputFiles`, `sameSemantics`, `semanticHash`
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
