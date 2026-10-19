@@ -449,10 +449,29 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         );
     }
 
+    /**
+     * Projects Spark SQL expressions, e.g. `selectExpr("id", "amount * 2 AS doubled")`.
+     * The server parses each string, so the result schema is not known statically.
+     */
+    selectExpr(...exprs: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        if (exprs.length === 0) {
+            throw new TypeError("selectExpr() requires at least one expression.");
+        }
+        for (const sql of exprs) assertNonEmptyString("selectExpr() expression", sql);
+        return this.chainAs<UnknownSchema>(
+            (df, EX, DF) => DF.select(df, exprs.map(sql => EX.exprString(sql))),
+            () => undefined,
+        );
+    }
+
     filter(predicate: TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     filter(cond: EBuilder): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
-    filter(cond: EBuilder | TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+    /** Filters with a Spark SQL predicate, e.g. `filter("age > 21 AND country = 'AR'")`. */
+    filter(condition: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    filter(cond: EBuilder | TypedPredicate<S, E> | string): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        if (typeof cond === "string") assertNonEmptyString("filter() condition", cond);
         return this.chain((df, EX, DF) => {
+            if (typeof cond === "string") return DF.filter(df, EX.exprString(cond));
             const condition = typeof cond === "function"
                 ? (cond as (columns: Columns<Extract<S, SchemaShape>, E>) => Condition<E>)(
                     makeColumns<Extract<S, SchemaShape>, E>()
@@ -460,6 +479,14 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                 : cond;
             return DF.filter(df, condition.build(EX));
         });
+    }
+
+    /** Alias of `filter`, matching PySpark's `DataFrame.where`. */
+    where(predicate: TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    where(cond: EBuilder): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    where(condition: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    where(cond: EBuilder | TypedPredicate<S, E> | string): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        return this.filter(cond as EBuilder);
     }
 
     withColumn<Name extends string, T extends ColumnType>(
