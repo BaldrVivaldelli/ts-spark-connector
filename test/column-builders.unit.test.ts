@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ProtoExprAlg } from "../src/engine/compilerRead";
+import { SparkExprAlg } from "../src/read/readDataFrameInterpreter";
 import * as Column from "../src/engine/column";
 
 // Pins how the untyped column helpers coerce their arguments on the wire:
@@ -59,6 +60,11 @@ describe("column builder coercions", () => {
         expect(fn(Column.struct(id, rhs).build(ProtoExprAlg))).toMatchObject({ function_name: "struct" });
         expect(JSON.stringify(Column.getItem(id, "key").build(ProtoExprAlg))).toContain('"string":"key"');
         expect(JSON.stringify(Column.getItem(id, rhs).build(ProtoExprAlg))).toContain('"unparsed_identifier":"rhs"');
+        // The helper and the column method are the same 0-based extraction.
+        for (const key of [0, "key", rhs] as const) {
+            expect(Column.getItem(id, key).build(ProtoExprAlg)).toEqual(id.getItem(key).build(ProtoExprAlg));
+            expect(Column.getItem(id, key).build(SparkExprAlg)).toEqual(id.getItem(key).build(SparkExprAlg));
+        }
         expect(JSON.stringify(Column.getField(id, "nested").build(ProtoExprAlg))).toContain("nested");
         expect(JSON.stringify(Column.to_json(id).build(ProtoExprAlg))).toContain("to_json");
         expect(JSON.stringify(id.to_json().build(ProtoExprAlg))).toContain("to_json");

@@ -87,15 +87,15 @@ describe("complete protobuf read compiler", () => {
             "key",
         );
         expect(ProtoExprAlg.getItem(column, column)).toHaveProperty(
-            "unresolved_function.arguments.1",
+            "unresolved_extract_value.extraction",
             column,
         );
         expect(ProtoExprAlg.getItem(column, 2)).toHaveProperty(
-            "unresolved_function.arguments.1.literal.integer",
+            "unresolved_extract_value.extraction.literal.integer",
             2,
         );
         expect(ProtoExprAlg.getItem(column, "key")).toHaveProperty(
-            "unresolved_function.arguments.1.literal.string",
+            "unresolved_extract_value.extraction.literal.string",
             "key",
         );
         expect(ProtoExprAlg.split(column, column)).toHaveProperty(

@@ -449,18 +449,17 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: [mapExpr, typeof key === "object" ? key : {literal: {string: String(key)}}]
         }
     }),
+    // Same expression as `col.getItem(key)`: 0-based for arrays, by key for
+    // maps and structs. The 1-based `element_at` form is `elementAt`.
     getItem: (collectionExpr, key) => ({
-        unresolved_function: {
-            function_name: "element_at",
-            arguments: [
-                collectionExpr,
-                typeof key === "object"
-                    ? key
-                    : typeof key === "number"
-                        ? protoLiteral(key)
-                        : {literal: {string: String(key)}}
-            ]
-        }
+        unresolved_extract_value: {
+            child: collectionExpr,
+            extraction: typeof key === "object"
+                ? key
+                : typeof key === "number"
+                    ? protoLiteral(key)
+                    : {literal: {string: String(key)}},
+        },
     }),
     split: (input, delimiter) => ({
         unresolved_function: {

@@ -10,6 +10,19 @@ a newer server (`session.cloneSession()`, Spark 4.1+) reject with
 reports the server version. Code that loaded the packaged `proto/` directory
 directly sees the 4.2.0 definitions, including the new `pipelines.proto`.
 
+## After 3.2.0: `getItem()` indexes arrays from 0
+
+The root helper `getItem(column, key)` compiled to Spark's `element_at`,
+whose array index starts at 1. It now builds the same expression as
+PySpark's `Column.getItem` and the new `col.getItem(key)` method: arrays are
+indexed from 0, maps and structs by key. Code that passed 1-based indexes
+to `getItem` should subtract one or switch to `elementAt(column, index)`
+(`functions.element_at`), which keeps Spark's 1-based semantics.
+
+Custom interpreters passed to `ReadChainedDataFrame.runWith(DF, EX)` must
+implement the expression operations added in this release (`callDistinct`,
+`exprString`, `cast`, `lambda`, `lambdaVar`, `updateFields`, `extractValue`).
+
 ## After 3.2.0: `close()` always closes
 
 `SparkSession.close()` used to leave the session open when `ReleaseSession`

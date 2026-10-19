@@ -102,16 +102,13 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         args: [map, key],
     }),
     getItem: (collectionExpr, key) => ({
-        type: "UnresolvedFunction",
-        name: "element_at",
-        args: [
-            collectionExpr,
-            typeof key === "object"
-                ? key
-                : typeof key === "number"
-                    ? { type: "Literal", value: key }
-                    : { type: "Literal", value: String(key) },
-        ],
+        type: "ExtractValue",
+        child: collectionExpr,
+        extraction: typeof key === "object"
+            ? key
+            : typeof key === "number"
+                ? { type: "Literal", value: key }
+                : { type: "Literal", value: String(key) },
     }),
     split: (input, delimiter) => ({
         type: "UnresolvedFunction",
