@@ -38,27 +38,27 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `select`, `filter`/`where`, `withColumn`, `withColumnRenamed(s)`, `drop` | ✅ | |
 | `join` (all join types, hints), `union`, `unionByName`, `intersect(All)`, `exceptAll`/`subtract` | ✅ | |
 | `groupBy().agg()` | ✅ | typed and untyped |
-| `rollup`, `cube`, `groupBy().pivot()`, `groupingSets` | ⬜ | `Aggregate.group_type` (`GroupTypeInput` already maps the enum) |
+| `rollup`, `cube`, `groupBy().pivot()`, `groupingSets` | ✅ | `Aggregate.group_type`, `pivot`, `grouping_sets`; results are untyped |
 | `orderBy`/`sort`, `limit`, `distinct`, `dropDuplicates` | ✅ | |
-| `sortWithinPartitions` | ⬜ | `Sort.is_global = false` |
+| `sortWithinPartitions` | ✅ | `Sort.is_global = false` |
 | `sample`, `randomSplit` | ✅ | |
 | `repartition(n)`, `coalesce(n)`, `hint` | ✅ | |
 | `describe`, `summary` | ✅ | |
 | `cache`, `persist`, `unpersist` | ✅ | |
 | `withWatermark` | ✅ | |
-| `dropDuplicatesWithinWatermark` | ⬜ | `Deduplicate.within_watermark` |
+| `dropDuplicatesWithinWatermark` | ✅ | `Deduplicate.within_watermark` |
 | `na.fill/drop/replace`, `fillna/dropna`, `replace` | ✅ | `NAFill`, `NADrop`, `NAReplace` |
 | `stat.corr/cov/crosstab/freqItems/approxQuantile/sampleBy` | ✅ | `corr`, `cov` and `approxQuantile` execute and return numbers |
 | `unpivot`/`melt`, `toDF`, `alias`, `offset`, `transpose`, `withColumns`, `crossJoin` | ✅ | reshaping operations fall back to the untyped schema |
 | `repartition(n?, ...cols)`, `repartitionByRange` | ✅ | `RepartitionByExpression` |
 | `selectExpr`, `filter("sql")`, `where` | ✅ | `ExpressionString` |
-| `colRegex`, `metadataColumn` | ⬜ | `UnresolvedRegex`, `UnresolvedAttribute.is_metadata_column` |
-| `lateralJoin`, `asOfJoin` | ⬜ | `LateralJoin`, `AsOfJoin` |
-| `observe` | ⬜ | `CollectMetrics` plus the observed metrics in `ExecutePlanResponse` |
-| `checkpoint`, `localCheckpoint` | ⬜ | `checkpoint_command`, `CachedRemoteRelation` |
+| `colRegex`, `metadataColumn` | ✅ | `UnresolvedRegex`, `UnresolvedAttribute.is_metadata_column` |
+| `lateralJoin`, `asOfJoin` | ✅ | `LateralJoin`, `AsOfJoin` (PySpark `_joinAsOf` parameters) |
+| `observe` | ✅ | `CollectMetrics`; `Observation.get()` resolves with `ExecutePlanResponse.observed_metrics` |
+| `checkpoint`, `localCheckpoint` | ✅ | `checkpoint_command`, `CachedRemoteRelation`; released with `remove_cached_remote_relation_command` on `close()` |
 | `transform(func)` | ⬜ | client-side helper only |
-| `to(schema)` | ⬜ | `ToSchema` |
-| `withMetadata` | ⬜ | `WithColumns` aliases with metadata |
+| `to(schema)` | ✅ | `ToSchema` with an unparsed DDL type; typed when given a `schema({...})` |
+| `withMetadata` | ✅ | `WithColumns` alias with JSON metadata |
 
 ## DataFrame actions and introspection
 
@@ -69,10 +69,10 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `count`, `first`, `head`, `take`, `tail`, `isEmpty` | ✅ | `count()` returns a `bigint`, like every Spark long |
 | `schema`, `printSchema`/`treeString`, `columns`, `dtypes` | ✅ | AnalyzePlan `schema` / `tree_string` |
 | `isLocal`, `isStreaming`, `inputFiles`, `sameSemantics`, `semanticHash` | ✅ | AnalyzePlan |
-| `storageLevel` | ⬜ | AnalyzePlan `get_storage_level` |
+| `storageLevel` | ✅ | AnalyzePlan `get_storage_level` |
 | `createTempView`, `createOrReplaceTempView` | ✅ | through the writer |
-| `createGlobalTempView`, `createOrReplaceGlobalTempView` | ⬜ | `CreateDataFrameViewCommand.is_global` |
-| `toJSON` | ⬜ | `to_json(struct(*))` projection |
+| `createGlobalTempView`, `createOrReplaceGlobalTempView` | ✅ | `CreateDataFrameViewCommand.is_global`; also on the writer |
+| `toJSON` | ✅ | `to_json(struct(*))` projection into a `value` column |
 
 ## Writers
 
@@ -97,7 +97,7 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | Higher-order functions (`transform`, `filter`, `exists`, `forall`, `aggregate`, `zip_with`, `array_sort`, `map_filter`, `transform_keys`/`values`, `map_zip_with`) with JS lambdas | ✅ | `LambdaFunction` |
 | `expr` | ✅ | `ExpressionString` |
 | Partition transforms for `writeTo` (`years`, `months`, `days`, `hours`, `bucket`) | ⬜ | `UnresolvedFunction` names used by `WriteOperationV2.partitioning_columns` |
-| `call_function`, `colRegex` | ⬜ | `CallFunction`, `UnresolvedRegex` |
+| `call_function` | ⬜ | `CallFunction` |
 | Typed (schema-aware) builders | ✅ | `length`, `upper`, `lower`, `concat`, `abs`, `round`, `typedWhen`; typed aggregates `count`, `countDistinct`, `sum`, `avg`, `min`, `max`, `first`, `last`, `collectList`, `collectSet`, `stddev`, `variance`, `approxCountDistinct`, `countIf` |
 
 ## Catalog
