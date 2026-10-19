@@ -15,6 +15,7 @@ export type {
 } from "./client/session";
 export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";
+export { UnsupportedServerVersionError } from "./client/serverVersion";
 export type { SparkConnectErrorOptions, SparkErrorDetails, SparkGrpcErrorInfo } from "./client/errors";
 export {
     Window,

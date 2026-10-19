@@ -436,14 +436,31 @@ pinned artifacts.
 
 The currently verified compatibility targets are:
 
-- Vendored Spark Connect protocol descriptors from 4.0.4 (pinned to the oldest
-  fully supported line; newer servers are verified behaviorally)
+- Vendored Spark Connect protocol descriptors from 4.2.0, the newest line in
+  the matrix. The connector only sends messages an older server understands:
+  features that need a newer server are gated on the version it reports and
+  fail with `UnsupportedServerVersionError` before any RPC
 - Spark Connect servers 4.0.0, 4.0.4, 4.1.3 and 4.2.0 covered by the Docker E2E
   matrix
 - Scala 2.13 artifacts on the server image
 - Node.js 22 and 24
 - TypeScript 7 for compilation; TypeScript 6 API compatibility only for
   tooling that has not migrated to the new compiler API
+
+`session.version()` returns the server's Spark version (fetched once with
+AnalyzePlan and cached). Version-gated features:
+
+| Feature | Minimum server |
+| --- | --- |
+| `session.cloneSession()` — copy the server-side session (temp views, runtime configuration) into an independent new session | 4.1.0 |
+
+```ts
+if ((await session.version()).startsWith("4.0")) {
+  // cloneSession() would reject with UnsupportedServerVersionError
+}
+const sandbox = await session.cloneSession();
+await sandbox.conf.set("spark.sql.shuffle.partitions", 4); // the original keeps its value
+```
 
 Other Spark Connect versions may work, but they are not
 currently part of a green compatibility matrix and are therefore not claimed

@@ -1,5 +1,15 @@
 # Migration guide
 
+## After 3.2.0: protocol descriptors from Spark 4.2.0
+
+The vendored `.proto` files now come from Apache Spark 4.2.0 instead of 4.0.4.
+Every server in the compatibility matrix (4.0.0 to 4.2.0) keeps working:
+requests only use messages the connected server knows, and features that need
+a newer server (`session.cloneSession()`, Spark 4.1+) reject with
+`UnsupportedServerVersionError` before sending anything. `session.version()`
+reports the server version. Code that loaded the packaged `proto/` directory
+directly sees the 4.2.0 definitions, including the new `pipelines.proto`.
+
 ## After 3.2.0: `close()` always closes
 
 `SparkSession.close()` used to leave the session open when `ReleaseSession`

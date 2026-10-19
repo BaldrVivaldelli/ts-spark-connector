@@ -881,6 +881,7 @@ export class SparkSession implements SessionAlgebra {
     static builder(): SparkSessionBuilder;
     get catalog(): SparkCatalog;
     clearTags(): void;
+    cloneSession(): Promise<SparkSession>;
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(rows: ReadonlyArray<InferSchema<D>>, declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G>;
@@ -910,6 +911,7 @@ export class SparkSession implements SessionAlgebra {
     stop(): Promise<void>;
     // (undocumented)
     table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
+    version(): Promise<string>;
     // (undocumented)
     writeStream<R = unknown, E = unknown, G = unknown, CDF = unknown, CEX = unknown>(df: ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingMark<R>, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>>;
 }
@@ -1090,6 +1092,17 @@ export type TypeToken = "int" | "long" | "double" | "float" | "string" | "boolea
 export type UnknownSchema = {
     readonly __unknownSchema: unique symbol;
 };
+
+// @public
+export class UnsupportedServerVersionError extends Error {
+    constructor(feature: string, requiredVersion: string, serverVersion: string);
+    // (undocumented)
+    readonly feature: string;
+    // (undocumented)
+    readonly requiredVersion: string;
+    // (undocumented)
+    readonly serverVersion: string;
+}
 
 // @public
 export function upper<T extends string | null, E>(col: TypedColumn<T, E>): TypedColumn<T, E>;

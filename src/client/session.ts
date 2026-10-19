@@ -15,6 +15,7 @@ import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
 import { cleanupConnectionConfig } from "./rpcLifecycle";
+import { compareSparkVersions, UnsupportedServerVersionError } from "./serverVersion";
 import {
     assertOperationId,
     assertValidTag,
@@ -216,6 +217,7 @@ export class SparkSession implements SessionAlgebra {
     private invalidatedError?: Error;
     private readonly runtimeConfig: SparkRuntimeConfig;
     private readonly tags = new Set<string>();
+    private serverVersion?: Promise<string>;
 
     constructor(
         sessionId?: string,
@@ -375,6 +377,73 @@ export class SparkSession implements SessionAlgebra {
             interrupt_type: "INTERRUPT_TYPE_OPERATION_ID",
             operation_id: operationId,
         });
+    }
+
+    /**
+     * Version of the Spark Connect server, e.g. `"4.1.3"`. Fetched once with
+     * AnalyzePlan and cached for the lifetime of the session.
+     */
+    async version(): Promise<string> {
+        this.assertOpen();
+        this.serverVersion ??= this.fetchServerVersion().catch(error => {
+            this.serverVersion = undefined;
+            throw error;
+        });
+        return this.serverVersion;
+    }
+
+    /**
+     * @internal Rejects with `UnsupportedServerVersionError`, before the
+     * feature's own RPC, when the server is older than `minimum`.
+     */
+    async requireServerVersion(minimum: string, feature: string): Promise<string> {
+        const actual = await this.version();
+        if (compareSparkVersions(actual, minimum) < 0) {
+            throw new UnsupportedServerVersionError(feature, minimum, actual);
+        }
+        return actual;
+    }
+
+    /**
+     * Creates an independent copy of this session on the server (Spark
+     * Connect 4.1+): temporary views, runtime configuration and other session
+     * state are copied once, and later changes on either side stay local to
+     * it. The clone uses the same connection settings; session tags are
+     * client-side and are not copied.
+     */
+    async cloneSession(): Promise<SparkSession> {
+        await this.requireServerVersion("4.1.0", "cloneSession()");
+        const newSessionId = crypto.randomUUID();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.cloneSession({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                new_session_id: newSessionId,
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId({
+            session_id: response.session_id,
+            server_side_session_id: response.server_side_session_id,
+        });
+        if (response.new_session_id !== newSessionId) {
+            throw new Error(
+                `CloneSession returned session id ${String(response.new_session_id)}; expected ${newSessionId}.`
+            );
+        }
+        const clone = new SparkSession(newSessionId, {
+            userContext: this.userContext,
+            connectionConfig: this.connectionConfig,
+        });
+        clone.adoptClonedServerSession(response.new_server_side_session_id);
+        return clone;
     }
 
     /** @internal Snapshots per-execution controls when an action starts. */
@@ -567,6 +636,42 @@ export class SparkSession implements SessionAlgebra {
         }
         this.observeServerSideSessionId(response);
         return response;
+    }
+
+    private async fetchServerVersion(): Promise<string> {
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.analyze({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                spark_version: {},
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const version = (response.spark_version as { version?: unknown } | undefined)?.version;
+        if (typeof version !== "string" || !version) {
+            throw new Error("Invalid AnalyzePlan response: missing spark_version.");
+        }
+        return version;
+    }
+
+    /**
+     * A clone already exists on the server with the source's configuration
+     * applied, so builder-provided configs must not be re-sent over the
+     * values it copied.
+     */
+    private adoptClonedServerSession(serverSideSessionId: unknown): void {
+        this.markRemoteTouched();
+        this.initialConfigApplied = true;
+        this.observeServerSideSessionId({ session_id: this.sessionId, server_side_session_id: serverSideSessionId });
     }
 
     private async runInterrupt(fields: Record<string, unknown>): Promise<string[]> {

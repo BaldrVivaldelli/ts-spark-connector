@@ -68,6 +68,8 @@ interface SparkConnectServiceClient {
     interrupt(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     releaseSession(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     fetchErrorDetails(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    /** Spark Connect 4.1+. */
+    cloneSession(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     close(): void;
 }
 
@@ -704,6 +706,19 @@ export const sparkGrpcClient = {
             retryConfig,
             { signal: config?.signal }
         );
+    },
+
+    /**
+     * Copies a server-side session (Spark Connect 4.1+). Not retried: a lost
+     * response would make the retry collide with the clone it created.
+     */
+    async cloneSession(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        try {
+            return await callUnary(client.cloneSession.bind(client), request, metadata, config, "CloneSession");
+        } catch (error) {
+            throw await enrichSparkConnectError(error, "CloneSession", request, client, metadata, config);
+        }
     },
 
     /** Retains shared ownership of the channel identity without opening it eagerly. */

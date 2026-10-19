@@ -68,7 +68,8 @@ type UnaryName =
     | "config"
     | "interrupt"
     | "releaseSession"
-    | "fetchErrorDetails";
+    | "fetchErrorDetails"
+    | "cloneSession";
 
 type UnaryOutcome = RpcMessage | Error;
 
@@ -122,6 +123,7 @@ class FakeService {
     interrupt = this.unary("interrupt");
     releaseSession = this.unary("releaseSession");
     fetchErrorDetails = this.unary("fetchErrorDetails");
+    cloneSession = this.unary("cloneSession");
 
     private unary(name: UnaryName) {
         return (
@@ -593,6 +595,24 @@ describe("spark gRPC client complete behavior", () => {
             state.calls.find(call => call.name === name)?.metadata.get("authorization")[0]
         );
         expect(tokens).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-3"]);
+        sparkGrpcClient.close(config);
+    });
+
+    it("clones a session without retrying and enriches CloneSession failures", async () => {
+        const config = connection({ retry: { maxRetries: 3, initialBackoffMs: 0 } });
+        const request = { ...executeRequest(), new_session_id: "new-1" };
+        setUnary("cloneSession", { session_id: "session-1", new_session_id: "new-1" });
+        await expect(sparkGrpcClient.cloneSession(request, config))
+            .resolves.toMatchObject({ new_session_id: "new-1" });
+
+        const failure = Object.assign(new Error("unavailable"), { code: 14, errorId: "error-9" });
+        setUnary("cloneSession", failure);
+        setUnary("fetchErrorDetails", { detail: "clone detail" });
+        await expect(sparkGrpcClient.cloneSession(request, config)).rejects.toMatchObject({
+            operation: "CloneSession",
+            remoteDetails: { detail: "clone detail" },
+        });
+        expect(state.calls.filter(call => call.name === "cloneSession")).toHaveLength(2);
         sparkGrpcClient.close(config);
     });
 
