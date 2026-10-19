@@ -6,8 +6,9 @@ name: API docs
 on:
   push:
     branches: [main]
+  # Any base branch: stacked pull requests (a branch targeting another
+  # feature branch) are checked too; releases still run only on main.
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
