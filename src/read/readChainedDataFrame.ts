@@ -8,6 +8,7 @@ import {
     applyPendingAnalyzeActions,
 } from "../engine/compilerRead";
 import { SparkSession } from "../client/session";
+import type { ExecutionOptions } from "../client/executionOptions";
 import {
     DEFAULT_JOIN_TYPE,
     ExplainModeInput,
@@ -760,37 +761,49 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         return this.interpretWith<LogicalPlan>(SparkDFAlg, SparkExprAlg);
     }
 
-    async collectRaw(): Promise<unknown[]> {
+    /**
+     * Executes the plan and returns the raw ExecutePlan responses. `options`
+     * cancels or tags this execution only; see `ExecutionOptions`.
+     */
+    async collectRaw(options?: ExecutionOptions): Promise<unknown[]> {
+        const execution = this.session.resolveExecution(options);
         const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
-        return ProtoExec.collect(root, this.session);
+        return ProtoExec.collect(root, this.session, execution);
     }
 
-    /** Streams raw Spark Connect ExecutePlan responses with bounded buffering. */
-    async *streamRaw(): AsyncGenerator<Record<string, unknown>, void, void> {
+    /**
+     * Streams raw Spark Connect ExecutePlan responses with bounded buffering.
+     * Session tags are read when iteration starts.
+     */
+    async *streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void> {
+        const execution = this.session.resolveExecution(options);
         const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         const executor = await applyPendingAnalyzeActions(root, this.session);
-        for await (const response of executor.stream(root)) {
+        for await (const response of executor.stream(root, execution)) {
             yield response;
         }
     }
 
     /** Streams Arrow IPC batches as they arrive from Spark. */
-    async *toArrowBatches(): AsyncGenerator<Buffer, void, void> {
-        for await (const response of this.streamRaw()) {
+    async *toArrowBatches(options?: ExecutionOptions): AsyncGenerator<Buffer, void, void> {
+        for await (const response of this.streamRaw(options)) {
             for (const buffer of arrowBuffersFromResponses([response])) yield buffer;
         }
     }
 
     /** Streams decoded rows without collecting the entire DataFrame in memory. */
-    async *toRows(): AsyncGenerator<RowOf<S>, void, void> {
-        for await (const buffer of this.toArrowBatches()) {
+    async *toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void> {
+        for await (const buffer of this.toArrowBatches(options)) {
             for (const row of rowsFromArrowBuffers<RowOf<S>>([buffer], this.runtimeSchema)) yield row;
         }
     }
 
-    /** Executes the plan and decodes Spark's Arrow batches into row objects. */
-    async collect(): Promise<Array<RowOf<S>>> {
-        const responses = await this.collectRaw();
+    /**
+     * Executes the plan and decodes Spark's Arrow batches into row objects.
+     * `options` cancels or tags this execution only; see `ExecutionOptions`.
+     */
+    async collect(options?: ExecutionOptions): Promise<Array<RowOf<S>>> {
+        const responses = await this.collectRaw(options);
         return rowsFromArrowBuffers<RowOf<S>>(
             arrowBuffersFromResponses(responses),
             this.runtimeSchema,

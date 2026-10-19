@@ -13,6 +13,7 @@ export type {
     SparkMetric, SparkMetricObserver,
     SessionConfigMap, SessionConfigValue, SparkUserContext,
 } from "./client/session";
+export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";
 export type { SparkConnectErrorOptions, SparkErrorDetails, SparkGrpcErrorInfo } from "./client/errors";
 export {

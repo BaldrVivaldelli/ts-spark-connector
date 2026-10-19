@@ -7,6 +7,7 @@ import {
 import { SparkConnectExecutor } from "../src/client/sparkConnectExecutor";
 import type { ProtoRel } from "../src/engine/compilerRead";
 import type { ProtoWriteRoot } from "../src/write/compilerWrite";
+import { resolveExecution, type ExecutionOptions } from "../src/client/executionOptions";
 
 function handle(serverSideSessionId?: string): StreamingQueryHandle {
     return {
@@ -32,6 +33,7 @@ function fakeSession(serverId?: string) {
         observeServerSideSessionId: vi.fn(),
         observeRemoteError: vi.fn(),
         getServerSideSessionId: vi.fn(() => serverId),
+        resolveExecution: vi.fn((options?: ExecutionOptions) => resolveExecution([], options)),
     };
     return {
         methods,
@@ -73,6 +75,20 @@ describe("SparkConnectExecutor complete behavior", () => {
             operation_id: expect.any(String),
             plan: { root: plan },
         }), { address: "sc://spark:15002" });
+    });
+
+    it("tags writes and uses the caller's operation id", async () => {
+        const { session } = fakeSession();
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+        const execution = resolveExecution(["etl"], {
+            operationId: "00112233-4455-4677-8899-aabbccddeeff",
+        });
+
+        await SparkConnectExecutor.for(session).runWrite(batchRoot, execution);
+        expect(execute.mock.calls[0]?.[0]).toMatchObject({
+            operation_id: "00112233-4455-4677-8899-aabbccddeeff",
+            tags: ["etl"],
+        });
     });
 
     it("streams responses and reports stream iteration failures", async () => {

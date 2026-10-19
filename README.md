@@ -311,7 +311,7 @@ Notes:
 - Retry counts and delays must be non-negative safe integers; delays are limited to Node's maximum timer duration, the multiplier must be finite and at least `1`, and the initial delay cannot exceed the maximum delay. Invalid configurations throw instead of being silently clamped.
 - `explain` and `interrupt` are unary and idempotent, so they are always safe to retry.
 - Every `executePlan` has a stable operation UUID and requests reattachable execution. Recovery uses `ReattachExecute` from the last response id and never resends the original read, SQL, DDL, or write plan; `ReleaseExecute` cleans server buffers afterward.
-- `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits.
+- `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits. The session-wide signal is sticky: once it aborts, every later RPC of that session rejects. To cancel a single query, use the per-execution options below.
 - By default each ExecutePlan/ReattachExecute stream gets its own `rpcTimeoutMs` deadline, so a query that streams for longer than that fails. `withExecuteTimeout(ms)` instead bounds the whole execution, across every reattach and retry, while unary RPCs keep `rpcTimeoutMs`; `withExecuteTimeout(Infinity)` keeps short unary deadlines without capping query time.
 - Spark closes every reattachable response stream after `spark.connect.execute.reattachable.senderMaxStreamDuration` (two minutes by default), even while a long job has not produced a row yet. The client follows such idle streams for as long as the job runs; only streams that end empty immediately, which indicates a broken server, are limited.
 - Cleanup RPCs (`ReleaseExecute`, `ReleaseSession`, `FetchErrorDetails`) never use the caller's signal and are bounded by a 10 s deadline (or `rpcTimeoutMs`, when shorter), so an unreachable server cannot hold an aborted query or `close()` open.
@@ -319,6 +319,40 @@ Notes:
 - Provider credentials (`withAuth({ type: "provider" })`) are resolved again for every ReattachExecute and ReleaseExecute, so a query can outlive the token it started with.
 - gRPC send and receive limits default to 128 MiB, avoiding grpc-js's small default for normal Arrow batches; advanced callers can override the validated `grpcMaxReceiveMessageBytes` / `grpcMaxSendMessageBytes` connection options before the first RPC.
 - Client session ids and operation ids are UUIDs. If the compatibility helper `createSparkSession(id)` is given an explicit id, it must be a canonical UUID.
+
+### Cancelling and tagging queries
+
+Actions accept per-execution options. Aborting the `signal` cancels only that
+query: the stream is cancelled and the operation is released, which interrupts
+the job on the server, and the session stays usable.
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort("too slow"), 30_000);
+const rows = await df.collect({ signal: controller.signal });
+```
+
+`collect`, `collectRaw`, `toRows`, `toArrowBatches` and `streamRaw` take the
+same options. Spark operation tags group executions so another part of the
+program can interrupt them, and `operationId` (a canonical UUID) lets the
+caller target one execution:
+
+```ts
+session.addTag("nightly-etl");              // every operation started from now on
+const report = big.collect({ tags: ["report"] });
+await session.interruptTag("report");      // resolves to the interrupted operation ids
+session.removeTag("nightly-etl");
+
+const id = crypto.randomUUID();
+const pending = other.collect({ operationId: id });
+await session.interruptOperation(id);
+await session.interruptAll();              // everything this session is running
+```
+
+Session tags are read when an action starts, so later `addTag`/`removeTag`
+calls do not affect executions already in flight. Batch writes carry the
+session tags as well. An interrupted execution rejects with a
+`SparkConnectError` from Spark.
 
 RPC failures are wrapped as `SparkConnectError` with the operation, gRPC code,
 Spark error class and error id when available. Spark 4's binary

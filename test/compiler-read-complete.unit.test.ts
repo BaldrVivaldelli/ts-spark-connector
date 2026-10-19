@@ -272,7 +272,7 @@ describe("complete protobuf read compiler", () => {
             .resolves.toBe("explain text");
         await expect(ProtoExec.explain!(root, session, "extended"))
             .resolves.toBe("explain text");
-        expect(execute).toHaveBeenCalledWith(root);
+        expect(execute).toHaveBeenCalledWith(root, undefined);
         expect(explain).toHaveBeenCalledWith(root, "simple");
         expect(explain).toHaveBeenCalledWith(root, "extended");
         expect(programToProtobufRoot(root)).toEqual({ plan: { root } });

@@ -16,6 +16,13 @@ import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
 import { cleanupConnectionConfig } from "./rpcLifecycle";
 import {
+    assertOperationId,
+    assertValidTag,
+    ExecutionOptions,
+    ResolvedExecution,
+    resolveExecution,
+} from "./executionOptions";
+import {
     AuthDraft,
     LEGACY_AUTH_KEYS,
     LEGACY_TLS_KEYS,
@@ -208,6 +215,7 @@ export class SparkSession implements SessionAlgebra {
     private serverSideSessionId?: string;
     private invalidatedError?: Error;
     private readonly runtimeConfig: SparkRuntimeConfig;
+    private readonly tags = new Set<string>();
 
     constructor(
         sessionId?: string,
@@ -310,6 +318,68 @@ export class SparkSession implements SessionAlgebra {
 
     getSessionId(): string {
         return this.sessionId;
+    }
+
+    /**
+     * Adds a tag to every operation this session starts from now on, so
+     * `interruptTag(tag)` can cancel them as a group. Executions already in
+     * flight keep the tags they started with.
+     */
+    addTag(tag: string): void {
+        assertValidTag(tag);
+        this.tags.add(tag);
+    }
+
+    /** Stops tagging new operations with `tag`. */
+    removeTag(tag: string): void {
+        assertValidTag(tag);
+        this.tags.delete(tag);
+    }
+
+    /** Tags attached to operations started by this session. */
+    getTags(): string[] {
+        return [...this.tags];
+    }
+
+    /** Removes every session tag. */
+    clearTags(): void {
+        this.tags.clear();
+    }
+
+    /** Interrupts every running operation of this session; resolves to their ids. */
+    interruptAll(): Promise<string[]> {
+        return this.runInterrupt({ interrupt_type: "INTERRUPT_TYPE_ALL" });
+    }
+
+    /** Interrupts the running operations tagged with `tag`; resolves to their ids. */
+    interruptTag(tag: string): Promise<string[]> {
+        try {
+            assertValidTag(tag);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.runInterrupt({ interrupt_type: "INTERRUPT_TYPE_TAG", operation_tag: tag });
+    }
+
+    /**
+     * Interrupts one running operation. Pass the `operationId` given to the
+     * action's `ExecutionOptions`; resolves to the ids actually interrupted.
+     */
+    interruptOperation(operationId: string): Promise<string[]> {
+        try {
+            assertOperationId(operationId);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.runInterrupt({
+            interrupt_type: "INTERRUPT_TYPE_OPERATION_ID",
+            operation_id: operationId,
+        });
+    }
+
+    /** @internal Snapshots per-execution controls when an action starts. */
+    resolveExecution(options?: ExecutionOptions): ResolvedExecution {
+        return resolveExecution(this.tags, options);
     }
 
     getUserContext(): SparkUserContext {
@@ -497,6 +567,30 @@ export class SparkSession implements SessionAlgebra {
         }
         this.observeServerSideSessionId(response);
         return response;
+    }
+
+    private async runInterrupt(fields: Record<string, unknown>): Promise<string[]> {
+        this.assertOpen();
+        // Nothing can be running on a session that never reached the server.
+        if (!this.remoteTouched) return [];
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.interrupt({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                ...fields,
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const ids = response.interrupted_ids ?? response.interruptedIds;
+        return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
     }
 
     /** @internal Marks an execution RPC as having created/used remote state. */

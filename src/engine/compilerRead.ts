@@ -9,6 +9,7 @@ import {
 } from "./sparkConnectEnums";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
+import type {ResolvedExecution} from "../client/executionOptions";
 import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
 import {DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
@@ -756,9 +757,9 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {
-    async collect(root: ProtoRel, session: SparkSession) {
+    async collect(root: ProtoRel, session: SparkSession, execution?: ResolvedExecution) {
         const executor = await applyPendingAnalyzeActions(root, session);
-        return executor.execute(root);
+        return executor.execute(root, execution);
     },
 
     async explain(root: ProtoRel, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<string> {

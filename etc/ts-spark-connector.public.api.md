@@ -374,6 +374,13 @@ export type EBuilder = {
 // @public (undocumented)
 export const elementAt: (mapCol: EBuilder, key: EBuilder | string | number) => EBuilder;
 
+// @public
+export type ExecutionOptions = {
+    signal?: AbortSignal;
+    tags?: readonly string[];
+    operationId?: string;
+};
+
 // @public (undocumented)
 export type ExplainModeInput = "simple" | "extended" | "codegen" | "cost" | "formatted";
 
@@ -532,9 +539,8 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     coalesce(name: string, ...exprs: Array<string | DataFrameExpressionBuilder | number | boolean>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
-    collect(): Promise<Array<RowOf<S>>>;
-    // (undocumented)
-    collectRaw(): Promise<unknown[]>;
+    collect(options?: ExecutionOptions): Promise<Array<RowOf<S>>>;
+    collectRaw(options?: ExecutionOptions): Promise<unknown[]>;
     // (undocumented)
     describe<K extends ColumnName<S>>(colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -610,17 +616,17 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // @deprecated (undocumented)
     sql(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & SqlCap<R>, CEX>;
-    streamRaw(): AsyncGenerator<Record<string, unknown>, void, void>;
+    streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void>;
     // (undocumented)
     summary<K extends ColumnName<S>>(metrics: readonly string[] | undefined, colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
-    toArrowBatches(): AsyncGenerator<Buffer, void, void>;
+    toArrowBatches(options?: ExecutionOptions): AsyncGenerator<Buffer, void, void>;
     // (undocumented)
     toClientASTJSON(): string;
     // (undocumented)
     toClientASTMermaid(): string;
     // (undocumented)
     toProtoJSON(): string;
-    toRows(): AsyncGenerator<RowOf<S>, void, void>;
+    toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void>;
     // (undocumented)
     toSparkLogicalPlanJSON(): string;
     // (undocumented)
@@ -870,9 +876,11 @@ export class SparkSession implements SessionAlgebra {
         userContext?: Partial<SparkUserContext>;
         connectionConfig?: SparkConnectionConfig;
     });
+    addTag(tag: string): void;
     // (undocumented)
     static builder(): SparkSessionBuilder;
     get catalog(): SparkCatalog;
+    clearTags(): void;
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(rows: ReadonlyArray<InferSchema<D>>, declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G>;
@@ -882,12 +890,17 @@ export class SparkSession implements SessionAlgebra {
     getSessionConfig(): SessionConfigMap;
     // (undocumented)
     getSessionId(): string;
+    getTags(): string[];
     // (undocumented)
     getUserContext(): SparkUserContext;
+    interruptAll(): Promise<string[]>;
+    interruptOperation(operationId: string): Promise<string[]>;
+    interruptTag(tag: string): Promise<string[]>;
     // (undocumented)
     get read(): DataFrameReaderTF;
     // (undocumented)
     readStream<R, E, G>(format: string, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, StreamingReadCap<R> & StreamingMark<R>, unknown>;
+    removeTag(tag: string): void;
     // (undocumented)
     setConnectionConfig(config: SparkConnectionConfig): void;
     // (undocumented)

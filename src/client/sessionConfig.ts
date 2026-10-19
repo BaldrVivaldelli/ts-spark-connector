@@ -65,7 +65,7 @@ const CONNECTION_ONLY_SESSION_KEYS = new Set<string>([
 
 const DEFAULT_SPARK_CONNECT_ADDRESS = "sc://localhost:15002";
 const MAX_GRPC_MESSAGE_BYTES = 2_147_483_647;
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isRemoteSparkConfig(key: string): boolean {
     return !CONNECTION_ONLY_SESSION_KEYS.has(key)

@@ -1,5 +1,6 @@
 import crypto from "crypto";
-import { SparkSession } from "./session";
+import { SparkConnectionConfig, SparkSession } from "./session";
+import { combineSignals, ResolvedExecution } from "./executionOptions";
 import type { ProtoRel } from "../engine/compilerRead";
 import { sparkGrpcClient, StreamingQueryHandle } from "./sparkClient";
 import { ProtoPlan, ProtoWriteRoot, protoWriteRootToPlan } from "../write/compilerWrite";
@@ -16,6 +17,7 @@ type ExecutePlanRequest = {
         root: ProtoRel;
     };
     operation_id: string;
+    tags?: string[];
     client_observed_server_side_session_id?: string;
 };
 
@@ -78,24 +80,30 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return new SparkConnectExecutor(session);
     }
 
-    async execute(plan: ProtoRel): Promise<ExecutePlanResponse[]> {
+    async execute(
+        plan: ProtoRel,
+        execution: ResolvedExecution = this.session.resolveExecution(),
+    ): Promise<ExecutePlanResponse[]> {
         await this.prepareSession();
-        const request = this.buildExecuteRequest(plan);
+        const request = this.buildExecuteRequest(plan, execution);
         const responses = await this.remote(() =>
-            sparkGrpcClient.executePlan(request, this.session.getConnectionConfig())
+            sparkGrpcClient.executePlan(request, this.connectionConfigFor(execution))
         );
         responses.forEach(response => this.session.observeServerSideSessionId(response));
         return responses;
     }
 
     /** Streams ExecutePlan responses without materializing the complete result. */
-    async *stream(plan: ProtoRel): AsyncGenerator<ExecutePlanResponse, void, void> {
+    async *stream(
+        plan: ProtoRel,
+        execution: ResolvedExecution = this.session.resolveExecution(),
+    ): AsyncGenerator<ExecutePlanResponse, void, void> {
         await this.prepareSession();
-        const request = this.buildExecuteRequest(plan);
+        const request = this.buildExecuteRequest(plan, execution);
         try {
             for await (const response of sparkGrpcClient.executePlanStream(
                 request,
-                this.session.getConnectionConfig()
+                this.connectionConfigFor(execution)
             )) {
                 this.session.observeServerSideSessionId(response);
                 yield response;
@@ -146,7 +154,10 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         this.session.observeServerSideSessionId(response);
     }
 
-    async runWrite(root: ProtoWriteRoot): Promise<ExecutePlanResponse[]> {
+    async runWrite(
+        root: ProtoWriteRoot,
+        execution: ResolvedExecution = this.session.resolveExecution(),
+    ): Promise<ExecutePlanResponse[]> {
         await this.prepareSession();
         const plan = protoWriteRootToPlan(root);
         const request = {
@@ -154,10 +165,11 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector" as const,
-            operation_id: crypto.randomUUID(),
+            operation_id: execution.operationId,
+            ...(execution.tags.length > 0 ? { tags: execution.tags } : {}),
             ...this.observedServerSessionField(),
         };
-        const config = this.session.getConnectionConfig();
+        const config = this.connectionConfigFor(execution);
         // ExecutePlan recovery uses ReattachExecute with this stable operation id;
         // the original mutating command is never replayed.
         const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
@@ -206,15 +218,23 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return handle;
     }
 
-    private buildExecuteRequest(root: ProtoRel): ExecutePlanRequest {
+    private buildExecuteRequest(root: ProtoRel, execution: ResolvedExecution): ExecutePlanRequest {
         return {
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector",
             plan: { root },
-            operation_id: crypto.randomUUID(),
+            operation_id: execution.operationId,
+            ...(execution.tags.length > 0 ? { tags: execution.tags } : {}),
             ...this.observedServerSessionField(),
         };
+    }
+
+    /** Session connection config, cancelled by the execution's own signal too. */
+    private connectionConfigFor(execution: ResolvedExecution): SparkConnectionConfig {
+        const config = this.session.getConnectionConfig();
+        const signal = combineSignals(config.signal, execution.signal);
+        return signal === config.signal ? config : { ...config, signal };
     }
 
     private buildAnalyzeRequest(root: ProtoRel, mode: ExplainModeInput): AnalyzePlanRequest {
