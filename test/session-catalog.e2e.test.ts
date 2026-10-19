@@ -103,7 +103,8 @@ describe("createDataFrame with complex columns (E2E)", () => {
         // The values are real Spark values: expressions can reach inside them.
         expect(await df.select(call("try_element_at", ["tags", lit(1)]).alias("first"), call("size", ["counts"]).alias("n")).collect())
             .toEqual([{ first: "a", n: 2 }, { first: null, n: 0 }]);
-        expect(await session.createDataFrame(await df.collect(), Orders).count()).toBe(2n);
+        const collected = await df.collect();
+        expect(await session.createDataFrame(collected, Orders).collect()).toEqual(collected);
     });
 });
 
