@@ -8,3 +8,4 @@ test-results
 example_data/dest
 *.log
 *.tsbuildinfo
+docs-site

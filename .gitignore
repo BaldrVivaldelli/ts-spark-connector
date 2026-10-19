@@ -11,6 +11,7 @@ pnpm-debug.log*
 
 # Build output
 dist/
+docs-site/
 build/
 out/
 coverage/

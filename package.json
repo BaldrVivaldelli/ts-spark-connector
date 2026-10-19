@@ -47,6 +47,7 @@
     "api:check": "npm run build && api-extractor run",
     "package:lint": "node scripts/lint-package.mjs",
     "sbom": "npm sbom --omit=dev --sbom-format cyclonedx",
+    "docs:api": "typedoc",
     "check": "npm run check:typescript && npm run check:functions && npm run typecheck && npm run typecheck:test && npm run build && npm run typecheck:examples && npm run lint && npm run test:coverage && npm run test:proto && npm run check:changelog && npm run api:check && npm run package:lint",
     "benchmark": "npm run build && node scripts/benchmark-plan.mjs",
     "test:docker": "docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner test-runner",
@@ -110,6 +111,7 @@
     "publint": "^0.3.22",
     "rimraf": "^6.0.0",
     "semantic-release": "^25.0.8",
+    "typedoc": "0.28.20",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^5.0.1"
   },
