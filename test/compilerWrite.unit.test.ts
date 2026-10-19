@@ -229,4 +229,15 @@ describe("protoWriteRootToPlan - views", () => {
     const cmd = plan.command as { create_dataframe_view?: { name: string; is_global: boolean; replace?: boolean } };
     expect(cmd.create_dataframe_view).toMatchObject({ name: "v", is_global: false, replace: false });
   });
+
+  it("serializes a global registerView", () => {
+    const plan = singlePlan({
+      child: childRelation,
+      writerKind: "batch",
+      spec: { options: {}, partitionBy: [], sortBy: [], registerView: { name: "g", replace: true, global: true } },
+    });
+
+    const cmd = plan.command as { create_dataframe_view?: { name: string; is_global: boolean; replace?: boolean } };
+    expect(cmd.create_dataframe_view).toMatchObject({ name: "g", is_global: true, replace: true });
+  });
 });

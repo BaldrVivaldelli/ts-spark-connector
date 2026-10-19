@@ -45,7 +45,7 @@ export interface WriterSpec extends WriterCommonSpec {
     sortBy: string[];
     viewName?: string;
     asTempView?: boolean;
-    registerView?: { name: string; replace: boolean };
+    registerView?: { name: string; replace: boolean; global?: boolean };
     outputMode?: "append" | "complete" | "update";
     trigger?:
         | { processingTime?: string }

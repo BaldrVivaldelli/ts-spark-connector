@@ -116,6 +116,12 @@ describe("trace interpreters", () => {
         expect(writerToClientASTMermaid(
             TraceWriterAlg.createOrReplaceTempView(batch, "view"),
         )).toContain("createOrReplace:view");
+        expect(TraceWriterAlg.createGlobalTempView(batch, "view")).toMatchObject({
+            target: { kind: "tempView", name: "view", replace: false, global: true },
+        });
+        expect(TraceWriterAlg.createOrReplaceGlobalTempView(batch, "view")).toMatchObject({
+            target: { kind: "tempView", name: "view", replace: true, global: true },
+        });
 
         let stream = TraceWriterAlg.writeStream(child);
         stream = TraceWriterAlg.outputMode(stream, "append");

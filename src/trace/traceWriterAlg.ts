@@ -9,7 +9,7 @@ export type TWKind =
 export type TWTarget =
     | { kind: "path"; path: string }
     | { kind: "table"; table: string }
-    | { kind: "tempView"; name: string; replace?: boolean }
+    | { kind: "tempView"; name: string; replace?: boolean; global?: boolean }
     | { kind: "none" };
 
 export type TWNode = {
@@ -119,6 +119,12 @@ export const TraceWriterAlg = {
     },
     createOrReplaceTempView(w: TWNode, name: string): TWNode {
         return { ...w, target: { kind: "tempView", name, replace: true } };
+    },
+    createGlobalTempView(w: TWNode, name: string): TWNode {
+        return { ...w, target: { kind: "tempView", name, replace: false, global: true } };
+    },
+    createOrReplaceGlobalTempView(w: TWNode, name: string): TWNode {
+        return { ...w, target: { kind: "tempView", name, replace: true, global: true } };
     },
 } as const;
 

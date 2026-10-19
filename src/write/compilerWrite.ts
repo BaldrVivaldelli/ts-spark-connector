@@ -160,6 +160,14 @@ const protoWritingAlg = {
         return updateWriterSpec(writer, { registerView: { name, replace: false } });
     },
 
+    createGlobalTempView<T extends ProtoWriterNode>(writer: T, name: string): T {
+        return updateWriterSpec(writer, { registerView: { name, replace: false, global: true } });
+    },
+
+    createOrReplaceGlobalTempView<T extends ProtoWriterNode>(writer: T, name: string): T {
+        return updateWriterSpec(writer, { registerView: { name, replace: true, global: true } });
+    },
+
     mode(writer: ProtoBatchWriteNode, mode: SaveMode): ProtoBatchWriteNode {
         return asBatch({ ...writer, spec: { ...writer.spec, mode } });
     },
@@ -358,7 +366,7 @@ export function protoWriteRootToPlan(root: ProtoWriteRoot): ProtoPlan | ProtoPla
             command: {
                 create_dataframe_view: {
                     name: spec.registerView.name,
-                    is_global: false,
+                    is_global: spec.registerView.global ?? false,
                     replace: spec.registerView.replace,
                     input: root.child,
                 },

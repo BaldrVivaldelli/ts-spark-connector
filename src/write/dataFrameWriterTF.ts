@@ -148,6 +148,8 @@ type SharedWriterRuntimeAlg<W> = {
     targetTable(w: W, table: string): W;
     createOrReplaceTempView?(w: W, viewName: string): W;
     createTempView?(w: W, viewName: string): W;
+    createGlobalTempView?(w: W, viewName: string): W;
+    createOrReplaceGlobalTempView?(w: W, viewName: string): W;
 };
 
 type BatchWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
@@ -401,6 +403,31 @@ export class DataFrameWriterTF<
         requireNonEmpty(viewName, "createTempView() name");
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createTempView, "createTempView");
+        const root = method(this.wProgram(WR, DF, EX), viewName);
+        return EXE.run(root, this.session);
+    }
+
+    /** Registers the DataFrame as a global temp view (`global_temp.<name>`); fails if it exists. */
+    async createGlobalTempView(viewName: string): Promise<void>;
+    async createGlobalTempView(viewName: string, impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
+    async createGlobalTempView(viewName: string, impl?: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void> {
+        requireNonEmpty(viewName, "createGlobalTempView() name");
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createGlobalTempView, "createGlobalTempView");
+        const root = method(this.wProgram(WR, DF, EX), viewName);
+        return EXE.run(root, this.session);
+    }
+
+    /** Registers or replaces the DataFrame as a global temp view (`global_temp.<name>`). */
+    async createOrReplaceGlobalTempView(viewName: string): Promise<void>;
+    async createOrReplaceGlobalTempView(viewName: string, impl: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
+    async createOrReplaceGlobalTempView(viewName: string, impl?: Impl<R, E, G, W, CDF, CEX, WRALG>): Promise<void> {
+        requireNonEmpty(viewName, "createOrReplaceGlobalTempView() name");
+        const { DF, EX, WR, EXE } = impl ?? this.defaults();
+        const method = this.requireWriteMethod(
+            this.sharedWriterAlg(WR).createOrReplaceGlobalTempView,
+            "createOrReplaceGlobalTempView",
+        );
         const root = method(this.wProgram(WR, DF, EX), viewName);
         return EXE.run(root, this.session);
     }
