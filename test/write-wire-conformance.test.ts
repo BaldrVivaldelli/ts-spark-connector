@@ -201,3 +201,44 @@ describe("Spark Connect write protobuf wire conformance", () => {
     expect(start.input.rel_type).toBe("read");
   });
 });
+
+describe("Spark Connect write wire conformance: insertInto and schema evolution", () => {
+  it("encodes insertInto with TABLE_SAVE_METHOD_INSERT_INTO", () => {
+    const [plan] = plansOf({
+      child,
+      writerKind: "batch",
+      spec: { mode: "overwrite", options: {}, partitionBy: [], sortBy: [], target: { table: "db.events", insertInto: true } },
+    });
+    const operation = wireRoundTrip(plan).command.write_operation;
+    expect(operation.mode).toBe("SAVE_MODE_OVERWRITE");
+    expect(operation.table).toMatchObject({ table_name: "db.events", save_method: "TABLE_SAVE_METHOD_INSERT_INTO" });
+  });
+
+  it("encodes the V2 schema-evolution flag only when requested", () => {
+    const source = SparkSession.builder().getOrCreate().read.parquet("/data/input");
+    const evolving = source.writeTo("db.events").withSchemaEvolution().buildCommand("append") as ProtoPlan["command"];
+    expect(wireRoundTrip({ command: evolving } as ProtoPlan).command.write_operation_v2.with_schema_evolution).toBe(true);
+    const plain = source.writeTo("db.events").buildCommand("append") as ProtoPlan["command"];
+    expect(wireRoundTrip({ command: plain } as ProtoPlan).command.write_operation_v2.with_schema_evolution).toBe(false);
+  });
+
+  it("encodes JDBC predicates on the data source", () => {
+    const df = SparkSession.builder().getOrCreate().read.jdbc("jdbc:derby:memory:db", "people", {
+      predicates: ["id < 10", "id >= 10"],
+      properties: { driver: "org.apache.derby.jdbc.EmbeddedDriver" },
+    });
+    const root = JSON.parse(df.toProtoJSON()) as ProtoObject;
+    const encoded = executePlanRequest.serialize({
+      session_id: "00112233-4455-6677-8899-aabbccddeeff",
+      user_context: { user_id: "write-wire-conformance" },
+      plan: { root },
+    });
+    const dataSource = (executePlanRequest.deserialize(encoded) as any).plan.root.read.data_source;
+    expect(dataSource).toMatchObject({
+      format: "jdbc",
+      paths: [],
+      predicates: ["id < 10", "id >= 10"],
+      options: { url: "jdbc:derby:memory:db", dbtable: "people", driver: "org.apache.derby.jdbc.EmbeddedDriver" },
+    });
+  });
+});

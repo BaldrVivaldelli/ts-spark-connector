@@ -210,3 +210,31 @@ describe("DataFrameWriterV2 partitioning", () => {
         expect(operation.clustering_columns).toEqual(["d"]);
     });
 });
+
+describe("DataFrameWriterV2 schema evolution", () => {
+    it("is gated on Spark 4.1 and sent only when requested", async () => {
+        const gated = SparkSession.builder().getOrCreate();
+        const reader = () => gated.read.parquet("/data/updates.parquet");
+        vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.0.4" } });
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+
+        await expect(reader().writeTo("t").withSchemaEvolution().append()).rejects.toMatchObject({
+            name: "UnsupportedServerVersionError",
+            feature: "withSchemaEvolution()",
+            requiredVersion: "4.1.0",
+            serverVersion: "4.0.4",
+        });
+        expect(execute).not.toHaveBeenCalled();
+
+        await reader().writeTo("t").append();
+        expect(executedCommand(execute).write_operation_v2).not.toHaveProperty("with_schema_evolution");
+
+        const modern = SparkSession.builder().getOrCreate();
+        vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.1.3" } });
+        const writer = modern.read.parquet("/data/updates.parquet").writeTo("t");
+        const evolving = writer.withSchemaEvolution();
+        await evolving.append();
+        expect(executedCommand(execute, 1).write_operation_v2).toMatchObject({ with_schema_evolution: true });
+        expect(writer.buildCommand("append").write_operation_v2).not.toHaveProperty("with_schema_evolution");
+    });
+});

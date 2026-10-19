@@ -241,3 +241,16 @@ describe("protoWriteRootToPlan - views", () => {
     expect(cmd.create_dataframe_view).toMatchObject({ name: "g", is_global: true, replace: true });
   });
 });
+
+describe("protoWriteRootToPlan - insertInto", () => {
+  it("selects the INSERT_INTO save method for insertInto targets", () => {
+    const plan = singlePlan({
+      child: childRelation,
+      writerKind: "batch",
+      spec: { mode: "append", options: {}, partitionBy: [], sortBy: [], target: { table: "db.events", insertInto: true } },
+    });
+    const op = (plan.command as { write_operation: Record<string, unknown> }).write_operation;
+    expect(op.table).toEqual({ table_name: "db.events", save_method: 2 });
+    expect(op.mode).toBe(1);
+  });
+});

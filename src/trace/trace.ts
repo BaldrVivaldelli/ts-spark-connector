@@ -106,8 +106,8 @@ const orderLabels = (orders: SortOrder<TraceNode>[]): TraceNode[] => orders.map(
  * relation added to `DFAlg` cannot silently break plan inspection.
  */
 export const TraceDFAlg: TraceDFAlgebra = {
-    relation: (format, _path, _opts, schema) =>
-        node("rel", `relation(${format}${schema ? ",schema" : ""})`),
+    relation: (format, _path, _opts, schema, predicates) =>
+        node("rel", `relation(${format}${schema ? ",schema" : ""}${predicates?.length ? `,predicates[${predicates.length}]` : ""})`),
 
     catalog: op => node("rel", `catalog(${op.method})`),
     range: (start, end, step, numPartitions) => node(

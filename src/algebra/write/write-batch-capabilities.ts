@@ -13,6 +13,12 @@ export interface BucketSortCap<W> {
 }
 
 /** @internal */
+export interface InsertIntoCap<W> {
+    /** Positional insert into an existing table (`WriteOperation.table.save_method = INSERT_INTO`). */
+    insertInto(w: W, table: string): W;
+}
+
+/** @internal */
 export interface ViewsCap<W> {
     createOrReplaceTempView(w: W, viewName: string): W;
     createTempView(w: W, name: string): W;

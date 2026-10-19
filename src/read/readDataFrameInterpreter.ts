@@ -135,7 +135,14 @@ export const SparkExprAlg: ExprAlg<Expression> = {
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<LogicalPlan, Expression>> = {
-    relation: (format, path, options, schema) => ({ type: "Relation", format, path, options, schema }),
+    relation: (format, path, options, schema, predicates) => ({
+        type: "Relation",
+        format,
+        path,
+        options,
+        schema,
+        ...(predicates && predicates.length > 0 ? { predicates: [...predicates] } : {}),
+    }),
     catalog: op => ({ type: "Catalog", operation: op }),
     range: (start, end, step, numPartitions) => ({
         type: "Range",

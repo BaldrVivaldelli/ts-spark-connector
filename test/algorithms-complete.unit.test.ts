@@ -107,6 +107,7 @@ describe("trace interpreters", () => {
         });
         expect(writerToClientASTJSON(batch)).toContain('"bucketBy"');
         expect(writerToClientASTMermaid(batch)).toContain("path:/output");
+        expect(writerToClientASTMermaid(TraceWriterAlg.insertInto(batch, "db.events"))).toContain("insertInto:db.events");
         expect(writerToClientASTMermaid(
             TraceWriterAlg.targetTable(batch, "catalog.table"),
         )).toContain("table:catalog.table");

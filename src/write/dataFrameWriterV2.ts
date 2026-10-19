@@ -31,6 +31,7 @@ type WriterV2Spec = {
     readonly tableProperties: Readonly<Record<string, string>>;
     readonly partitioning: readonly (string | EBuilder)[];
     readonly clustering: readonly string[];
+    readonly schemaEvolution: boolean;
 };
 
 function requireNonEmpty(value: string, label: string): string {
@@ -67,6 +68,7 @@ export class DataFrameWriterV2 {
         tableProperties: {},
         partitioning: [],
         clustering: [],
+        schemaEvolution: false,
     };
 
     /**
@@ -141,6 +143,15 @@ export class DataFrameWriterV2 {
         return this.with({ clustering: [...cols] });
     }
 
+    /**
+     * Lets the write add columns the table lacks. Needs Spark Connect 4.1 or
+     * newer: older servers reject the write with `UnsupportedServerVersionError`
+     * before anything is sent.
+     */
+    withSchemaEvolution(): DataFrameWriterV2 {
+        return this.with({ schemaEvolution: true });
+    }
+
     /** Creates the table; fails if it already exists. */
     create(): Promise<void> {
         return this.run("create");
@@ -194,10 +205,14 @@ export class DataFrameWriterV2 {
             mode: PROTO_MODES[mode],
             ...(condition ? { overwrite_condition: condition.build(EX) } : {}),
             clustering_columns: [...this.spec.clustering],
+            ...(this.spec.schemaEvolution ? { with_schema_evolution: true } : {}),
         };
     }
 
     private async run(mode: WriterV2Mode, condition?: EBuilder): Promise<void> {
+        if (this.spec.schemaEvolution) {
+            await this.session.requireServerVersion("4.1.0", "withSchemaEvolution()");
+        }
         const input = this.relation() as ProtoRel;
         const executor = await applyPendingAnalyzeActions(input, this.session);
         await executor.runCommand({

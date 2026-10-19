@@ -152,6 +152,10 @@ const protoWritingAlg = {
         return updateWriterSpec(writer, { target: { table } });
     },
 
+    insertInto(writer: ProtoBatchWriteNode, table: string): ProtoBatchWriteNode {
+        return updateWriterSpec(writer, { target: { table, insertInto: true } });
+    },
+
     createOrReplaceTempView<T extends ProtoWriterNode>(writer: T, name: string): T {
         return preserveWriterFlavor(writer, { tempViewName: name });
     },
@@ -351,7 +355,8 @@ function buildBatchWriteOperation(root: ProtoWriteRoot): ProtoMessage {
     } else if (spec.target?.table) {
         operation.table = {
             table_name: spec.target.table,
-            save_method: 1,
+            // TABLE_SAVE_METHOD_SAVE_AS_TABLE = 1, TABLE_SAVE_METHOD_INSERT_INTO = 2
+            save_method: spec.target.insertInto ? 2 : 1,
         };
     }
 

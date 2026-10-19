@@ -12,6 +12,23 @@ export type Opts = Record<string, string>;
 /** @public */
 export type ReaderOptionValue = string | number | boolean | bigint;
 
+/**
+ * Partitioning and connection settings of `read.jdbc`, following PySpark's
+ * `DataFrameReader.jdbc` keyword arguments.
+ * @public
+ */
+export type JdbcReadOptions = {
+    /** Numeric, date or timestamp column used to split the reads; requires the three bounds below. */
+    column?: string;
+    lowerBound?: number | bigint | string;
+    upperBound?: number | bigint | string;
+    numPartitions?: number;
+    /** One partition per WHERE clause; cannot be combined with `column`. */
+    predicates?: readonly string[];
+    /** Connection properties such as `driver`, `user` or `password`, sent as data source options. */
+    properties?: Record<string, ReaderOptionValue>;
+};
+
 function nonEmpty(value: string, label: string): string {
     if (typeof value !== "string" || !value.trim()) {
         throw new TypeError(`${label} must be a non-empty string.`);
@@ -84,6 +101,52 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
     }
     avro(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {
         return this.make("avro", oneOrManyPaths(paths));
+    }
+
+    /**
+     * Reads a table or a query through JDBC. Spark reads `table` with a single
+     * partition unless `column` with its bounds, or `predicates`, splits it.
+     */
+    jdbc(url: string, table: string, options: JdbcReadOptions = {}): ReadChainedDataFrame<UnknownSchema, R, E, G> {
+        nonEmpty(url, "jdbc() url");
+        nonEmpty(table, "jdbc() table");
+        if (options === null || typeof options !== "object") {
+            throw new TypeError("jdbc() options must be an object.");
+        }
+        const { column, lowerBound, upperBound, numPartitions, predicates, properties } = options;
+        const partitioning: Record<string, string> = {};
+        if (column !== undefined) {
+            nonEmpty(column, "jdbc() column");
+            if (lowerBound === undefined || upperBound === undefined || numPartitions === undefined) {
+                throw new TypeError("jdbc() column requires lowerBound, upperBound and numPartitions.");
+            }
+            if (!Number.isSafeInteger(numPartitions) || numPartitions < 1) {
+                throw new RangeError("jdbc() numPartitions must be a positive safe integer.");
+            }
+            partitioning.partitionColumn = column;
+            partitioning.lowerBound = optionValue(lowerBound, "jdbc() lowerBound");
+            partitioning.upperBound = optionValue(upperBound, "jdbc() upperBound");
+            partitioning.numPartitions = String(numPartitions);
+        }
+        if (predicates !== undefined) {
+            if (column !== undefined) {
+                throw new TypeError("jdbc() predicates cannot be combined with a partition column.");
+            }
+            if (!Array.isArray(predicates) || predicates.length === 0
+                || predicates.some(predicate => typeof predicate !== "string" || !predicate.trim())) {
+                throw new TypeError("jdbc() predicates must be a non-empty array of non-empty strings.");
+            }
+        }
+        const normalizedProperties = Object.fromEntries(
+            Object.entries(properties ?? {}).map(([key, value]) => [
+                nonEmpty(key, "jdbc() property name"),
+                optionValue(value, `jdbc() properties[${JSON.stringify(key)}]`),
+            ])
+        );
+        const opts = { ...this.opts, ...normalizedProperties, ...partitioning, url, dbtable: table };
+        const prog: DFProgram<R, E, G> = (DF) =>
+            DF.relation("jdbc", [], opts, undefined, predicates === undefined ? undefined : [...predicates]);
+        return new ReadChainedDataFrame<UnknownSchema, R, E, G>(prog, this.session);
     }
 
     load(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G> {

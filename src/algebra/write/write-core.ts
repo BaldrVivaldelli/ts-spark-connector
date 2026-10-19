@@ -10,6 +10,8 @@ export type StreamWriterFormat = "console" | "kafka" | "memory";
 export interface WriterTarget {
     path?: string;
     table?: string;
+    /** `insertInto(table)`: positional insert into an existing table instead of `saveAsTable`. */
+    insertInto?: boolean;
 }
 
 export interface WriterCommonSpec {

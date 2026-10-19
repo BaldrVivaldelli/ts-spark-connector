@@ -9,6 +9,7 @@ export type TWKind =
 export type TWTarget =
     | { kind: "path"; path: string }
     | { kind: "table"; table: string }
+    | { kind: "insertInto"; table: string }
     | { kind: "tempView"; name: string; replace?: boolean; global?: boolean }
     | { kind: "none" };
 
@@ -114,6 +115,9 @@ export const TraceWriterAlg = {
     targetTable(w: TWNode, table: string): TWNode {
         return { ...w, target: { kind: "table", table } };
     },
+    insertInto(w: TWNode, table: string): TWNode {
+        return { ...w, target: { kind: "insertInto", table } };
+    },
     createTempView(w: TWNode, name: string): TWNode {
         return { ...w, target: { kind: "tempView", name, replace: false } };
     },
@@ -158,6 +162,8 @@ export function writerToClientASTMermaid(wn: TWNode) {
             ? `path:${wn.target.path}`
             : wn.target.kind === "table"
                 ? `table:${wn.target.table}`
+                : wn.target.kind === "insertInto"
+                    ? `insertInto:${wn.target.table}`
                 : wn.target.kind === "tempView"
                     ? `${wn.target.replace ? "createOrReplace" : "create"}:${wn.target.name}`
                     : "no-target";

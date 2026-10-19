@@ -22,7 +22,9 @@ export interface DFCore<R, E, G = unknown> {
         format: string,
         path: string | string[],
         options?: Record<string, string>,
-        schema?: string
+        schema?: string,
+        /** JDBC only: one partition per WHERE clause (`DataSource.predicates`). */
+        predicates?: readonly string[]
     ): R;
 
     /** Roots the plan at a server-side catalog metadata operation. */

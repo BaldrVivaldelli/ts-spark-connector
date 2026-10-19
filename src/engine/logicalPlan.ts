@@ -33,7 +33,7 @@ export type DataSource = {
 };
 
 export type LogicalPlan =
-    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string>; schema?: string }
+    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string>; schema?: string; predicates?: string[] }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
     | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, Expression>; groupType?: GroupTypeInput }

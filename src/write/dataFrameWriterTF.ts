@@ -156,6 +156,7 @@ type BatchWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
     mode(w: W, m: SaveMode): W;
     bucketBy(w: W, n: number, col: string, ...cols: string[]): W;
     sortBy(w: W, col: string, ...cols: string[]): W;
+    insertInto?(w: W, table: string): W;
 };
 
 type StreamWriterRuntimeAlg<W> = SharedWriterRuntimeAlg<W> & {
@@ -439,6 +440,54 @@ export class DataFrameWriterTF<
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const root = this.sharedWriterAlg(WR).targetTable(this.wProgram(WR, DF, EX), table);
         return EXE.run(root, this.session);
+    }
+
+    /**
+     * Inserts the rows into an existing table by column position, like
+     * PySpark's `insertInto`. `overwrite` selects the overwrite or append save
+     * mode; without it the writer's current mode applies.
+     */
+    async insertInto(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, table: string, overwrite?: boolean): Promise<void>;
+    async insertInto(
+        this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>,
+        table: string,
+        overwrite: boolean | undefined,
+        impl: Impl<R, E, G, WBatch, CDF, CEX, WRALG>,
+    ): Promise<void>;
+    async insertInto(
+        this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>,
+        table: string,
+        overwrite?: boolean,
+        impl?: Impl<R, E, G, WBatch, CDF, CEX, WRALG>,
+    ): Promise<void> {
+        requireNonEmpty(table, "insertInto() table");
+        if (overwrite !== undefined && typeof overwrite !== "boolean") {
+            throw new TypeError("insertInto() overwrite must be a boolean.");
+        }
+        const writer = overwrite === undefined ? this : this.mode(overwrite ? "overwrite" : "append");
+        const { DF, EX, WR, EXE } = impl ?? writer.defaults();
+        const method = this.requireWriteMethod(this.batchWriterAlg(WR).insertInto, "insertInto");
+        const root = method(writer.wProgram(WR, DF, EX) as WBatch, table);
+        return EXE.run(root, this.session);
+    }
+
+    /**
+     * Saves the rows into a JDBC table, like PySpark's `write.jdbc`:
+     * `properties` become data source options (`driver`, `user`, ...).
+     */
+    async jdbc(
+        this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>,
+        url: string,
+        table: string,
+        mode?: SaveMode,
+        properties?: Record<string, WriterOptionValue>,
+    ): Promise<void> {
+        requireNonEmpty(url, "jdbc() url");
+        requireNonEmpty(table, "jdbc() table");
+        let writer = this.format("jdbc").option("url", url).option("dbtable", table);
+        if (properties !== undefined) writer = writer.options(properties);
+        if (mode !== undefined) writer = writer.mode(mode);
+        return writer.save();
     }
 
     parquet(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>) {

@@ -659,7 +659,7 @@ export function unparsedDataType(dataTypeString: string): ProtoMessage {
 }
 
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
-    relation: (format, path, options, schema) => {
+    relation: (format, path, options, schema, predicates) => {
         if (format === "table") {
             if (Array.isArray(path)) throw new TypeError("table reads accept exactly one identifier.");
             return {
@@ -682,6 +682,7 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
                     paths: Array.isArray(path) ? path : [path],
                     options: options ?? {},
                     ...(schema ? { schema } : {}),
+                    ...(predicates && predicates.length > 0 ? { predicates: [...predicates] } : {}),
                 },
             },
         };
