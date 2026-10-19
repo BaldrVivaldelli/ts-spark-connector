@@ -98,6 +98,8 @@ describe("Spark Connect protobuf wire conformance", () => {
 
     const decoded = wireRoundTrip(root);
     const sort = decoded.plan.root.sort;
+    // An unset is_global decodes as false and would sort each partition on its own.
+    expect(sort.is_global).toBe(true);
     expect(sort.order[0]).toMatchObject({
       direction: "SORT_DIRECTION_DESCENDING",
       null_ordering: "SORT_NULLS_LAST",

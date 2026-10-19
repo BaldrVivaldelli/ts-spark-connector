@@ -178,6 +178,14 @@ describe('examples (E2E)', () => {
         ]);
     }, 90_000);
 
+    it('orderBy sorts globally across partitions', async () => {
+        const rows = await session.sql('SELECT id FROM range(0, 200)')
+            .repartition(5)
+            .orderBy(col('id').desc())
+            .collect() as Array<{ id: bigint }>;
+        expect(rows.map(row => row.id)).toEqual(Array.from({ length: 200 }, (_, i) => BigInt(199 - i)));
+    }, 90_000);
+
     it('groupBy + agg + orderBy + limit', async () => {
         const rows = await purchases()
             .groupBy('user_id')

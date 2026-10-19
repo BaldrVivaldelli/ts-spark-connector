@@ -510,6 +510,9 @@ function protoSortedRelation(
                     marker?.nulls ?? order.nulls,
                 );
             }),
+            // Spark reads an unset is_global as false, i.e. a sort within each
+            // partition; orderBy()/sort() promise a total order.
+            is_global: true,
         },
     };
 }
