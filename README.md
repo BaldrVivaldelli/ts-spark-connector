@@ -312,6 +312,7 @@ Notes:
 - `explain` and `interrupt` are unary and idempotent, so they are always safe to retry.
 - Every `executePlan` has a stable operation UUID and requests reattachable execution. Recovery uses `ReattachExecute` from the last response id and never resends the original read, SQL, DDL, or write plan; `ReleaseExecute` cleans server buffers afterward.
 - `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits.
+- Spark closes every reattachable response stream after `spark.connect.execute.reattachable.senderMaxStreamDuration` (two minutes by default), even while a long job has not produced a row yet. The client follows such idle streams for as long as the job runs; only streams that end empty immediately, which indicates a broken server, are limited.
 - gRPC send and receive limits default to 128 MiB, avoiding grpc-js's small default for normal Arrow batches; advanced callers can override the validated `grpcMaxReceiveMessageBytes` / `grpcMaxSendMessageBytes` connection options before the first RPC.
 - Client session ids and operation ids are UUIDs. If the compatibility helper `createSparkSession(id)` is given an explicit id, it must be a canonical UUID.
 
