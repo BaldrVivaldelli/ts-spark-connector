@@ -287,6 +287,8 @@ export class SparkSession implements SessionAlgebra {
     private readonly observations = new Map<string, Observation>();
     private readonly cachedRelationIds = new Set<string>();
     private streamingQueryManager?: StreamingQueryManager;
+    /** Connection config as given to the builder, before runtime `conf.set()` mirrors into it. */
+    private builderConnectionConfig: SparkConnectionConfig;
 
     constructor(
         sessionId?: string,
@@ -301,6 +303,7 @@ export class SparkSession implements SessionAlgebra {
             ...(opts?.userContext ?? {}),
         };
         this.connectionConfig = normalizeConnectionConfig(opts?.connectionConfig);
+        this.builderConnectionConfig = this.connectionConfig;
         this.runtimeConfig = new SparkRuntimeConfig(this);
     }
 
@@ -407,9 +410,11 @@ export class SparkSession implements SessionAlgebra {
      */
     newSession(): SparkSession {
         this.assertOpen();
+        // Runtime `conf.set()` calls are mirrored into connectionConfig; the
+        // child must start from what the builder configured, not from them.
         return new SparkSession(undefined, {
             userContext: this.userContext,
-            connectionConfig: this.connectionConfig,
+            connectionConfig: this.builderConnectionConfig,
         });
     }
 
@@ -766,6 +771,7 @@ export class SparkSession implements SessionAlgebra {
             throw new Error("Cannot change the Spark connection after this session has used remote state.");
         }
         this.connectionConfig = normalizeConnectionConfig(config);
+        this.builderConnectionConfig = this.connectionConfig;
         this.initialConfigApplied = false;
         this.initialConfigPromise = undefined;
     }

@@ -77,6 +77,25 @@ describe("newSession", () => {
         expect(parent.getTags()).toEqual(["only-parent"]);
     });
 
+    it("starts the child from the builder configuration, not from runtime conf.set() values", async () => {
+        const config = vi.spyOn(sparkGrpcClient, "config").mockResolvedValue({});
+        const parent = SparkSession.builder()
+            .config("spark.connect.url", "sc://host:15002")
+            .config("spark.sql.session.timeZone", "UTC")
+            .getOrCreate();
+        await parent.conf.set("spark.sql.shuffle.partitions", 8);
+        expect(parent.getSessionConfig()).toMatchObject({ "spark.sql.shuffle.partitions": 8 });
+
+        const child = parent.newSession();
+        expect(child.getSessionConfig()).toEqual({ "spark.connect.url": "sc://host:15002", "spark.sql.session.timeZone": "UTC" });
+        config.mockClear();
+        await child.ensureRemoteConfigApplied();
+        expect(config).toHaveBeenCalledTimes(1);
+        expect(config.mock.calls[0]![0]).toMatchObject({
+            operation: { set: { pairs: [{ key: "spark.sql.session.timeZone", value: "UTC" }] } },
+        });
+    });
+
     it("refuses to spawn from a closed session", async () => {
         vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
         const parent = SparkSession.builder().getOrCreate();
