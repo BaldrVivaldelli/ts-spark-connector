@@ -124,3 +124,179 @@ describe("column builder coercions", () => {
         expect(window.frame_spec).toBeTruthy();
     });
 });
+
+describe("column methods", () => {
+    const id = Column.col("id");
+    const rhs = Column.col("rhs");
+    const built = (expression: { build: typeof id.build }) => expression.build(ProtoExprAlg) as Record<string, any>;
+    const literal = (value: unknown) => ProtoExprAlg.lit(value as never);
+
+    it("builds binary operators with literal or column right-hand sides", () => {
+        const operators: Array<[(x: Column.ColumnOperand) => Column.EBuilder, string]> = [
+            [id.eqNullSafe, "<=>"],
+            [id.plus, "+"],
+            [id.minus, "-"],
+            [id.multiply, "*"],
+            [id.divide, "/"],
+            [id.mod, "%"],
+            [id.bitwiseAND, "&"],
+            [id.bitwiseOR, "|"],
+            [id.bitwiseXOR, "^"],
+        ];
+        for (const [operator, name] of operators) {
+            expect(fn(built(operator(2)))).toEqual({ function_name: name, arguments: [attribute("id"), literal(2)] });
+            expect(fn(built(operator(rhs))).arguments[1]).toEqual(attribute("rhs"));
+        }
+        // A bare string is a literal on the right-hand side, null is a null literal.
+        expect(fn(built(id.eqNullSafe(null))).arguments[1]).toEqual({ literal: { null: { null: {} } } });
+        // `!=` is SQL syntax only; Spark Connect cannot resolve it as a function.
+        expect(fn(built(id.neq("x")))).toEqual({
+            function_name: "not",
+            arguments: [{ unresolved_function: { function_name: "=", arguments: [attribute("id"), literal("x")] } }],
+        });
+    });
+
+    it("negates, names and checks NaN", () => {
+        expect(fn(built(id.gt(1).not()))).toMatchObject({ function_name: "not" });
+        expect(built(id.name("renamed"))).toEqual({ alias: { expr: attribute("id"), name: ["renamed"] } });
+        expect(fn(built(id.isNaN()))).toEqual({ function_name: "isnan", arguments: [attribute("id")] });
+    });
+
+    it("builds IN lists from values and arrays", () => {
+        expect(fn(built(id.isin(1, "two", rhs)))).toEqual({
+            function_name: "in",
+            arguments: [attribute("id"), literal(1), literal("two"), attribute("rhs")],
+        });
+        expect(fn(built(id.isin([1, 2], 3))).arguments).toEqual([attribute("id"), literal(1), literal(2), literal(3)]);
+    });
+
+    it("expands between into an inclusive range", () => {
+        const range = built(id.between(1, rhs));
+        expect(fn(range).function_name.toLowerCase()).toBe("and");
+        expect(fn(fn(range).arguments[0]!)).toEqual({ function_name: ">=", arguments: [attribute("id"), literal(1)] });
+        expect(fn(fn(range).arguments[1]!)).toEqual({ function_name: "<=", arguments: [attribute("id"), attribute("rhs")] });
+    });
+
+    it("builds string predicates and substr with literal patterns", () => {
+        const predicates: Array<[(pattern: string) => Column.EBuilder, string]> = [
+            [id.like, "like"],
+            [id.ilike, "ilike"],
+            [id.rlike, "rlike"],
+            [id.startsWith, "startswith"],
+            [id.endsWith, "endswith"],
+            [id.contains, "contains"],
+        ];
+        for (const [predicate, name] of predicates) {
+            expect(fn(built(predicate("a%")))).toEqual({ function_name: name, arguments: [attribute("id"), literal("a%")] });
+        }
+        expect(fn(built(id.substr(2, rhs)))).toEqual({
+            function_name: "substr",
+            arguments: [attribute("id"), literal(2), attribute("rhs")],
+        });
+    });
+
+    it("casts with an optional try evaluation mode", () => {
+        expect(built(id.cast("decimal(10,2)"))).toEqual({ cast: { expr: attribute("id"), type_str: "decimal(10,2)" } });
+        expect(built(id.tryCast("int"))).toEqual({
+            cast: { expr: attribute("id"), type_str: "int", eval_mode: "EVAL_MODE_TRY" },
+        });
+    });
+
+    it("extracts and updates nested values like PySpark", () => {
+        expect(built(id.getItem(0))).toEqual({ unresolved_extract_value: { child: attribute("id"), extraction: literal(0) } });
+        expect(built(id.getItem("key"))).toEqual({
+            unresolved_extract_value: { child: attribute("id"), extraction: literal("key") },
+        });
+        expect(built(id.getItem(rhs))).toEqual({ unresolved_extract_value: { child: attribute("id"), extraction: attribute("rhs") } });
+        expect(built(id.getField("a").getField("b"))).toEqual({
+            unresolved_extract_value: {
+                child: { unresolved_extract_value: { child: attribute("id"), extraction: literal("a") } },
+                extraction: literal("b"),
+            },
+        });
+        expect(built(id.withField("x", Column.lit(1)))).toEqual({
+            update_fields: { struct_expression: attribute("id"), field_name: "x", value_expression: literal(1) },
+        });
+        // Dropping several fields nests one update per field, in order.
+        expect(built(id.dropFields("a", "b"))).toEqual({
+            update_fields: {
+                struct_expression: { update_fields: { struct_expression: attribute("id"), field_name: "a" } },
+                field_name: "b",
+            },
+        });
+    });
+
+    it("parses SQL expressions on the server and rejects blank ones", () => {
+        expect(built(Column.expr("amount * 2"))).toEqual({ expression_string: { expression: "amount * 2" } });
+        expect(() => Column.expr("  ")).toThrow("expr() requires a non-empty SQL expression.");
+        expect(() => Column.expr(undefined as unknown as string)).toThrow(TypeError);
+    });
+});
+
+describe("window specifications", () => {
+    const id = Column.col("id");
+    type ProtoWindow = {
+        window: {
+            window_function: unknown;
+            partition_spec: unknown[];
+            order_spec: Array<{ child: unknown; direction: string }>;
+            frame_spec?: { frame_type: string; lower: unknown; upper: unknown };
+        };
+    };
+    const windowOf = (spec?: Column.WindowSpecBuilder) =>
+        (Column.call("row_number", []).over(spec).build(ProtoExprAlg) as ProtoWindow).window;
+
+    it("evaluates over the whole result without a specification", () => {
+        expect(windowOf()).toEqual({
+            window_function: { unresolved_function: { function_name: "row_number", arguments: [] } },
+            partition_spec: [],
+            order_spec: [],
+        });
+    });
+
+    it("accepts partition-only and order-only specifications", () => {
+        const partitioned = windowOf(Column.Window.partitionBy("group"));
+        expect(partitioned.partition_spec).toEqual([attribute("group")]);
+        expect(partitioned.order_spec).toEqual([]);
+        expect(partitioned.frame_spec).toBeUndefined();
+
+        const ordered = windowOf(Column.Window.orderBy(id.desc()));
+        expect(ordered.partition_spec).toEqual([]);
+        expect(ordered.order_spec[0]!.direction).toContain("DESCENDING");
+
+        // Refining keeps the earlier parts.
+        const both = windowOf(Column.Window.orderBy("id").partitionBy(id));
+        expect(both.partition_spec).toEqual([attribute("id")]);
+        expect(both.order_spec).toHaveLength(1);
+    });
+
+    it("maps PySpark-style numeric boundaries to frame boundaries", () => {
+        const rows = windowOf(Column.Window.partitionBy("g").orderBy("t").rowsBetween(-Infinity, 0)).frame_spec;
+        expect(rows).toEqual({ frame_type: "FRAME_TYPE_ROW", lower: { unbounded: true }, upper: { current_row: true } });
+
+        const range = windowOf(Column.Window.orderBy("t").rangeBetween(-3, Infinity)).frame_spec;
+        expect(range).toEqual({
+            frame_type: "FRAME_TYPE_RANGE",
+            lower: { value: { literal: { long: "-3" } } },
+            upper: { unbounded: true },
+        });
+
+        const following = windowOf(Column.Window.rowsBetween(Column.Window.currentRow, 2)).frame_spec;
+        expect(following?.upper).toEqual({ value: { literal: { integer: 2 } } });
+
+        const frameOnly = windowOf(
+            Column.Window.rangeBetween(Column.Window.unboundedPreceding, Column.Window.unboundedFollowing),
+        );
+        expect(frameOnly.frame_spec).toEqual({
+            frame_type: "FRAME_TYPE_RANGE",
+            lower: { unbounded: true },
+            upper: { unbounded: true },
+        });
+    });
+
+    it("rejects NaN frame boundaries", () => {
+        expect(() => Column.Window.rowsBetween(Number.NaN, 0)).toThrow(
+            "Window frame boundaries must be numbers, not NaN.",
+        );
+    });
+});

@@ -5,6 +5,7 @@ import { col, lit, call, coalesce, when } from "../../src/engine/column";
 import { NumericColumn, TypedColumn } from "../../src/typed/typed-column";
 import { abs, concat, length, lower, round, upper, when as twhen } from "../../src/typed/functions";
 import { makeAggFactory } from "../../src/typed/aggregations";
+import * as F from "../../src/functions";
 import { ColumnType } from "../../src/schema/schema-model";
 
 /**
@@ -24,11 +25,8 @@ import { ColumnType } from "../../src/schema/schema-model";
  * proto resultante con `toEqual`. Si ambos caminos generan el mismo plan proto,
  * la capa tipada no altera el plan (Requirement 3.2 / Plan_Equivalence 11.3).
  *
- * Nota sobre la aritmética: el `EBuilder` no tipado **no** expone
- * `plus/minus/times/div` (solo comparaciones y lógicos), por lo que el
- * "equivalente no tipado" de la aritmética es la expresión canónica construida
- * directamente con el álgebra (`ProtoExprAlg.bin(...)`), que es exactamente lo
- * que cualquier camino produciría para esa operación.
+ * La aritmética tipada (`plus/minus/times/div`) se compara con los métodos
+ * `plus/minus/multiply/divide` del `EBuilder` no tipado.
  */
 
 // `E` es el tipo de expresión del intérprete proto (interno = any).
@@ -102,35 +100,25 @@ describe("Plan-assertion: builders de columna tipados vs EBuilder no tipado", ()
     });
 });
 
-describe("Plan-assertion: aritmética numérica tipada vs álgebra canónica", () => {
+describe("Plan-assertion: aritmética numérica tipada vs EBuilder no tipado", () => {
     it("plus produce el mismo proto", () => {
-        sameProto(ncol("amount").plus(10), {
-            build: ex => ex.bin("+", ex.col("amount"), ex.lit(10)),
-        });
+        sameProto(ncol("amount").plus(10), col("amount").plus(10));
     });
 
     it("minus produce el mismo proto", () => {
-        sameProto(ncol("amount").minus(10), {
-            build: ex => ex.bin("-", ex.col("amount"), ex.lit(10)),
-        });
+        sameProto(ncol("amount").minus(10), col("amount").minus(10));
     });
 
     it("times produce el mismo proto", () => {
-        sameProto(ncol("amount").times(2), {
-            build: ex => ex.bin("*", ex.col("amount"), ex.lit(2)),
-        });
+        sameProto(ncol("amount").times(2), col("amount").multiply(2));
     });
 
     it("div produce el mismo proto", () => {
-        sameProto(ncol("amount").div(2), {
-            build: ex => ex.bin("/", ex.col("amount"), ex.lit(2)),
-        });
+        sameProto(ncol("amount").div(2), col("amount").divide(2));
     });
 
     it("aritmética entre columnas produce el mismo proto", () => {
-        sameProto(ncol("amount").minus(ncol("discount")), {
-            build: ex => ex.bin("-", ex.col("amount"), ex.col("discount")),
-        });
+        sameProto(ncol("amount").minus(ncol("discount")), col("amount").minus(col("discount")));
     });
 });
 
@@ -183,11 +171,9 @@ describe("Plan-assertion: agregaciones tipadas vs call(...) no tipado", () => {
         sameProto(agg.count().as("n"), call("count", [lit(1)]));
     });
 
-    it("countDistinct produce count(DISTINCT ...)", () => {
-        // Spark registers no `count_distinct`: it is count with is_distinct.
-        sameProto(agg.countDistinct("amount").as("d"), {
-            build: ex => ex.callDistinct("count", [ex.col("amount")]),
-        });
+    it("countDistinct produce el mismo proto que count_distinct()", () => {
+        // Spark registers no `count_distinct`: it is count(DISTINCT ...).
+        sameProto(agg.countDistinct("amount").as("d"), F.count_distinct("amount"));
     });
 
     it("sum produce el mismo proto", () => {
@@ -201,5 +187,28 @@ describe("Plan-assertion: agregaciones tipadas vs call(...) no tipado", () => {
     it("min / max producen el mismo proto", () => {
         sameProto(agg.min("amount").as("lo"), call("min", [col("amount")]));
         sameProto(agg.max("amount").as("hi"), call("max", [col("amount")]));
+    });
+
+    it("first/last producen el mismo proto que la biblioteca de funciones", () => {
+        sameProto(agg.first("product").as("f"), F.first("product"));
+        sameProto(agg.first("product", true).as("f"), F.first("product", true));
+        sameProto(agg.last("product").as("l"), F.last("product"));
+        sameProto(agg.last("product", true).as("l"), F.last("product", true));
+    });
+
+    it("collectList/collectSet producen el mismo proto que la biblioteca", () => {
+        sameProto(agg.collectList("product").as("all"), F.collect_list("product"));
+        sameProto(agg.collectSet(c => c.product).as("set"), F.collect_set("product"));
+    });
+
+    it("stddev/variance producen el mismo proto que la biblioteca", () => {
+        sameProto(agg.stddev("amount").as("sd"), F.stddev("amount"));
+        sameProto(agg.variance("amount").as("var"), F.variance("amount"));
+    });
+
+    it("approxCountDistinct y countIf producen el mismo proto que la biblioteca", () => {
+        sameProto(agg.approxCountDistinct("product").as("n"), F.approx_count_distinct("product"));
+        sameProto(agg.approxCountDistinct("product", 0.01).as("n"), F.approx_count_distinct("product", 0.01));
+        sameProto(agg.countIf(c => c.amount.gt(10)).as("big"), F.count_if(col("amount").gt(10)));
     });
 });

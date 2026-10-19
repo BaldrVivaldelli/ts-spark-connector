@@ -1,7 +1,7 @@
 import path from "node:path";
 import { loadSync, type MessageTypeDefinition } from "@grpc/proto-loader";
 import { describe, expect, it } from "vitest";
-import { SparkSession, col, lit } from "../src";
+import { SparkSession, col, functions as F, lit } from "../src";
 import { ProtoDFAlg, ProtoExprAlg } from "../src/engine/compilerRead";
 import { Window, call } from "../src/engine/column";
 import { schema } from "../src/schema/schema";
@@ -238,6 +238,47 @@ describe("Spark Connect protobuf wire conformance", () => {
     ));
     expect(hinted.plan.root.hint.parameters[0].literal.integer).toBe(8);
     expect(hinted.plan.root.hint.parameters[1].literal.string).toBe("id");
+  });
+
+  it("round-trips SQL strings, casts, lambdas, distinct calls and struct updates", () => {
+    const df = session()
+      .read.parquet("/data/input.parquet")
+      .filter("amount > 10")
+      .selectExpr("id", "amount * 2 AS doubled")
+      .select(
+        col("amount").tryCast("decimal(10,2)"),
+        F.transform("tags", (tag, i) => tag.plus(i)),
+        F.count_distinct("id"),
+        col("address").withField("zip", lit("1000")).dropFields("street"),
+        col("tags").getItem(0),
+        F.from_json("payload", "a INT", { mode: "PERMISSIVE" }),
+      );
+    const decoded = wireRoundTrip(planOf(df));
+    const project = decoded.plan.root.project;
+    const [cast, transform, distinct, update, extract, fromJson] = project.expressions;
+
+    expect(cast.cast).toMatchObject({ type_str: "decimal(10,2)", eval_mode: "EVAL_MODE_TRY" });
+
+    const lambda = transform.unresolved_function.arguments[1].lambda_function;
+    const [x, i] = lambda.arguments.map((argument: { name_parts: string[] }) => argument.name_parts[0]);
+    expect(lambda.function.unresolved_function.arguments).toEqual([
+      expect.objectContaining({ unresolved_named_lambda_variable: { name_parts: [x] } }),
+      expect.objectContaining({ unresolved_named_lambda_variable: { name_parts: [i] } }),
+    ]);
+
+    expect(distinct.unresolved_function).toMatchObject({ function_name: "count", is_distinct: true });
+    expect(update.update_fields.field_name).toBe("street");
+    expect(update.update_fields.struct_expression.update_fields).toMatchObject({
+      field_name: "zip",
+      value_expression: { literal: { string: "1000" } },
+    });
+    expect(extract.unresolved_extract_value.extraction.literal.integer).toBe(0);
+    expect(fromJson.unresolved_function.arguments[2].unresolved_function.function_name).toBe("map");
+
+    const selectExpr = project.input.project;
+    expect(selectExpr.expressions.map((e: { expression_string: { expression: string } }) =>
+      e.expression_string.expression)).toEqual(["id", "amount * 2 AS doubled"]);
+    expect(selectExpr.input.filter.condition.expression_string.expression).toBe("amount > 10");
   });
 
   it("rejects empty batch paths before producing an invalid request", () => {
