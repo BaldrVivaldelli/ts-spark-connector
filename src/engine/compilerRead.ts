@@ -179,6 +179,50 @@ function protoLiteral(value: LiteralValue): ProtoExpr {
     return {literal: {string: value}};
 }
 
+/**
+ * `na.fill` literal. Spark's `DataFrameNaFunctions` only accepts long, double,
+ * string and boolean fill values, so integers travel as longs (an int32
+ * literal is rejected) and fractional numbers as doubles.
+ */
+function naFillLiteral(value: LiteralValue): ProtoMessage {
+    if (typeof value === "number" && Number.isInteger(value)) {
+        return protoLiteral(BigInt(value)).literal as ProtoMessage;
+    }
+    return protoLiteral(value).literal as ProtoMessage;
+}
+
+/**
+ * `na.replace` literal. Spark compares numeric replacements as doubles (null,
+ * boolean, double and string are the supported kinds), so every number,
+ * including a bigint, is sent as a double.
+ */
+function naReplaceLiteral(value: LiteralValue): ProtoMessage {
+    if (typeof value === "number" || typeof value === "bigint") {
+        return { double: Number(value) };
+    }
+    return protoLiteral(value).literal as ProtoMessage;
+}
+
+/**
+ * Expression partitioning. Range partitioning needs `SortOrder` expressions:
+ * sort keys keep their direction, anything else sorts ascending. Hash
+ * partitioning rejects sort keys, which Spark would refuse at analysis.
+ */
+function protoPartitionExpression(expr: ProtoExpr, range: boolean): ProtoExpr {
+    const marker = expr.sort_key_marker;
+    if (range) {
+        return {
+            sort_order: marker
+                ? protoSortOrder(marker.input, marker.direction, marker.nulls)
+                : protoSortOrder(expr, "asc"),
+        };
+    }
+    if (marker) {
+        throw new TypeError("repartition() does not accept sort keys; use repartitionByRange().");
+    }
+    return expr;
+}
+
 function protoHintParameter(value: unknown): ProtoExpr {
     if (value !== null && typeof value === "object") return value as ProtoExpr;
     if (["string", "number", "boolean", "bigint"].includes(typeof value) || value === null) {
@@ -729,6 +773,78 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             input,
             column_names: columnNames, // usamos nombres; también podrías usar 'columns' (expr)
         }
+    }),
+    fillNa: (input, cols, values) => ({
+        fill_na: { input, cols, values: values.map(naFillLiteral) },
+    }),
+    dropNa: (input, cols, minNonNulls) => ({
+        drop_na: {
+            input,
+            cols,
+            ...(minNonNulls !== undefined ? { min_non_nulls: minNonNulls } : {}),
+        },
+    }),
+    replaceNa: (input, cols, replacements) => ({
+        replace: {
+            input,
+            cols,
+            replacements: replacements.map(({ from, to }) => ({
+                old_value: naReplaceLiteral(from),
+                new_value: naReplaceLiteral(to),
+            })),
+        },
+    }),
+    crosstab: (input, col1, col2) => ({ crosstab: { input, col1, col2 } }),
+    cov: (input, col1, col2) => ({ cov: { input, col1, col2 } }),
+    corr: (input, col1, col2, method) => ({
+        corr: { input, col1, col2, ...(method !== undefined ? { method } : {}) },
+    }),
+    approxQuantile: (input, cols, probabilities, relativeError) => ({
+        approx_quantile: { input, cols, probabilities, relative_error: relativeError },
+    }),
+    freqItems: (input, cols, support) => ({
+        freq_items: { input, cols, ...(support !== undefined ? { support } : {}) },
+    }),
+    sampleBy: (input, col, fractions, seed) => ({
+        sample_by: {
+            input,
+            col,
+            fractions: fractions.map(({ stratum, fraction }) => ({
+                stratum: protoLiteral(stratum).literal,
+                fraction,
+            })),
+            seed,
+        },
+    }),
+    unpivot: (input, ids, values, variableColumnName, valueColumnName) => ({
+        unpivot: {
+            input,
+            ids,
+            ...(values !== undefined ? { values: { values } } : {}),
+            variable_column_name: variableColumnName,
+            value_column_name: valueColumnName,
+        },
+    }),
+    toDF: (input, columnNames) => ({ to_df: { input, column_names: columnNames } }),
+    transpose: (input, indexColumns) => ({ transpose: { input, index_columns: indexColumns } }),
+    withColumns: (input, columns) => ({
+        with_columns: {
+            input,
+            aliases: columns.map(({ name, column }) => ({ expr: column, name: [name] })),
+        },
+    }),
+    subqueryAlias: (input, alias) => ({ subquery_alias: { input, alias } }),
+    crossJoin: (left, right) => ({
+        join: { left, right, join_type: toProtoJoinType("CROSS") },
+    }),
+    offset: (input, offset) => ({ offset: { input, offset } }),
+    tail: (input, limit) => ({ tail: { input, limit } }),
+    repartitionByExpression: (input, partitionExprs, numPartitions, range) => ({
+        repartition_by_expression: {
+            input,
+            partition_exprs: partitionExprs.map(expr => protoPartitionExpression(expr, range)),
+            ...(numPartitions !== undefined ? { num_partitions: numPartitions } : {}),
+        },
     }),
     withWatermark(input, eventTimeCol, delay) {
         const eventTimeColumn = protoExprToColumnName(eventTimeCol);

@@ -168,6 +168,67 @@ export const TraceDFAlg: TraceDFAlgebra = {
     summary: (df, metrics, columns) =>
         node("summary", `summary[${metrics.length}x${columns.length}]`, [df, ...metrics, ...columns]),
 
+    fillNa: (df, columns, values) =>
+        node("fillNa", `fillNa[${values.length}]${columns.length ? `(${columns.join(",")})` : ""}`, [df]),
+
+    dropNa: (df, columns, minNonNulls) =>
+        node(
+            "dropNa",
+            `dropNa${minNonNulls === undefined ? "" : `(min=${minNonNulls})`}${columns.length ? `(${columns.join(",")})` : ""}`,
+            [df],
+        ),
+
+    replaceNa: (df, columns, replacements) =>
+        node("replaceNa", `replaceNa[${replacements.length}]${columns.length ? `(${columns.join(",")})` : ""}`, [df]),
+
+    crosstab: (df, col1, col2) => node("crosstab", `crosstab(${col1},${col2})`, [df]),
+
+    cov: (df, col1, col2) => node("cov", `cov(${col1},${col2})`, [df]),
+
+    corr: (df, col1, col2, method) => node("corr", `corr(${col1},${col2}${method ? `,${method}` : ""})`, [df]),
+
+    approxQuantile: (df, columns, probabilities, relativeError) =>
+        node("approxQuantile", `approxQuantile(${columns.join(",")};p[${probabilities.length}];e=${relativeError})`, [df]),
+
+    freqItems: (df, columns, support) =>
+        node("freqItems", `freqItems(${columns.join(",")}${support === undefined ? "" : `;support=${support}`})`, [df]),
+
+    sampleBy: (df, column, fractions, seed) =>
+        node("sampleBy", `sampleBy[${fractions.length}](seed=${seed})`, [df, column]),
+
+    unpivot: (df, ids, values, variableColumnName, valueColumnName) =>
+        node(
+            "unpivot",
+            `unpivot(${variableColumnName},${valueColumnName};ids[${ids.length}]${values ? `;values[${values.length}]` : ""})`,
+            [df, ...ids, ...(values ?? [])],
+        ),
+
+    toDF: (df, columnNames) => node("toDF", `toDF(${columnNames.join(",")})`, [df]),
+
+    transpose: (df, indexColumns) => node("transpose", `transpose[${indexColumns.length}]`, [df, ...indexColumns]),
+
+    withColumns: (df, columns) =>
+        node(
+            "withCols",
+            `withColumns(${columns.map(column => column.name).join(",")})`,
+            [df, ...columns.map(column => column.column)],
+        ),
+
+    subqueryAlias: (df, alias) => node("alias", `alias(${alias})`, [df]),
+
+    crossJoin: (l, r) => node("join", "join(CROSS)", [l, r]),
+
+    offset: (df, n) => node("offset", `offset(${n})`, [df]),
+
+    tail: (df, n) => node("tail", `tail(${n})`, [df]),
+
+    repartitionByExpression: (df, exprs, numPartitions, range) =>
+        node(
+            "repartition",
+            `repartition${range ? "ByRange" : ""}[${exprs.length}]${numPartitions === undefined ? "" : `(${numPartitions})`}`,
+            [df, ...exprs],
+        ),
+
     readStream: (format, options) =>
         node("readStream", `readStream(${format}${options ? ",opts" : ""})`),
 

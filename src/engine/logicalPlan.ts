@@ -1,6 +1,7 @@
 import { GroupTypeInput, JoinHintName, JoinTypeInput } from "./sparkConnectEnums";
 import { CatalogOperation } from "../types/catalog";
 import { LiteralValue } from "../algebra/read";
+import type { NAReplacement, SampleFraction } from "../algebra/read/batch-capabilities";
 import { FrameBoundary } from "./column";
 import { FrameType, SortOrder } from "../types";
 
@@ -56,6 +57,23 @@ export type LogicalPlan =
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
     | { type: "Drop"; input: LogicalPlan; columnNames: string[] }
     | { type: "EventTimeWatermark"; input: LogicalPlan; eventTimeColumn: string; delay: string }
+    | { type: "FillNa"; input: LogicalPlan; columns: string[]; values: LiteralValue[] }
+    | { type: "DropNa"; input: LogicalPlan; columns: string[]; minNonNulls?: number }
+    | { type: "ReplaceNa"; input: LogicalPlan; columns: string[]; replacements: NAReplacement[] }
+    | { type: "Crosstab"; input: LogicalPlan; col1: string; col2: string }
+    | { type: "Cov"; input: LogicalPlan; col1: string; col2: string }
+    | { type: "Corr"; input: LogicalPlan; col1: string; col2: string; method?: string }
+    | { type: "ApproxQuantile"; input: LogicalPlan; columns: string[]; probabilities: number[]; relativeError: number }
+    | { type: "FreqItems"; input: LogicalPlan; columns: string[]; support?: number }
+    | { type: "SampleBy"; input: LogicalPlan; column: Expression; fractions: SampleFraction[]; seed: number }
+    | { type: "Unpivot"; input: LogicalPlan; ids: Expression[]; values?: Expression[]; variableColumnName: string; valueColumnName: string }
+    | { type: "ToDF"; input: LogicalPlan; columnNames: string[] }
+    | { type: "Transpose"; input: LogicalPlan; indexColumns: Expression[] }
+    | { type: "SubqueryAlias"; input: LogicalPlan; alias: string }
+    | { type: "CrossJoin"; left: LogicalPlan; right: LogicalPlan }
+    | { type: "Offset"; input: LogicalPlan; offset: number }
+    | { type: "Tail"; input: LogicalPlan; limit: number }
+    | { type: "RepartitionByExpression"; input: LogicalPlan; partitionExprs: Expression[]; numPartitions?: number; range: boolean }
     | { type: "Read"; data_source: DataSource; is_streaming?: boolean };
 
 export type Expression =

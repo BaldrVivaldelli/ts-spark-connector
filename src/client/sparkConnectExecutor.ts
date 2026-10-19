@@ -41,6 +41,16 @@ type OrderedStreamingPlan = ProtoPlan & {
     };
 };
 
+/** AnalyzePlan request kinds whose result is read back by field name. */
+export type AnalyzeField =
+    | "schema"
+    | "tree_string"
+    | "is_local"
+    | "is_streaming"
+    | "input_files"
+    | "same_semantics"
+    | "semantic_hash";
+
 type AnalyzeAction =
     | { kind: "persist"; relation: unknown; level: string }
     | { kind: "unpersist"; relation: unknown; blocking?: boolean };
@@ -152,6 +162,30 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
             sparkGrpcClient.analyze(request, this.session.getConnectionConfig())
         );
         this.session.observeServerSideSessionId(response);
+    }
+
+    /**
+     * Runs one AnalyzePlan request (`schema`, `tree_string`, `is_local`, ...)
+     * and returns the response's sub-message of the same name.
+     */
+    async analyzePlan(field: AnalyzeField, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+        await this.prepareSession();
+        const request = {
+            session_id: this.session.getSessionId(),
+            user_context: this.session.getUserContext(),
+            client_type: "ts-spark-connector",
+            ...this.observedServerSessionField(),
+            [field]: payload,
+        };
+        const response = await this.remote(() =>
+            sparkGrpcClient.analyze(request, this.session.getConnectionConfig())
+        );
+        this.session.observeServerSideSessionId(response);
+        const result = response[field];
+        if (result === null || typeof result !== "object") {
+            throw new Error(`Invalid AnalyzePlan response: missing ${field} result.`);
+        }
+        return result as Record<string, unknown>;
     }
 
     async runWrite(

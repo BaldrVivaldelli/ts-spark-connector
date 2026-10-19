@@ -21,11 +21,38 @@ import { toJSON, toMermaid } from "../trace/traceSerializers";
 import { TraceDFAlg, TraceExprAlg, TraceNode } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
 import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, LiteralValue, StreamingMark, StreamingReadCap} from "../algebra/read";
-import {CacheCap, HintCap, RepartitionCap, SamplingCap, SqlCap} from "../algebra/read/batch-capabilities";
+import {
+    CacheCap,
+    HintCap,
+    RepartitionByExpressionCap,
+    RepartitionCap,
+    SamplingCap,
+    SqlCap,
+} from "../algebra/read/batch-capabilities";
+import type { AnalyzeField } from "../client/sparkConnectExecutor";
+import type { SortKeyBuilder } from "../engine/column";
+import {
+    DataFrameNaFunctions,
+    DataFrameStatFunctions,
+    NAFillValue,
+    NAHow,
+    NAReplaceValue,
+} from "./dataFrameFunctions";
+import { SparkStructType, sparkStructType } from "./dataTypes";
+import {
+    assertQuantileArguments,
+    assertSupport,
+    columnList,
+    dropNaMinimum,
+    fillSpec,
+    replaceSpec,
+    sampleFractions,
+} from "./naStat";
 import {BatchWProgram, StreamWProgram, WBatch, WStream} from "../algebra/write";
 import {BatchWriterAlg, StreamWriterAlg} from "../algebra/write/dataframe";
 import {
     ColumnType,
+    Prettify,
     Schema,
     SchemaShape,
     UnknownSchema,
@@ -244,6 +271,62 @@ export type RowOf<S> = [S] extends [UnknownSchema]
     : S extends SchemaShape
       ? { [K in keyof S]: S[K] extends ColumnType ? S[K] : unknown }
       : Record<string, unknown>;
+
+/**
+ * Typed `withColumns` callback: receives the column accessor and returns the
+ * new columns by name.
+ * @public
+ */
+export type TypedColumnsFactory<S, M, E> = S extends SchemaShape
+    ? (columns: Columns<S, E>) => M
+    : never;
+
+/** @internal Schema after adding or replacing every column of `M`. */
+export type AddedColumnsSchema<S, M> = [S] extends [UnknownSchema]
+    ? UnknownSchema
+    : S extends SchemaShape
+      ? Prettify<Omit<S, keyof M> & {
+          -readonly [K in keyof M]: M[K] extends TypedColumn<infer T, any> ? T : never;
+      }>
+      : UnknownSchema;
+
+/** @internal Schema of a cross join; unknown when either side is. */
+export type CrossJoinSchema<S, RS> = [S] extends [UnknownSchema]
+    ? UnknownSchema
+    : [RS] extends [UnknownSchema]
+      ? UnknownSchema
+      : S extends SchemaShape
+        ? RS extends SchemaShape
+          ? JoinedFor<S, RS, "CROSS">
+          : UnknownSchema
+        : UnknownSchema;
+
+type ColumnInput = string | EBuilder;
+
+function toColumnInputs(input: ColumnInput | ReadonlyArray<ColumnInput>): ColumnInput[] {
+    const inputs = typeof input === "string" || !Array.isArray(input)
+        ? [input as ColumnInput]
+        : [...input];
+    for (const value of inputs) {
+        if (typeof value === "string") assertNonEmptyString("column", value);
+    }
+    return inputs;
+}
+
+function columnExpression<E>(input: ColumnInput, EX: ExprAlg<E>): E {
+    return typeof input === "string" ? EX.col(input) : input.build(EX);
+}
+
+/** Partitioning inputs are column names, expressions or sort keys. */
+function assertPartitionInputs(label: string, inputs: readonly unknown[]): void {
+    for (const input of inputs) {
+        if (typeof input === "string") {
+            assertNonEmptyString(`${label} column`, input);
+        } else if (typeof input !== "function" && !(input !== null && typeof input === "object" && "build" in input)) {
+            throw new TypeError(`${label} columns must be names, column expressions or sort keys.`);
+        }
+    }
+}
 
 export const col = (name: string): EBuilder => ({ build: EX => EX.col(name) });
 export const lit = (v: LiteralValue): EBuilder => ({ build: EX => EX.lit(v) });
@@ -664,9 +747,45 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         );
     }
 
-    repartition(numPartitions: number, shuffle = true): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX> {
-        assertInteger("repartition() numPartitions", numPartitions, 1);
-        return this.chain<RepartitionCap<R>>((df, _EX, DF) => DF.repartition(df, numPartitions, shuffle));
+    /**
+     * `repartition(n)` round-robins into `n` partitions (`shuffle = false`
+     * coalesces instead). Given columns, Spark hash-partitions by them,
+     * into `n` partitions when a count comes first.
+     */
+    repartition(numPartitions: number, shuffle?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
+    repartition(
+        numPartitions: number,
+        ...cols: [ColumnName<S> | EBuilder, ...Array<ColumnName<S> | EBuilder>]
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartition(
+        ...cols: [ColumnName<S> | EBuilder, ...Array<ColumnName<S> | EBuilder>]
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartition(
+        ...args: Array<number | boolean | ColumnName<S> | EBuilder | undefined>
+    ): ReadChainedDataFrame<S, R, E, G, any, CEX> {
+        const [first, ...rest] = args;
+        if (typeof first === "number" && (rest[0] === undefined || typeof rest[0] === "boolean")) {
+            if (rest.length > 1) throw new TypeError("repartition(numPartitions, shuffle) takes no columns.");
+            const shuffle = rest[0] !== false;
+            assertInteger("repartition() numPartitions", first, 1);
+            return this.chain<RepartitionCap<R>>((df, _EX, DF) => DF.repartition(df, first, shuffle));
+        }
+        const numPartitions = typeof first === "number" ? first : undefined;
+        const cols = (numPartitions === undefined ? args : rest) as unknown[];
+        if (numPartitions !== undefined) assertInteger("repartition() numPartitions", numPartitions, 1);
+        if (cols.length === 0) throw new TypeError("repartition() requires a partition count or columns.");
+        if (cols.some(input => typeof input === "number" || typeof input === "boolean" || typeof input === "function")) {
+            throw new TypeError("repartition() columns must be names or column expressions.");
+        }
+        assertPartitionInputs("repartition()", cols);
+        return this.chain<RepartitionByExpressionCap<R, E>>((df, EX, DF) =>
+            DF.repartitionByExpression(
+                df,
+                (cols as ColumnInput[]).map(input => columnExpression(input, EX)),
+                numPartitions,
+                false,
+            )
+        );
     }
 
     hint(name: JoinHintName | string, ...params: any[]) {
@@ -951,6 +1070,444 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                 DF.sample(df, lowerBound, upperBound, false, resolvedSeed, true)
             )
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Null handling and statistics (PySpark `df.na` / `df.stat`)
+    // ---------------------------------------------------------------------
+
+    /** Null-value functions, mirroring PySpark's `df.na`. */
+    get na(): DataFrameNaFunctions<S, R, E, G, CDF, CEX> {
+        return new DataFrameNaFunctions(this);
+    }
+
+    /** Statistic functions, mirroring PySpark's `df.stat`. */
+    get stat(): DataFrameStatFunctions<S, R, E, G, CDF, CEX> {
+        return new DataFrameStatFunctions(this);
+    }
+
+    /**
+     * Replaces nulls. A single value applies to every column of a compatible
+     * type (or to `subset`); a mapping fills each named column with its own
+     * value. The schema is unchanged.
+     */
+    fillna(
+        value: NAFillValue | Readonly<Record<string, NAFillValue>>,
+        subset?: ColumnName<S> | readonly ColumnName<S>[],
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        const { columns, values } = fillSpec(value, subset);
+        return this.chain((df, _EX, DF) => DF.fillNa(df, columns, values));
+    }
+
+    /**
+     * Drops rows with nulls (or NaN). `how = "any"` (default) drops a row with
+     * any null in the considered columns, `"all"` only rows where all of them
+     * are null; `thresh` keeps rows with at least that many non-null values
+     * and takes precedence over `how`.
+     */
+    dropna(
+        how?: NAHow,
+        thresh?: number,
+        subset?: ColumnName<S> | readonly ColumnName<S>[],
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        const minNonNulls = dropNaMinimum(how, thresh);
+        const columns = columnList("dropna()", subset);
+        return this.chain((df, _EX, DF) => DF.dropNa(df, columns, minNonNulls));
+    }
+
+    /**
+     * Replaces values: `replace(old, new)`, `replace([olds], [news] | new)` or
+     * `replace(mapping)`, optionally restricted to `subset`. Numbers compare as
+     * doubles; value kinds cannot be mixed.
+     */
+    replace(
+        toReplace: NAReplaceValue | readonly NAReplaceValue[],
+        value: NAReplaceValue | readonly NAReplaceValue[],
+        subset?: ColumnName<S> | readonly ColumnName<S>[],
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    replace(
+        mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>,
+        subset?: ColumnName<S> | readonly ColumnName<S>[],
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    replace(...args: unknown[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        const { columns, replacements } = replaceSpec(args);
+        return this.chain((df, _EX, DF) => DF.replaceNa(df, columns, replacements));
+    }
+
+    /** Pearson correlation of two numeric columns. */
+    async corr(col1: ColumnName<S>, col2: ColumnName<S>, method: "pearson" = "pearson"): Promise<number> {
+        if (method !== "pearson") {
+            throw new RangeError(`corr() supports only the "pearson" method; received ${String(method)}.`);
+        }
+        assertNonEmptyString("corr() col1", col1);
+        assertNonEmptyString("corr() col2", col2);
+        return this.scalarDouble("corr()", (df, DF) => DF.corr(df, col1, col2, method));
+    }
+
+    /** Sample covariance of two numeric columns. */
+    async cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number> {
+        assertNonEmptyString("cov() col1", col1);
+        assertNonEmptyString("cov() col2", col2);
+        return this.scalarDouble("cov()", (df, DF) => DF.cov(df, col1, col2));
+    }
+
+    /** Pair-wise frequency table: one row per `col1` value, one column per `col2` value. */
+    crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        assertNonEmptyString("crosstab() col1", col1);
+        assertNonEmptyString("crosstab() col2", col2);
+        return this.chainAs<UnknownSchema>((df, _EX, DF) => DF.crosstab(df, col1, col2), () => undefined);
+    }
+
+    /** Frequent items per column (one row of `<column>_freqItems` arrays). */
+    freqItems(cols: readonly ColumnName<S>[], support?: number): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        const columns = columnList("freqItems()", cols);
+        if (columns.length === 0) throw new TypeError("freqItems() requires at least one column.");
+        assertSupport(support);
+        return this.chainAs<UnknownSchema>((df, _EX, DF) => DF.freqItems(df, columns, support), () => undefined);
+    }
+
+    /**
+     * Approximate quantiles (Greenwald-Khanna). One column returns one value
+     * per probability; several columns return one such list per column.
+     */
+    async approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
+    async approxQuantile(
+        cols: readonly ColumnName<S>[],
+        probabilities: readonly number[],
+        relativeError: number,
+    ): Promise<number[][]>;
+    async approxQuantile(
+        cols: ColumnName<S> | readonly ColumnName<S>[],
+        probabilities: readonly number[],
+        relativeError: number,
+    ): Promise<number[] | number[][]> {
+        const columns = columnList("approxQuantile()", cols);
+        if (columns.length === 0) throw new TypeError("approxQuantile() requires at least one column.");
+        assertQuantileArguments(probabilities, relativeError);
+        const values = await this.scalarValue(
+            "approxQuantile()",
+            (df, DF) => DF.approxQuantile(df, columns, [...probabilities], relativeError),
+        );
+        if (!Array.isArray(values) || values.some(row => !Array.isArray(row))) {
+            throw new TypeError("approxQuantile() expected a list of quantile lists from Spark.");
+        }
+        const quantiles = (values as unknown[][]).map(row => row.map(Number));
+        return typeof cols === "string" ? quantiles[0]! : quantiles;
+    }
+
+    /**
+     * Stratified sample without replacement. `fractions` maps each stratum of
+     * `col` to the fraction of its rows to keep; missing strata keep none.
+     */
+    sampleBy(
+        col: ColumnName<S> | EBuilder,
+        fractions: Readonly<Record<string, number>> | ReadonlyMap<LiteralValue, number>,
+        seed?: number,
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        if (typeof col === "string") assertNonEmptyString("sampleBy() column", col);
+        const strata = sampleFractions(fractions);
+        assertOptionalSeed("sampleBy()", seed);
+        const resolvedSeed = seed ?? freshSparkSeed();
+        return this.chain((df, EX, DF) =>
+            DF.sampleBy(df, typeof col === "string" ? EX.col(col) : col.build(EX), strata, resolvedSeed)
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Reshaping and row-position relations
+    // ---------------------------------------------------------------------
+
+    /**
+     * Unpivots `values` (every non-id column when omitted) into
+     * `variableColumnName` / `valueColumnName` rows, keeping `ids`.
+     */
+    unpivot(
+        ids: ColumnName<S> | EBuilder | ReadonlyArray<ColumnName<S> | EBuilder>,
+        values: ColumnName<S> | EBuilder | ReadonlyArray<ColumnName<S> | EBuilder> | undefined,
+        variableColumnName: string,
+        valueColumnName: string,
+    ): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        assertNonEmptyString("unpivot() variableColumnName", variableColumnName);
+        assertNonEmptyString("unpivot() valueColumnName", valueColumnName);
+        const idList = toColumnInputs(ids);
+        const valueList = values === undefined ? undefined : toColumnInputs(values);
+        if (valueList?.length === 0) throw new TypeError("unpivot() values must not be empty; omit them instead.");
+        return this.chainAs<UnknownSchema>(
+            (df, EX, DF) => DF.unpivot(
+                df,
+                idList.map(input => columnExpression(input, EX)),
+                valueList?.map(input => columnExpression(input, EX)),
+                variableColumnName,
+                valueColumnName,
+            ),
+            () => undefined,
+        );
+    }
+
+    /** Alias of `unpivot`, as in PySpark. */
+    melt(
+        ids: ColumnName<S> | EBuilder | ReadonlyArray<ColumnName<S> | EBuilder>,
+        values: ColumnName<S> | EBuilder | ReadonlyArray<ColumnName<S> | EBuilder> | undefined,
+        variableColumnName: string,
+        valueColumnName: string,
+    ): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        return this.unpivot(ids, values, variableColumnName, valueColumnName);
+    }
+
+    /** Renames every column positionally; Spark requires one name per column. */
+    toDF(...names: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        for (const name of names) assertNonEmptyString("toDF() column", name);
+        assertUniqueColumnNames("toDF()", names);
+        return this.chainAs<UnknownSchema>((df, _EX, DF) => DF.toDF(df, names), () => undefined);
+    }
+
+    /**
+     * Names this DataFrame for qualified references, e.g. a self-join on
+     * `col("a.id").eq(col("b.id"))`. The schema is unchanged.
+     */
+    alias(name: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        assertNonEmptyString("alias()", name);
+        return this.chain((df, _EX, DF) => DF.subqueryAlias(df, name));
+    }
+
+    /** Skips the first `n` rows. */
+    offset(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        assertInteger("offset()", n, 0);
+        return this.chain((df, _EX, DF) => DF.offset(df, n));
+    }
+
+    /**
+     * Transposes rows and columns around `indexColumn` (the first column when
+     * omitted). Every other column must share a type.
+     */
+    transpose(indexColumn?: ColumnName<S> | EBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX> {
+        if (typeof indexColumn === "string") assertNonEmptyString("transpose() indexColumn", indexColumn);
+        return this.chainAs<UnknownSchema>(
+            (df, EX, DF) => DF.transpose(
+                df,
+                indexColumn === undefined ? [] : [columnExpression(indexColumn, EX)],
+            ),
+            () => undefined,
+        );
+    }
+
+    /** Adds or replaces several columns in one projection. */
+    withColumns<const M extends Readonly<Record<string, TypedColumn<ColumnType, E>>>>(
+        build: TypedColumnsFactory<S, M, E>,
+    ): ReadChainedDataFrame<AddedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
+    withColumns(columns: Readonly<Record<string, EBuilder>>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    withColumns(
+        input: Readonly<Record<string, EBuilder>> | TypedColumnsFactory<S, Readonly<Record<string, TypedColumn<ColumnType, E>>>, E>,
+    ): ReadChainedDataFrame<any, R, E, G, CDF, CEX> {
+        const eager = typeof input === "function" ? undefined : Object.keys(input);
+        if (eager) {
+            if (eager.length === 0) throw new TypeError("withColumns() requires at least one column.");
+            for (const name of eager) assertNonEmptyString("withColumns() column", name);
+        }
+        return this.chainAs<any>(
+            (df, EX, DF) => {
+                const columns = typeof input === "function"
+                    ? (input as (columns: Columns<Extract<S, SchemaShape>, E>) => Record<string, EBuilder>)(
+                        makeColumns<Extract<S, SchemaShape>, E>()
+                    )
+                    : input;
+                const entries = Object.entries(columns);
+                if (entries.length === 0) throw new TypeError("withColumns() requires at least one column.");
+                return DF.withColumns(df, entries.map(([name, column]) => {
+                    assertNonEmptyString("withColumns() column", name);
+                    return { name, column: column.build(EX) };
+                }));
+            },
+            () => undefined,
+        );
+    }
+
+    /** Cartesian product with `right`. */
+    crossJoin<RS, RCDF = unknown, RCEX = unknown>(
+        right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>,
+    ): ReadChainedDataFrame<CrossJoinSchema<S, RS>, R, E, G, CDF & RCDF, CEX & RCEX> {
+        return this.chainAs<CrossJoinSchema<S, RS>, RCDF, RCEX>(
+            (df, EX, DF) => DF.crossJoin(
+                df,
+                right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
+            ),
+            schema => joinRuntimeSchema(schema, right.runtimeSchema, "CROSS"),
+            this.streaming || right.streaming,
+        );
+    }
+
+    /**
+     * Range-partitions by `cols` (ascending unless given as sort keys such as
+     * `col("x").desc()`), optionally into `numPartitions` partitions.
+     */
+    repartitionByRange(
+        numPartitions: number,
+        ...cols: Array<ColumnName<S> | EBuilder | SortKeyBuilder>
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartitionByRange(
+        ...cols: Array<ColumnName<S> | EBuilder | SortKeyBuilder>
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartitionByRange(
+        ...args: Array<number | ColumnName<S> | EBuilder | SortKeyBuilder>
+    ): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX> {
+        const numPartitions = typeof args[0] === "number" ? args[0] : undefined;
+        const cols = (numPartitions === undefined ? args : args.slice(1)) as unknown[];
+        if (numPartitions !== undefined) assertInteger("repartitionByRange() numPartitions", numPartitions, 1);
+        if (cols.length === 0) throw new TypeError("repartitionByRange() requires at least one column.");
+        assertPartitionInputs("repartitionByRange()", cols);
+        return this.chain<RepartitionByExpressionCap<R, E>>((df, EX, DF) =>
+            DF.repartitionByExpression(
+                df,
+                cols.map(input => {
+                    const order = resolveOrderInput(input, EX);
+                    return EX.sortKey(order.expr, order.direction, order.nulls);
+                }),
+                numPartitions,
+                true,
+            )
+        );
+    }
+
+    // ---------------------------------------------------------------------
+    // Actions
+    // ---------------------------------------------------------------------
+
+    /** Number of rows, as Spark's `long` (a `bigint`, like every long column). */
+    async count(): Promise<bigint> {
+        const rows = await this.chainAs<UnknownSchema>(
+            (df, EX, DF) => DF.agg(DF.groupBy(df, []), { count: EX.call("count", [EX.lit(1)]) }),
+            () => undefined,
+        ).collect();
+        const value = rows[0]?.count;
+        if (typeof value !== "bigint") {
+            throw new TypeError(`count() expected a long result from Spark but received ${typeof value}.`);
+        }
+        return value;
+    }
+
+    /** First row, or `undefined` when the DataFrame is empty. */
+    async first(): Promise<RowOf<S> | undefined> {
+        return (await this.take(1))[0];
+    }
+
+    /** `head()` is `first()`; `head(n)` is `take(n)`. */
+    async head(): Promise<RowOf<S> | undefined>;
+    async head(n: number): Promise<Array<RowOf<S>>>;
+    async head(n?: number): Promise<RowOf<S> | undefined | Array<RowOf<S>>> {
+        return n === undefined ? this.first() : this.take(n);
+    }
+
+    /** At most the first `n` rows. */
+    async take(n: number): Promise<Array<RowOf<S>>> {
+        return this.limit(n).collect();
+    }
+
+    /** At most the last `n` rows, in order. */
+    async tail(n: number): Promise<Array<RowOf<S>>> {
+        assertInteger("tail()", n, 0);
+        return this.chain((df, _EX, DF) => DF.tail(df, n)).collect();
+    }
+
+    /** Whether the DataFrame has no rows; only one row is fetched. */
+    async isEmpty(): Promise<boolean> {
+        return (await this.take(1)).length === 0;
+    }
+
+    // ---------------------------------------------------------------------
+    // Server-side introspection (AnalyzePlan)
+    // ---------------------------------------------------------------------
+
+    /** The resolved schema as reported by Spark. */
+    async schema(): Promise<SparkStructType> {
+        return sparkStructType((await this.analyze("schema")).schema);
+    }
+
+    /** Column names, in order. */
+    async columns(): Promise<string[]> {
+        return (await this.schema()).fields.map(field => field.name);
+    }
+
+    /** `[name, type]` pairs, with Spark's simple type strings. */
+    async dtypes(): Promise<Array<[string, string]>> {
+        return (await this.schema()).fields.map(field => [field.name, field.dataType]);
+    }
+
+    /** Spark's schema tree (`root\n |-- ...`), optionally limited to `level` nesting levels. */
+    async treeString(level?: number): Promise<string> {
+        if (level !== undefined) assertInteger("treeString() level", level, 1);
+        const result = await this.analyze("tree_string", level === undefined ? {} : { level });
+        return String(result.tree_string);
+    }
+
+    /** Prints the schema tree to stdout. */
+    async printSchema(level?: number): Promise<void> {
+        console.log(await this.treeString(level));
+    }
+
+    /** Whether `collect()` can run locally without executors. */
+    async isLocal(): Promise<boolean> {
+        return (await this.analyze("is_local")).is_local === true;
+    }
+
+    /** Whether the plan reads from a streaming source. */
+    async isStreaming(): Promise<boolean> {
+        return (await this.analyze("is_streaming")).is_streaming === true;
+    }
+
+    /** Best-effort list of the files that make up this DataFrame. */
+    async inputFiles(): Promise<string[]> {
+        const files = (await this.analyze("input_files")).files;
+        return Array.isArray(files) ? files.map(String) : [];
+    }
+
+    /** Whether both logical plans compute the same result. */
+    async sameSemantics<RS, RCDF, RCEX>(other: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): Promise<boolean> {
+        const result = await this.analyzeWith("same_semantics", root => ({
+            target_plan: { root },
+            other_plan: { root: other.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg) },
+        }));
+        return result.result === true;
+    }
+
+    /** Hash of the logical plan; equal for semantically equal plans. */
+    async semanticHash(): Promise<number> {
+        return Number((await this.analyze("semantic_hash")).result);
+    }
+
+    private toProtoRelation(): ProtoRel {
+        return this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
+    }
+
+    private analyze(field: AnalyzeField, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+        return this.analyzeWith(field, root => ({ plan: { root }, ...extra }));
+    }
+
+    private async analyzeWith(
+        field: AnalyzeField,
+        payload: (root: ProtoRel) => Record<string, unknown>,
+    ): Promise<Record<string, unknown>> {
+        const root = this.toProtoRelation();
+        const executor = await applyPendingAnalyzeActions(root, this.session);
+        return executor.analyzePlan(field, payload(root));
+    }
+
+    /** Executes a single-row statistic relation and returns its only value. */
+    private async scalarValue(
+        label: string,
+        step: (df: R, DF: DFAlg<R, E, G, CDF>) => R,
+    ): Promise<unknown> {
+        const rows = await this.chainAs<UnknownSchema>((df, _EX, DF) => step(df, DF), () => undefined).collect();
+        const first = rows[0];
+        if (first === undefined) throw new TypeError(`${label} expected one result row from Spark.`);
+        return Object.values(first)[0];
+    }
+
+    private async scalarDouble(label: string, step: (df: R, DF: DFAlg<R, E, G, CDF>) => R): Promise<number> {
+        const value = await this.scalarValue(label, step);
+        if (typeof value !== "number") {
+            throw new TypeError(`${label} expected a double result from Spark but received ${typeof value}.`);
+        }
+        return value;
     }
 
     static readStream<R, E, G, CDF = unknown, CEX = unknown>(

@@ -198,6 +198,15 @@ export type DataFrameExpressionBuilder = {
     build<E>(EX: ExprAlg<E>): E;
 };
 
+// @public
+export class DataFrameNaFunctions<S, R, E, G, CDF, CEX> {
+    drop(how?: NAHow, thresh?: number, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    fill(value: NAFillValue | Readonly<Record<string, NAFillValue>>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    replace(toReplace: NAReplaceValue | readonly NAReplaceValue[], value: NAReplaceValue | readonly NAReplaceValue[], subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    replace(mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+}
+
 // @public (undocumented)
 export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
     constructor(session: SparkSession, fmt?: string, opts?: ReaderOptions);
@@ -226,6 +235,18 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
     table(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
     // (undocumented)
     text(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+}
+
+// @public
+export class DataFrameStatFunctions<S, R, E, G, CDF, CEX> {
+    approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
+    // (undocumented)
+    approxQuantile(cols: readonly ColumnName<S>[], probabilities: readonly number[], relativeError: number): Promise<number[][]>;
+    corr(col1: ColumnName<S>, col2: ColumnName<S>, method?: "pearson"): Promise<number>;
+    cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number>;
+    crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    freqItems(cols: readonly ColumnName<S>[], support?: number): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    sampleBy(col: ColumnName<S> | DataFrameExpressionBuilder, fractions: Readonly<Record<string, number>> | ReadonlyMap<LiteralValue, number>, seed?: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
 }
 
 // @public (undocumented)
@@ -495,6 +516,15 @@ export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldS
 export function mapType<const Key extends FieldSpec, const Value extends FieldSpec, const N extends boolean = false>(key: Key, value: Value, nullable?: N): MapSpec<Key, Value> & NullableFlag<N>;
 
 // @public
+export type NAFillValue = string | number | boolean | bigint;
+
+// @public
+export type NAHow = "any" | "all";
+
+// @public
+export type NAReplaceValue = string | number | boolean | bigint | null;
+
+// @public
 export type NonNull<T> = T extends null ? never : T;
 
 // @public
@@ -528,6 +558,10 @@ export function posexplode(col: EBuilder | string): EBuilder;
 // @public
 export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G = unknown, CDF = {}, CEX = {}> {
     constructor(p: DFProgram<R, E, G, CDF, CEX>, session: SparkSession, streaming?: boolean, runtimeSchema?: SchemaDef | undefined);
+    alias(name: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
+    // (undocumented)
+    approxQuantile(cols: readonly ColumnName<S>[], probabilities: readonly number[], relativeError: number): Promise<number[][]>;
     as<T extends Schema>(): ReadChainedDataFrame<T, R, E, G, CDF, CEX>;
     // (undocumented)
     broadcast(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
@@ -541,6 +575,12 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     collect(options?: ExecutionOptions): Promise<Array<RowOf<S>>>;
     collectRaw(options?: ExecutionOptions): Promise<unknown[]>;
+    columns(): Promise<string[]>;
+    corr(col1: ColumnName<S>, col2: ColumnName<S>, method?: "pearson"): Promise<number>;
+    count(): Promise<bigint>;
+    cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number>;
+    crossJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<CrossJoinSchema<S, RS>, R, E, G, CDF & RCDF, CEX & RCEX>;
+    crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     describe<K extends ColumnName<S>>(colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -551,16 +591,21 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     dropDuplicates<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     dropDuplicates(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropna(how?: NAHow, thresh?: number, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dtypes(): Promise<Array<[string, string]>>;
     // (undocumented)
     except<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     exceptAll<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     explain(mode?: ExplainModeInput): Promise<string>;
+    fillna(value: NAFillValue | Readonly<Record<string, NAFillValue>>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     filter(predicate: TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     filter(cond: DataFrameExpressionBuilder): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    first(): Promise<RowOf<S> | undefined>;
+    freqItems(cols: readonly ColumnName<S>[], support?: number): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     static fromCSV<R, E, G, CDF = {}, CEX = {}>(path: string | string[], session: SparkSession, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -571,40 +616,64 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     groupBy<K extends ColumnName<S>>(...by: K[]): GroupedDataFrameTF<S, K, R, E, G, CDF, CEX>;
     // (undocumented)
     groupBy(...by: DataFrameExpressionBuilder[]): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
+    head(): Promise<RowOf<S> | undefined>;
+    // (undocumented)
+    head(n: number): Promise<Array<RowOf<S>>>;
     // (undocumented)
     hint(name: JoinHintName | string, ...params: any[]): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
+    inputFiles(): Promise<string[]>;
     // (undocumented)
     intersect<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     intersectAll<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
+    isEmpty(): Promise<boolean>;
+    isLocal(): Promise<boolean>;
+    isStreaming(): Promise<boolean>;
     // (undocumented)
     join<RS extends SchemaShape, JT extends JoinTypeInput = "INNER", RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: TypedJoinPredicate<S, RS, E>, jt?: JT): ReadChainedDataFrame<JoinSchema<S, RS, JT>, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     join<RS = unknown, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: DataFrameExpressionBuilder, jt?: JoinTypeInput): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     limit(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    melt(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     mergeHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
+    get na(): DataFrameNaFunctions<S, R, E, G, CDF, CEX>;
+    offset(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     orderBy(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E>>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     orderBy(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     persist(level?: string): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    printSchema(level?: number): Promise<void>;
     // (undocumented)
     randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<S, R, E, G, CDF & SamplingCap<R>, CEX>[];
     // (undocumented)
     static readStream<R, E, G, CDF = unknown, CEX = unknown>(format: string, session: SparkSession, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingReadCap<R> & StreamingMark<R>, CEX>;
-    // (undocumented)
     repartition(numPartitions: number, shuffle?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     // (undocumented)
+    repartition(numPartitions: number, ...cols: [ColumnName<S> | DataFrameExpressionBuilder, ...Array<ColumnName<S> | DataFrameExpressionBuilder>]): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    // (undocumented)
+    repartition(...cols: [ColumnName<S> | DataFrameExpressionBuilder, ...Array<ColumnName<S> | DataFrameExpressionBuilder>]): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartitionByRange(numPartitions: number, ...cols: Array<ColumnName<S> | DataFrameExpressionBuilder | SortKeyBuilder>): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    // (undocumented)
+    repartitionByRange(...cols: Array<ColumnName<S> | DataFrameExpressionBuilder | SortKeyBuilder>): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    replace(toReplace: NAReplaceValue | readonly NAReplaceValue[], value: NAReplaceValue | readonly NAReplaceValue[], subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    replace(mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
     runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R;
+    sameSemantics<RS, RCDF, RCEX>(other: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): Promise<boolean>;
     // (undocumented)
     sample(fraction: number, withReplacement?: boolean, seed?: number, deterministicOrder?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & SamplingCap<R>, CEX>;
+    sampleBy(col: ColumnName<S> | DataFrameExpressionBuilder, fractions: Readonly<Record<string, number>> | ReadonlyMap<LiteralValue, number>, seed?: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    schema(): Promise<SparkStructType>;
     // (undocumented)
     select<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<SelectedSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
     select(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    semanticHash(): Promise<number>;
     show(n?: number, truncate?: number): Promise<void>;
     // (undocumented)
     shuffleHashHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
@@ -616,19 +685,25 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // @deprecated (undocumented)
     sql(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & SqlCap<R>, CEX>;
+    get stat(): DataFrameStatFunctions<S, R, E, G, CDF, CEX>;
     streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void>;
     // (undocumented)
     summary<K extends ColumnName<S>>(metrics: readonly string[] | undefined, colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
+    tail(n: number): Promise<Array<RowOf<S>>>;
+    take(n: number): Promise<Array<RowOf<S>>>;
     toArrowBatches(options?: ExecutionOptions): AsyncGenerator<Buffer, void, void>;
     // (undocumented)
     toClientASTJSON(): string;
     // (undocumented)
     toClientASTMermaid(): string;
+    toDF(...names: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     toProtoJSON(): string;
     toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void>;
     // (undocumented)
     toSparkLogicalPlanJSON(): string;
+    transpose(indexColumn?: ColumnName<S> | DataFrameExpressionBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    treeString(level?: number): Promise<string>;
     // (undocumented)
     union<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
@@ -637,12 +712,16 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     unionByName<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, allowMissingColumns: true): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     unpersist(blocking?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    unpivot(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumn<Name extends string, T extends ColumnType>(name: Name, build: TypedColumnFactory<S, T, E>): ReadChainedDataFrame<AddedColumnSchema<S, Name, T>, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumn(name: string, e: DataFrameExpressionBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumnRenamed<From extends ColumnName<S>, const To extends string>(oldName: From, newName: ValidRenameTarget<S, From, To>): ReadChainedDataFrame<RenamedSchema<S, From, To>, R, E, G, CDF, CEX>;
+    withColumns<const M extends Readonly<Record<string, TypedColumn<ColumnType, E>>>>(build: TypedColumnsFactory<S, M, E>): ReadChainedDataFrame<AddedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
+    // (undocumented)
+    withColumns(columns: Readonly<Record<string, DataFrameExpressionBuilder>>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumnsRenamed<const M extends Record<string, string>>(mapping: ValidRenameMap<S, M>): ReadChainedDataFrame<RenamedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -942,6 +1021,18 @@ export class SparkSessionBuilder {
     withS3Credentials(credentials: S3Credentials): this;
 }
 
+// @public
+export interface SparkStructField {
+    readonly dataType: string;
+    readonly name: string;
+    readonly nullable: boolean;
+}
+
+// @public
+export interface SparkStructType {
+    readonly fields: readonly SparkStructField[];
+}
+
 // @public (undocumented)
 export type SparkTelemetryEvent = {
     name: string;
@@ -1072,6 +1163,9 @@ export class TypedColumn<T extends ColumnType, E> {
 
 // @public (undocumented)
 export type TypedColumnFactory<S, T extends ColumnType, E> = S extends SchemaShape ? (columns: Columns<S, E>) => TypedColumn<T, E> : never;
+
+// @public
+export type TypedColumnsFactory<S, M, E> = S extends SchemaShape ? (columns: Columns<S, E>) => M : never;
 
 // @public (undocumented)
 export type TypedJoinPredicate<S, RS extends SchemaShape, E> = S extends SchemaShape ? (left: Columns<S, E>, right: Columns<RS, E>) => Condition<E> : never;

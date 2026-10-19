@@ -50,8 +50,10 @@ export type {
 export { GroupedDataFrameTF, ReadChainedDataFrame } from "./read/readChainedDataFrame";
 export type {
     AddedColumnSchema,
+    AddedColumnsSchema,
     AggregatedSchema,
     ColumnName,
+    CrossJoinSchema,
     DuplicateRenameTargets,
     DroppedSchema,
     EBuilder as DataFrameExpressionBuilder,
@@ -63,6 +65,7 @@ export type {
     StatisticsSchema,
     TypedAggBuilder,
     TypedColumnFactory,
+    TypedColumnsFactory,
     TypedJoinPredicate,
     TypedOrderFactory,
     TypedPredicate,
@@ -70,6 +73,9 @@ export type {
     ValidRenameMap,
     ValidRenameTarget,
 } from "./read/readChainedDataFrame";
+export { DataFrameNaFunctions, DataFrameStatFunctions } from "./read/dataFrameFunctions";
+export type { NAFillValue, NAHow, NAReplaceValue } from "./read/dataFrameFunctions";
+export type { SparkStructField, SparkStructType } from "./read/dataTypes";
 export { DataFrameReaderTF } from "./read/dataFrameReaderTF";
 export {
     SparkCatalog,
@@ -134,9 +140,16 @@ export type {
     CacheCap,
     DescribeCap,
     HintCap,
+    NAReplacement,
+    NullHandlingCap,
+    OffsetCap,
+    RepartitionByExpressionCap,
     RepartitionCap,
+    ReshapeCap,
+    SampleFraction,
     SamplingCap,
     SqlCap,
+    StatCap,
     SummaryCap,
 } from "./algebra/read/batch-capabilities";
 export type { DFCore } from "./algebra/read/df-core";
