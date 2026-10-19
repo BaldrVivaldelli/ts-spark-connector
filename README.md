@@ -432,6 +432,57 @@ Spark Connect server, both formats require the matching jars and catalog
 configuration server-side — see `spark-server/Dockerfile` for the exact
 pinned artifacts.
 
+## Null handling, statistics and introspection
+
+`df.na` and `df.stat` mirror PySpark; the same methods also exist directly on
+the DataFrame (`fillna`, `dropna`, `replace`, `corr`, ...). Null handling keeps
+the declared schema, while relations that reshape the data (`crosstab`,
+`unpivot`, `toDF`, `transpose`) fall back to the untyped surface.
+
+```ts
+const filled = df.na.fill({ age: 0, name: "unknown" });
+const complete = df.dropna("any", undefined, ["age"]);
+const renamed = df.replace(["n/a", "-"], null, "name");
+
+const r = await df.stat.corr("age", "score");          // number
+const [p50, p90] = await df.approxQuantile("age", [0.5, 0.9], 0.01);
+const pairs = df.crosstab("country", "year");           // DataFrame
+const sample = df.sampleBy("country", { AR: 0.1, US: 0.5 }, 42);
+
+const rows = await df.count();                          // bigint, like every Spark long
+const first = await df.first();                        // row or undefined
+const last = await df.tail(5);
+const fields = await df.schema();                       // { fields: [{ name, dataType, nullable }] }
+await df.printSchema();
+```
+
+`schema()`, `columns()`, `dtypes()`, `treeString()`, `isLocal()`,
+`isStreaming()`, `inputFiles()`, `sameSemantics()` and `semanticHash()` are
+answered by Spark's `AnalyzePlan` RPC without running the query.
+
+## Table writes and MERGE INTO
+
+`df.writeTo(table)` is Spark's DataFrameWriterV2, and `df.mergeInto(table,
+condition)` builds a `MERGE INTO` command. Qualify the target columns with the
+table name and the source columns with an `alias()`:
+
+```ts
+await df.writeTo("default.customers").using("delta").partitionedBy("country").create();
+await updates.writeTo("default.customers").append();
+await updates.writeTo("default.customers").overwrite(col("country").eq("AR"));
+
+await updates
+  .alias("s")
+  .mergeInto("default.customers", col("customers.id").eq(col("s.id")))
+  .whenMatched().updateAll()
+  .whenNotMatched().insertAll()
+  .whenNotMatchedBySource().delete()
+  .merge();
+```
+
+Both are verified against the bundled Delta catalog on every E2E matrix
+version; see [`docs/examples/merge.ts`](docs/examples/merge.ts).
+
 ## Compatibility
 
 The currently verified compatibility targets are:
@@ -474,11 +525,14 @@ Implemented and exposed in the public API:
 - Reads: CSV / JSON / Parquet / ORC / Avro
 - Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
 - Lakehouse formats against the bundled server: Delta Lake on every matrix version (reads, writes, time travel) and Iceberg on Spark 4.0/4.1 (Hadoop catalog and metadata tables)
-- Transformations: `select`, `filter`, `join`, `groupBy().agg()`, `sort`, `limit`, `distinct`, `dropDuplicates`, `withColumn`, `withColumnRenamed`, `withColumnsRenamed`, `drop`, `sample`, `randomSplit`, `repartition`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
+- Transformations: `select`, `filter`, `join`, `crossJoin`, `groupBy().agg()`, `sort`, `limit`, `offset`, `distinct`, `dropDuplicates`, `withColumn`, `withColumns`, `withColumnRenamed`, `withColumnsRenamed`, `toDF`, `alias`, `drop`, `unpivot` / `melt`, `transpose`, `sample`, `randomSplit`, `repartition` (by count or by columns), `repartitionByRange`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
+- Null handling (`df.na`, `fillna`, `dropna`, `replace`) and statistics (`df.stat`: `corr`, `cov`, `crosstab`, `freqItems`, `approxQuantile`, `sampleBy`)
+- Actions and introspection: `collect`, `toRows`, `show`, `count`, `first`, `head`, `take`, `tail`, `isEmpty`, `schema`, `columns`, `dtypes`, `printSchema` / `treeString`, `isLocal`, `isStreaming`, `inputFiles`, `sameSemantics`, `semanticHash`
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
 - SQL / temp views
 - Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables and columns, existence checks, and temp-view drops
 - Batch writes plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
+- Table writes through `writeTo(table)` (DataFrameWriterV2: `create`, `replace`, `createOrReplace`, `append`, `overwrite(condition)`, `overwritePartitions`) and `mergeInto(table, condition)` (`MERGE INTO` with matched / not-matched / not-matched-by-source clauses)
 - `explain(...)`
 
 Not exposed as stable public API yet:
