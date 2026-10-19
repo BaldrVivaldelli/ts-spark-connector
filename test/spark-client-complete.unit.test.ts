@@ -162,7 +162,10 @@ class FakeService {
                 const outcome = state.artifactOutcome ?? {};
                 setImmediate(() => outcome instanceof Error ? callback(outcome, {}) : callback(null, outcome));
             },
-            cancel: vi.fn(),
+            // Like grpc-js, a cancelled call still reports CANCELLED to its callback.
+            cancel: vi.fn(() => {
+                setImmediate(() => callback(Object.assign(new Error("1 CANCELLED: Cancelled on client"), { code: 1 }), {}));
+            }),
         };
         return stream as unknown as Grpc.ClientWritableStream<RpcMessage>;
     }
@@ -666,14 +669,58 @@ describe("spark gRPC client complete behavior", () => {
         sparkGrpcClient.close(config);
     });
 
-    it("rejects when the request iterator itself fails", async () => {
+    it("rejects when the request iterator itself fails, without an unhandled rejection", async () => {
         const config = connection();
-        function* broken(): Generator<RpcMessage> {
-            yield { session_id: "session-1", batch: { artifacts: [] } };
-            throw new Error("disk vanished");
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => unhandled.push(reason);
+        process.on("unhandledRejection", onUnhandled);
+        try {
+            function* broken(): Generator<RpcMessage> {
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                throw new Error("disk vanished");
+            }
+            await expect(sparkGrpcClient.addArtifacts(broken(), config)).rejects.toThrow(/disk vanished/);
+            // Let the cancelled call's CANCELLED callback fire.
+            await new Promise(resolve => setImmediate(resolve));
+            await new Promise(resolve => setImmediate(resolve));
+        } finally {
+            process.off("unhandledRejection", onUnhandled);
         }
-        await expect(sparkGrpcClient.addArtifacts(broken(), config)).rejects.toThrow(/disk vanished/);
+        expect(unhandled).toEqual([]);
         sparkGrpcClient.close(config);
+    });
+
+    it("bounds uploads like executions and cancels them with the session signal", async () => {
+        const started = Date.now();
+        const bounded = connection({ rpcTimeoutMs: 1_000, executeTimeoutMs: 60_000 });
+        state.artifactOutcome = { artifacts: [] };
+        await sparkGrpcClient.addArtifacts([{ session_id: "session-1", batch: { artifacts: [] } }], bounded);
+        const deadline = state.calls.find(call => call.name === "addArtifacts")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(started + 60_000);
+        sparkGrpcClient.close(bounded);
+
+        const aborted = new AbortController();
+        aborted.abort("no uploads today");
+        const refused = connection({ signal: aborted.signal });
+        await expect(sparkGrpcClient.addArtifacts([{ session_id: "session-1" }], refused))
+            .rejects.toMatchObject({ name: "AbortError", message: "no uploads today" });
+
+        const controller = new AbortController();
+        const cancelled = connection({ signal: controller.signal });
+        state.artifactOutcome = { artifacts: [] };
+        // The fake asks to wait for drain on the second write; abort while waiting.
+        const upload = sparkGrpcClient.addArtifacts(
+            (function* () {
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                controller.abort("stop uploading");
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+            })(),
+            cancelled,
+        );
+        await expect(upload).rejects.toMatchObject({ name: "AbortError", message: "stop uploading" });
+        sparkGrpcClient.close(cancelled);
+        sparkGrpcClient.close(refused);
     });
 
     it("sends ArtifactStatus and GetStatus as retried unary calls", async () => {

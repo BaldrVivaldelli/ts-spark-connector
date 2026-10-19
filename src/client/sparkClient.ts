@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import tls from "node:tls";
 import type { AuthConfig, SessionConfigMap, SparkConnectionConfig, TLSConfig } from "./session";
-import { resolveRetryConfig, withRetry } from "./retry";
+import { abortError, resolveRetryConfig, throwIfAborted, withRetry } from "./retry";
 import { resolveProviderCredentials } from "./credentialProvider";
 import {
     executeReattachable,
@@ -14,7 +14,6 @@ import {
 } from "./reattachableExecution";
 import { emitTelemetry } from "./telemetry";
 import {
-    buildCallOptions,
     buildStreamCallOptions,
     callUnary,
     callUnaryWithRetry,
@@ -775,18 +774,31 @@ export const sparkGrpcClient = {
     /**
      * Streams `AddArtifactsRequest` messages to the server and resolves with
      * its summary. Not retried: a partially uploaded chunked artifact cannot
-     * be resumed, and the caller can simply upload again.
+     * be resumed, and the caller can simply upload again. The stream is
+     * bounded like an execution (`executeTimeoutMs`, else the per-stream
+     * `rpcTimeoutMs`) and cancelled by the session signal.
      */
     async addArtifacts(requests: Iterable<RpcMessage>, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const signal = config?.signal;
+        throwIfAborted(signal);
         const { client, metadata } = await getClientContext(config);
         const startedAt = Date.now();
         emitTelemetry(config, "spark.rpc.start", "debug", { rpc: "AddArtifacts" });
         let settle!: { resolve: (response: RpcMessage) => void; reject: (error: unknown) => void };
         const completed = new Promise<RpcMessage>((resolve, reject) => { settle = { resolve, reject }; });
-        const call = client.addArtifacts(metadata, buildCallOptions(config), (error, response) => {
-            if (error) settle.reject(error);
-            else settle.resolve(response);
-        });
+        // A failure while writing cancels the call, whose callback then rejects
+        // `completed` after nobody awaits it any more; keep that handled.
+        completed.catch(() => undefined);
+        const call = client.addArtifacts(
+            metadata,
+            buildStreamCallOptions(config, resolveExecuteDeadline(config, startedAt)),
+            (error, response) => {
+                if (error) settle.reject(error);
+                else settle.resolve(response);
+            },
+        );
+        const onAbort = () => call.cancel();
+        signal?.addEventListener("abort", onAbort, { once: true });
         try {
             for (const request of requests) {
                 if (!call.write(request)) await Promise.race([once(call, "drain"), completed]);
@@ -802,7 +814,10 @@ export const sparkGrpcClient = {
                 durationMs: Date.now() - startedAt,
                 code: (error as { code?: unknown } | null)?.code,
             });
+            if (signal?.aborted) throw abortError(signal.reason);
             throw await enrichSparkConnectError(error, "AddArtifacts", {}, client, metadata, config);
+        } finally {
+            signal?.removeEventListener("abort", onAbort);
         }
     },
 
