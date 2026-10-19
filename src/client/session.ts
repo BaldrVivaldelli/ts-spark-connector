@@ -297,8 +297,9 @@ export class SparkSession implements SessionAlgebra {
      * `"YYYY-MM-DD"` for `date`, ISO-8601 strings for `timestamp`), so
      * `createDataFrame(await df.collect(), Schema)` round-trips.
      *
-     * Complex column types (decimal, array, map, struct) are not supported
-     * yet and are rejected with a `TypeError`.
+     * Decimals are strings, arrays are arrays, maps are `Map` instances
+     * (plain objects are accepted for string keys) and structs are objects;
+     * nested values may be null, as in the rows Spark returns.
      */
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(
         rows: ReadonlyArray<InferSchema<D>>,

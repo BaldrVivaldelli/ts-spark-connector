@@ -113,8 +113,9 @@ await people.filter(col("id").gt(1)).show();
 
 Rows are validated during encoding: a `null` in a non-nullable column or a
 value that does not match its token fails with the column and row in the
-message, before anything reaches the network. Complex column types (decimal,
-array, map, struct) are not supported yet and are rejected explicitly. An
+message, before anything reaches the network, including nested values inside
+arrays, maps and structs (`decimalType`, `arrayType`, `mapType`,
+`structType`). An
 empty row array produces an empty, correctly-typed relation.
 
 ## Column expressions and functions

@@ -4,7 +4,7 @@ import { SparkDFAlg } from "../src/read/readDataFrameInterpreter";
 import { TraceDFAlg } from "../src/trace/trace";
 import { encodeLocalRelation } from "../src/typed/arrow-encode";
 import { rowsFromArrowBuffers } from "../src/typed/arrow-rows";
-import { SparkSession, arrayType, schema } from "../src";
+import { SparkSession, arrayType, decimalType, mapType, schema, structType } from "../src";
 
 const session = SparkSession.builder()
     .config("spark.connect.url", "sc://localhost:15002")
@@ -70,10 +70,95 @@ describe("encodeLocalRelation", () => {
         expect(() => encodeLocalRelation([], {})).toThrow(/at least one column/);
     });
 
-    it("rejects complex column specs with the column name", () => {
-        expect(() => encodeLocalRelation([], { tags: arrayType("string") })).toThrow(
-            /does not support array columns yet.*"tags"/,
-        );
+    it("round-trips decimal, array, map and struct columns through the decoder", () => {
+        const Complex = schema({
+            amount: decimalType(10, 2),
+            tags: arrayType("string"),
+            counts: mapType("string", "long"),
+            byId: mapType("int", "string", true),
+            addr: structType({ city: "string", zip: "int" }),
+            people: arrayType(structType({ name: "string", age: "int" }), true),
+        });
+        const rows = [
+            {
+                amount: "1452.00",
+                tags: ["a", null, "c"],
+                counts: new Map<string, bigint | null>([["x", 7n], ["y", null]]),
+                byId: new Map<number, string | null>([[1, "one"]]),
+                addr: { city: "Rosario", zip: 2000 },
+                people: [{ name: "ada", age: 36 }, null, { name: "grace", age: null }],
+            },
+            {
+                amount: "-0.5",
+                tags: [],
+                counts: new Map(),
+                byId: null,
+                addr: { city: null, zip: null },
+                people: null,
+            },
+        ];
+        const buffer = Buffer.from(encodeLocalRelation(rows, Complex.def));
+        expect(rowsFromArrowBuffers(buffer ? [buffer] : [], Complex.def)).toEqual([
+            {
+                amount: "1452.00",
+                tags: ["a", null, "c"],
+                counts: new Map([["x", 7n], ["y", null]]),
+                byId: new Map([[1, "one"]]),
+                addr: { city: "Rosario", zip: 2000 },
+                people: [{ name: "ada", age: 36 }, null, { name: "grace", age: null }],
+            },
+            {
+                amount: "-0.50",
+                tags: [],
+                counts: new Map(),
+                byId: null,
+                addr: { city: null, zip: null },
+                people: null,
+            },
+        ]);
+    });
+
+    it("accepts bigint decimals, plain objects for string-keyed maps and missing struct fields", () => {
+        const Def = schema({
+            amount: decimalType(5, 0),
+            labels: mapType("string", "int"),
+            addr: structType({ city: "string", zip: "int" }),
+        });
+        const buffer = Buffer.from(encodeLocalRelation([
+            { amount: 42n, labels: { a: 1, b: null }, addr: { city: "Salta" } },
+        ], Def.def));
+        expect(rowsFromArrowBuffers([buffer], Def.def)).toEqual([
+            { amount: "42", labels: new Map([["a", 1], ["b", null]]), addr: { city: "Salta", zip: null } },
+        ]);
+    });
+
+    it.each([
+        [decimalType(10, 2), "12.345", /at most 2 decimals/],
+        [decimalType(4, 2), "123.45", /within 4 digits/],
+        [decimalType(10, 2), "abc", /DECIMAL\(10,2\) string/],
+        [decimalType(10, 2), ".", /DECIMAL\(10,2\) string/],
+        [decimalType(10, 2), "", /DECIMAL\(10,2\) string/],
+        [decimalType(10, 2), 12.5, /DECIMAL\(10,2\) string/],
+        [arrayType("int"), "nope", /an array/],
+        [arrayType("int"), new Map(), /received Map\(0\)/],
+        [arrayType("int"), [1, "x"], /row 0\[1\]: expected a 32-bit integer/],
+        [mapType("int", "string"), { 1: "a" }, /expected a Map,/],
+        [mapType("string", "int"), 7, /a Map or a plain object/],
+        [mapType("string", "int"), new Map([[null, 1]]), /non-null map key/],
+        [mapType("string", "int"), new Map([["k", "v"]]), /row 0\["k"\]: expected a 32-bit integer/],
+        [mapType("int", "string"), new Map([["k", "v"]]), /key "k": expected a 32-bit integer/],
+        [structType({ a: "int" }), [1], /an object with the struct's fields/],
+        [structType({ a: "int" }), { a: "x" }, /row 0\.a: expected a 32-bit integer/],
+    ])("rejects a bad complex value: %o", (spec, value, message) => {
+        expect(() => encodeLocalRelation([{ v: value }], { v: spec as never })).toThrow(message);
+    });
+
+    it("reports a missing non-nullable column as undefined", () => {
+        expect(() => encodeLocalRelation([{}], { name: "string" })).toThrow(/received undefined/);
+    });
+
+    it("rejects an unknown field spec kind", () => {
+        expect(() => encodeLocalRelation([], { v: { kind: "tuple" } as never })).toThrow(/does not support tuple columns/);
     });
 
     it("rejects a row that is not an object", () => {
