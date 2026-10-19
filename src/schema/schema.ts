@@ -317,6 +317,15 @@ function isNullableSpec(spec: FieldSpec): boolean {
     return typeof spec === "string" ? spec.endsWith("?") : spec.nullable === true;
 }
 
+/**
+ * Spark DDL type of one field spec (`INT`, `ARRAY<STRING>`, `DECIMAL(10,2)`,
+ * `STRUCT<a: INT>`); the nullability marker is not part of a type string.
+ * @internal
+ */
+export function fieldSpecToDDL(spec: FieldSpec): string {
+    return ddlType(spec);
+}
+
 function ddlType(spec: FieldSpec): string {
     if (typeof spec === "string") {
         const base = spec.endsWith("?") ? spec.slice(0, -1) : spec;

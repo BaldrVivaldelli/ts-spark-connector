@@ -25,6 +25,10 @@ const executePlanRequest = packageDefinition[
   "spark.connect.ExecutePlanRequest"
 ] as MessageTypeDefinition<ProtoObject, ProtoObject>;
 
+function messageType(name: string): MessageTypeDefinition<ProtoObject, ProtoObject> {
+  return packageDefinition[`spark.connect.${name}`] as MessageTypeDefinition<ProtoObject, ProtoObject>;
+}
+
 function planOf(df: { toProtoJSON(): string }): ProtoObject {
   return JSON.parse(df.toProtoJSON()) as ProtoObject;
 }
@@ -321,6 +325,55 @@ describe("Spark Connect protobuf wire conformance", () => {
     const functions = wireRoundTrip(ProtoDFAlg.catalog({ method: "listFunctions", pattern: "up*" }));
     expect(functions.plan.root.catalog.list_functions).toMatchObject({ pattern: "up*" });
     expect(functions.plan.root.catalog.list_functions).not.toHaveProperty("_db_name");
+  });
+
+  it("encodes artifact, status and Java UDF registration messages", () => {
+    const add = messageType("AddArtifactsRequest");
+    const chunk = { data: Buffer.from("bytes"), crc: 123456789 };
+    const batch = add.deserialize(add.serialize({
+      session_id: "00112233-4455-4677-8899-aabbccddeeff",
+      user_context: { user_id: "u" },
+      client_type: "ts",
+      batch: { artifacts: [{ name: "jars/a.jar", data: chunk }] },
+    }));
+    expect(batch.batch).toMatchObject({ artifacts: [{ name: "jars/a.jar", data: { crc: "123456789" } }] });
+    const begin = add.deserialize(add.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      begin_chunk: { name: "jars/big.jar", total_bytes: 70000, num_chunks: 3, initial_chunk: chunk },
+    }));
+    expect(begin.begin_chunk).toMatchObject({ name: "jars/big.jar", total_bytes: "70000", num_chunks: "3" });
+    expect(begin.payload).toBe("begin_chunk");
+
+    const statuses = messageType("ArtifactStatusesRequest");
+    expect(statuses.deserialize(statuses.serialize({ session_id: "s", user_context: { user_id: "u" }, names: ["jars/a.jar"] })))
+      .toMatchObject({ names: ["jars/a.jar"] });
+
+    const getStatus = messageType("GetStatusRequest");
+    expect(getStatus.deserialize(getStatus.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      operation_status: { operation_ids: ["00112233-4455-4677-8899-aabbccddeeff"] },
+    })).operation_status).toMatchObject({ operation_ids: ["00112233-4455-4677-8899-aabbccddeeff"] });
+
+    const registered = executePlanRequest.deserialize(executePlanRequest.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      plan: {
+        command: {
+          register_function: {
+            function_name: "shout",
+            deterministic: true,
+            arguments: [],
+            java_udf: { class_name: "io.example.Shout", output_type: { unparsed: { data_type_string: "string" } }, aggregate: false },
+          },
+        },
+      },
+    })) as { plan: { command: { register_function: ProtoObject } } };
+    expect(registered.plan.command.register_function).toMatchObject({
+      function_name: "shout",
+      java_udf: { class_name: "io.example.Shout", output_type: { unparsed: { data_type_string: "string" } } },
+    });
   });
 
   it("rejects empty batch paths before producing an invalid request", () => {

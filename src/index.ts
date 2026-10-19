@@ -12,7 +12,10 @@ export type {
     SparkConnectionConfig, SparkLogger, SparkTelemetryEvent,
     SparkMetric, SparkMetricObserver,
     SessionConfigMap, SessionConfigValue, SparkUserContext, RangeRow,
+    OperationState, OperationStatus,
 } from "./client/session";
+export type { ArtifactKind, ArtifactUpload } from "./client/artifacts";
+export { SparkUdfRegistration } from "./client/udf";
 export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";
 export { UnsupportedServerVersionError } from "./client/serverVersion";

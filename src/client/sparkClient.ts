@@ -1,5 +1,6 @@
 import type * as Grpc from "@grpc/grpc-js";
 import crypto from "node:crypto";
+import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import tls from "node:tls";
@@ -13,6 +14,7 @@ import {
 } from "./reattachableExecution";
 import { emitTelemetry } from "./telemetry";
 import {
+    buildCallOptions,
     buildStreamCallOptions,
     callUnary,
     callUnaryWithRetry,
@@ -70,6 +72,10 @@ interface SparkConnectServiceClient {
     fetchErrorDetails(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     /** Spark Connect 4.1+. */
     cloneSession(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    addArtifacts(metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientWritableStream<RpcMessage>;
+    artifactStatus(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    /** Spark Connect 4.2+. */
+    getStatus(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     close(): void;
 }
 
@@ -719,6 +725,52 @@ export const sparkGrpcClient = {
         } catch (error) {
             throw await enrichSparkConnectError(error, "CloneSession", request, client, metadata, config);
         }
+    },
+
+    /**
+     * Streams `AddArtifactsRequest` messages to the server and resolves with
+     * its summary. Not retried: a partially uploaded chunked artifact cannot
+     * be resumed, and the caller can simply upload again.
+     */
+    async addArtifacts(requests: Iterable<RpcMessage>, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        const startedAt = Date.now();
+        emitTelemetry(config, "spark.rpc.start", "debug", { rpc: "AddArtifacts" });
+        let settle!: { resolve: (response: RpcMessage) => void; reject: (error: unknown) => void };
+        const completed = new Promise<RpcMessage>((resolve, reject) => { settle = { resolve, reject }; });
+        const call = client.addArtifacts(metadata, buildCallOptions(config), (error, response) => {
+            if (error) settle.reject(error);
+            else settle.resolve(response);
+        });
+        try {
+            for (const request of requests) {
+                if (!call.write(request)) await Promise.race([once(call, "drain"), completed]);
+            }
+            call.end();
+            const response = await completed;
+            emitTelemetry(config, "spark.rpc.end", "debug", { rpc: "AddArtifacts", durationMs: Date.now() - startedAt });
+            return response;
+        } catch (error) {
+            call.cancel();
+            emitTelemetry(config, "spark.rpc.error", "error", {
+                rpc: "AddArtifacts",
+                durationMs: Date.now() - startedAt,
+                code: (error as { code?: unknown } | null)?.code,
+            });
+            throw await enrichSparkConnectError(error, "AddArtifacts", {}, client, metadata, config);
+        }
+    },
+
+    /** Whether the named artifacts exist on the server for this session. */
+    async artifactStatus(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        return callUnaryWithRetry(client, client.artifactStatus.bind(client), request, metadata, config, "ArtifactStatus");
+    },
+
+    /** Operation states of this session (Spark Connect 4.2+). */
+    async getStatus(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        return callUnaryWithRetry(client, client.getStatus.bind(client), request, metadata, config, "GetStatus");
     },
 
     /** Retains shared ownership of the channel identity without opening it eagerly. */

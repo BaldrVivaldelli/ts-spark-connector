@@ -15,6 +15,15 @@ import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
 import { cleanupConnectionConfig } from "./rpcLifecycle";
+import {
+    CACHE_ARTIFACT_PREFIX,
+    artifactRequests,
+    cachedArtifactRequests,
+    uploadedArtifactNames,
+    type ArtifactKind,
+    type ArtifactUpload,
+} from "./artifacts";
+import { SparkUdfRegistration } from "./udf";
 import { compareSparkVersions, UnsupportedServerVersionError } from "./serverVersion";
 import {
     assertOperationId,
@@ -200,6 +209,38 @@ export type SparkConnectionConfig = {
     metrics?: SparkMetricObserver;
     sessionConfig?: SessionConfigMap;
 };
+
+/**
+ * State of one operation as reported by `session.getStatus()` (Spark 4.2+).
+ * @public
+ */
+export type OperationState =
+    | "UNSPECIFIED"
+    | "UNKNOWN"
+    | "RUNNING"
+    | "TERMINATING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED";
+
+/** @public */
+export type OperationStatus = {
+    operationId: string;
+    state: OperationState;
+};
+
+const OPERATION_STATES: readonly OperationState[] = [
+    "UNSPECIFIED", "UNKNOWN", "RUNNING", "TERMINATING", "SUCCEEDED", "FAILED", "CANCELLED",
+];
+
+function operationState(value: unknown): OperationState {
+    // enums arrive as their proto names ("OPERATION_STATE_RUNNING"); the
+    // numeric form only if a loader was configured differently.
+    const name = typeof value === "number"
+        ? OPERATION_STATES[value]
+        : String(value ?? "").replace(/^OPERATION_STATE_/, "");
+    return OPERATION_STATES.includes(name as OperationState) ? name as OperationState : "UNKNOWN";
+}
 
 /** Schema of `session.range()`: Spark names the column `id` and never makes it null. */
 const RANGE_SCHEMA = schema({ id: "long" });
@@ -514,6 +555,139 @@ export class SparkSession implements SessionAlgebra {
         });
         clone.adoptClonedServerSession(response.new_server_side_session_id);
         return clone;
+    }
+
+    /**
+     * Uploads a local file to the server for this session: a `.jar` joins the
+     * session classpath (then `udf.registerJavaFunction()` can use its
+     * classes); other files need `kind` `"file"` or `"archive"`. Resolves with
+     * the server-side artifact name, e.g. `jars/udfs.jar`.
+     */
+    async addArtifact(localPath: string, kind?: ArtifactKind): Promise<string> {
+        const [name] = await this.addArtifacts({ path: localPath, ...(kind !== undefined ? { kind } : {}) });
+        return name!;
+    }
+
+    /**
+     * Uploads several local files in one `AddArtifacts` stream. Small files
+     * are batched, large ones chunked, and every chunk is CRC-checked by the
+     * server. Resolves with the server-side artifact names, in order.
+     */
+    async addArtifacts(...uploads: Array<string | ArtifactUpload>): Promise<string[]> {
+        this.assertOpen();
+        if (uploads.length === 0) throw new TypeError("addArtifacts() requires at least one file.");
+        const normalized: ArtifactUpload[] = uploads.map(upload => typeof upload === "string" ? { path: upload } : upload);
+        return this.uploadArtifacts(artifactRequests(this.requestBase(), normalized));
+    }
+
+    /**
+     * Stores a blob on the server under its SHA-256 (`cache/<hash>`), like
+     * PySpark's `cache_artifact`, and resolves with the hash. Cached blobs are
+     * the one artifact kind the server reports through `isArtifactCached()`.
+     */
+    async cacheArtifact(data: Uint8Array | string): Promise<string> {
+        this.assertOpen();
+        if (typeof data !== "string" && !(data instanceof Uint8Array)) {
+            throw new TypeError("cacheArtifact() takes a Uint8Array or a string.");
+        }
+        const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+        if (bytes.byteLength === 0) throw new TypeError("cacheArtifact() requires a non-empty blob.");
+        const { hash, requests } = cachedArtifactRequests(this.requestBase(), bytes);
+        const [name] = await this.uploadArtifacts(requests);
+        if (name !== `${CACHE_ARTIFACT_PREFIX}${hash}`) {
+            throw new Error(`AddArtifacts confirmed ${String(name)}; expected ${CACHE_ARTIFACT_PREFIX}${hash}.`);
+        }
+        return hash;
+    }
+
+    /** Whether a blob stored with `cacheArtifact()` is still cached on the server. */
+    async isArtifactCached(hash: string): Promise<boolean> {
+        if (typeof hash !== "string" || !/^[0-9a-f]{64}$/i.test(hash)) {
+            throw new TypeError("isArtifactCached() takes the SHA-256 hex hash returned by cacheArtifact().");
+        }
+        const name = `${CACHE_ARTIFACT_PREFIX}${hash.toLowerCase()}`;
+        return (await this.artifactStatus(name))[name] === true;
+    }
+
+    /**
+     * Raw `ArtifactStatus` lookup by server-side name. Spark answers only for
+     * blobs stored by hash (`cache/<hash>`, see `cacheArtifact()`); jars and
+     * files always report `false` even after a successful upload.
+     */
+    async artifactStatus(...names: string[]): Promise<Record<string, boolean>> {
+        this.assertOpen();
+        if (names.length === 0) throw new TypeError("artifactStatus() requires at least one artifact name.");
+        for (const name of names) {
+            if (typeof name !== "string" || !name.trim()) throw new TypeError("Artifact names must be non-empty strings.");
+        }
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.artifactStatus({ ...this.requestBase(), names }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const statuses = (response.statuses ?? {}) as Record<string, { exists?: boolean } | undefined>;
+        return Object.fromEntries(names.map(name => [name, statuses[name]?.exists === true]));
+    }
+
+    /** Registration of server-side (Java) user-defined functions. */
+    get udf(): SparkUdfRegistration {
+        this.assertOpen();
+        return new SparkUdfRegistration(this);
+    }
+
+    /**
+     * States of this session's operations (Spark Connect 4.2+), for the given
+     * operation ids or, when none are given, every operation the server still
+     * tracks. Pair it with `ExecutionOptions.operationId` to follow a query.
+     */
+    async getStatus(operationIds: readonly string[] = []): Promise<OperationStatus[]> {
+        for (const id of operationIds) assertOperationId(id);
+        await this.requireServerVersion("4.2.0", "getStatus()");
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.getStatus({
+                ...this.requestBase(),
+                operation_status: { operation_ids: [...operationIds] },
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const statuses = response.operation_statuses ?? response.operationStatuses;
+        return (Array.isArray(statuses) ? statuses : []).map(status => {
+            const entry = status as { operation_id?: unknown; operationId?: unknown; state?: unknown };
+            return { operationId: String(entry.operation_id ?? entry.operationId ?? ""), state: operationState(entry.state) };
+        });
+    }
+
+    private async uploadArtifacts(requests: Iterable<Record<string, unknown>>): Promise<string[]> {
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.addArtifacts(requests, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        return uploadedArtifactNames(response);
+    }
+
+    /** Identity fields every session-scoped request repeats. */
+    private requestBase(): Record<string, unknown> {
+        return {
+            session_id: this.sessionId,
+            user_context: this.getUserContext(),
+            client_type: "ts-spark-connector",
+            ...(this.serverSideSessionId
+                ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                : {}),
+        };
     }
 
     /** @internal Snapshots per-execution controls when an action starts. */

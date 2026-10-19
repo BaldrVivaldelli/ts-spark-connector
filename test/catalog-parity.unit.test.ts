@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProtoDFAlg, unparsedDataType } from "../src/engine/compilerRead";
 import { ReadChainedDataFrame } from "../src/read/readChainedDataFrame";
 import { STORAGE_LEVEL_NAMES, toProtoStorageLevel } from "../src/client/storageLevel";
+import { sparkGrpcClient } from "../src/client/sparkClient";
 import { SparkSession, schema } from "../src";
 import type { CatalogOperation } from "../src";
 
@@ -43,6 +44,7 @@ describe("catalog parity: proto compilation", () => {
             },
         ],
         [{ method: "createExternalTable", tableName: "t", path: "/data/t" }, { create_external_table: { table_name: "t", path: "/data/t", options: {} } }],
+        [{ method: "createExternalTable", tableName: "t" }, { create_external_table: { table_name: "t", options: {} } }],
         [
             { method: "createExternalTable", tableName: "t", path: "/data/t", source: "csv", schema: "a INT", options: { header: "true" } },
             { create_external_table: { table_name: "t", path: "/data/t", source: "csv", schema: { unparsed: { data_type_string: "a INT" } }, options: { header: "true" } } },
@@ -131,9 +133,16 @@ describe("catalog parity: client surface", () => {
         });
         collect.mockResolvedValueOnce([{ name: "people", isTemporary: true }] as never);
         expect(await session.catalog.getTable("people")).toMatchObject({ name: "people", isTemporary: true });
+        collect.mockResolvedValueOnce([{ name: "people", isTemporary: false }] as never);
+        expect(await session.catalog.getTable("people", "default")).toMatchObject({ isTemporary: false });
         collect.mockResolvedValueOnce([{ name: "upper", className: "org.apache.spark.sql.catalyst.expressions.Upper" }] as never);
         expect(await session.catalog.getFunction("upper", "default")).toMatchObject({ name: "upper" });
-        collect.mockResolvedValueOnce([] as never);
+        collect.mockResolvedValueOnce([{ name: "lower", className: "Lower" }] as never);
+        expect(await session.catalog.getFunction("lower")).toMatchObject({ name: "lower" });
+        collect.mockRestore();
+
+        // An empty Arrow result (the plan really runs here) is an error, not undefined.
+        vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
         await expect(session.catalog.getTable("missing")).rejects.toThrow(/getTable expected a single row but received none/);
     });
 
