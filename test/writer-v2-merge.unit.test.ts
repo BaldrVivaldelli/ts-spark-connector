@@ -212,7 +212,7 @@ describe("DataFrameWriterV2 partitioning", () => {
 });
 
 describe("DataFrameWriterV2 schema evolution", () => {
-    it("is gated on Spark 4.1 and sent only when requested", async () => {
+    it("is gated on Spark 4.2 and sent only when requested", async () => {
         const gated = SparkSession.builder().getOrCreate();
         const reader = () => gated.read.parquet("/data/updates.parquet");
         vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.0.4" } });
@@ -221,16 +221,21 @@ describe("DataFrameWriterV2 schema evolution", () => {
         await expect(reader().writeTo("t").withSchemaEvolution().append()).rejects.toMatchObject({
             name: "UnsupportedServerVersionError",
             feature: "withSchemaEvolution()",
-            requiredVersion: "4.1.0",
+            requiredVersion: "4.2.0",
             serverVersion: "4.0.4",
         });
+        // 4.1 defines the field but does not act on it, so it is rejected too.
+        const midway = SparkSession.builder().getOrCreate();
+        vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.1.3" } });
+        await expect(midway.read.parquet("/data/updates.parquet").writeTo("t").withSchemaEvolution().append())
+            .rejects.toMatchObject({ name: "UnsupportedServerVersionError", requiredVersion: "4.2.0", serverVersion: "4.1.3" });
         expect(execute).not.toHaveBeenCalled();
 
         await reader().writeTo("t").append();
         expect(executedCommand(execute).write_operation_v2).not.toHaveProperty("with_schema_evolution");
 
         const modern = SparkSession.builder().getOrCreate();
-        vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.1.3" } });
+        vi.spyOn(sparkGrpcClient, "analyze").mockResolvedValue({ spark_version: { version: "4.2.0" } });
         const writer = modern.read.parquet("/data/updates.parquet").writeTo("t");
         const evolving = writer.withSchemaEvolution();
         await evolving.append();

@@ -144,7 +144,7 @@ export class DataFrameWriterV2 {
     }
 
     /**
-     * Lets the write add columns the table lacks. Needs Spark Connect 4.1 or
+     * Lets the write add columns the table lacks. Needs Spark Connect 4.2 or
      * newer: older servers reject the write with `UnsupportedServerVersionError`
      * before anything is sent.
      */
@@ -211,7 +211,12 @@ export class DataFrameWriterV2 {
 
     private async run(mode: WriterV2Mode, condition?: EBuilder): Promise<void> {
         if (this.spec.schemaEvolution) {
-            await this.session.requireServerVersion("4.1.0", "withSchemaEvolution()");
+            // Spark 4.1 already defines WriteOperationV2.with_schema_evolution
+            // and accepts it, but the 4.1 server (with the Delta runtime the
+            // E2E image bundles) still writes without evolving the schema and
+            // fails with DELTA_METADATA_MISMATCH; the first line verified to
+            // act on the flag is 4.2, so that is the behavioural gate.
+            await this.session.requireServerVersion("4.2.0", "withSchemaEvolution()");
         }
         const input = this.relation() as ProtoRel;
         const executor = await applyPendingAnalyzeActions(input, this.session);

@@ -81,7 +81,7 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `write.format/mode/option(s)/partitionBy/bucketBy/sortBy/save/saveAsTable` | ✅ | csv, json, parquet, orc, avro, text, Delta, Iceberg |
 | `write.insertInto` | ✅ | `WriteOperation.table.save_method = INSERT_INTO` |
 | `write.jdbc`, `read.jdbc` (properties, partition column, predicates) | ✅ | `jdbc` data source, `DataSource.predicates`; verified against the Derby jars shipped with Spark |
-| `writeTo` (DataFrameWriterV2: `using`, `tableProperty`, `partitionedBy`, `clusterBy`, `create`, `replace`, `createOrReplace`, `append`, `overwrite`, `overwritePartitions`, `withSchemaEvolution` on Spark 4.1+) | ✅ | `WriteOperationV2` |
+| `writeTo` (DataFrameWriterV2: `using`, `tableProperty`, `partitionedBy`, `clusterBy`, `create`, `replace`, `createOrReplace`, `append`, `overwrite`, `overwritePartitions`, `withSchemaEvolution` on Spark 4.2+) | ✅ | `WriteOperationV2`; 4.1 defines `with_schema_evolution` but does not act on it (verified: `DELTA_METADATA_MISMATCH`), hence the 4.2 gate |
 | `mergeInto` (`whenMatched`, `whenNotMatched`, `whenNotMatchedBySource`, `withSchemaEvolution`) | ✅ | `MergeIntoTableCommand` |
 | `writeStream` (start, toTable, triggers, output modes, sinks) | ✅ | |
 | `writeStream.foreach`, `foreachBatch` | ➖ | need Python on the server |

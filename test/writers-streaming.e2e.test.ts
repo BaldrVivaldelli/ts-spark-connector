@@ -106,7 +106,7 @@ describe("batch writers: insertInto and JDBC (E2E)", () => {
         expect(query).toEqual([{ id: 2, name: "grace" }]);
     });
 
-    it("gates writeTo().withSchemaEvolution() on Spark 4.1 and evolves a Delta table beyond it", async () => {
+    it("gates writeTo().withSchemaEvolution() on Spark 4.2 and evolves a Delta table from there", async () => {
         const table = `schema_evolution_${Date.now()}`;
         const version = await session.version();
         await people([{ id: 1, name: "ada" }]).writeTo(table).using("delta").create();
@@ -115,10 +115,12 @@ describe("batch writers: insertInto and JDBC (E2E)", () => {
             .writeTo(table)
             .withSchemaEvolution();
 
-        if (!(await atLeast(version, 4, 1))) {
+        // 4.1 accepts the field but writes without evolving the schema
+        // (DELTA_METADATA_MISMATCH), so 4.0 and 4.1 must be refused up front.
+        if (!(await atLeast(version, 4, 2))) {
             const error = await evolving.append().catch(e => e);
             expect(error).toBeInstanceOf(UnsupportedServerVersionError);
-            expect(error).toMatchObject({ requiredVersion: "4.1.0", serverVersion: version });
+            expect(error).toMatchObject({ requiredVersion: "4.2.0", serverVersion: version });
             return;
         }
 

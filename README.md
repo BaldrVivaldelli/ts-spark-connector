@@ -601,8 +601,9 @@ await updates
 Both are verified against the bundled Delta catalog on every E2E matrix
 version; see [`docs/examples/merge.ts`](docs/examples/merge.ts).
 `writeTo(...).withSchemaEvolution()` lets an append add the columns the table
-lacks; it needs Spark 4.1 and rejects older servers with
-`UnsupportedServerVersionError` before sending anything.
+lacks. It needs Spark 4.2: 4.1 already defines the protocol field but the
+server still writes without evolving the schema, so 4.0 and 4.1 are rejected
+with `UnsupportedServerVersionError` before anything is sent.
 
 ## JDBC tables and insertInto
 
