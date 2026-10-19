@@ -12,7 +12,7 @@ import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
 import type {ResolvedExecution} from "../client/executionOptions";
 import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
-import {DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
+import {CastEvalMode, DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
 
 type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
@@ -293,6 +293,12 @@ function protoWindowFrame(frame: ProtoWindowFrame) {
     };
 }
 
+const PROTO_CAST_EVAL_MODES: Record<CastEvalMode, string> = {
+    legacy: "EVAL_MODE_LEGACY",
+    ansi: "EVAL_MODE_ANSI",
+    try: "EVAL_MODE_TRY",
+};
+
 export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     col: (name, planId) => ({
         unresolved_attribute: {
@@ -312,6 +318,38 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     }),
     call: (name, args) => ({
         unresolved_function: {function_name: name, arguments: args},
+    }),
+    callDistinct: (name, args) => ({
+        unresolved_function: {function_name: name, arguments: args, is_distinct: true},
+    }),
+    exprString: sql => ({
+        expression_string: {expression: sql},
+    }),
+    cast: (input, type, evalMode) => ({
+        cast: {
+            expr: input,
+            type_str: type,
+            ...(evalMode === undefined ? {} : {eval_mode: PROTO_CAST_EVAL_MODES[evalMode]}),
+        },
+    }),
+    lambda: (params, body) => ({
+        lambda_function: {
+            function: body,
+            arguments: params.map(name => ({name_parts: [name]})),
+        },
+    }),
+    lambdaVar: name => ({
+        unresolved_named_lambda_variable: {name_parts: [name]},
+    }),
+    updateFields: (struct, field, value) => ({
+        update_fields: {
+            struct_expression: struct,
+            field_name: field,
+            ...(value === undefined ? {} : {value_expression: value}),
+        },
+    }),
+    extractValue: (child, extraction) => ({
+        unresolved_extract_value: {child, extraction},
     }),
     sortKey: (input, direction, nulls) => ({
         // No es expresión ejecutable; el DFAlg.orderBy lo "desenvuelve".

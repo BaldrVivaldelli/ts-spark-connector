@@ -167,6 +167,7 @@ export type {
     StreamingReadCap,
 } from "./algebra/read/streaming-capabilities";
 export type {
+    CastEvalMode,
     DFAlg,
     DFBatchCaps,
     DFProgram,

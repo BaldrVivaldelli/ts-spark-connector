@@ -1,6 +1,6 @@
 import { GroupTypeInput, JoinHintName, JoinTypeInput } from "./sparkConnectEnums";
 import { CatalogOperation } from "../types/catalog";
-import { LiteralValue } from "../algebra/read";
+import { CastEvalMode, LiteralValue } from "../algebra/read";
 import type { NAReplacement, SampleFraction } from "../algebra/read/batch-capabilities";
 import { FrameBoundary } from "./column";
 import { FrameType, SortOrder } from "../types";
@@ -82,7 +82,12 @@ export type Expression =
     | { type: "Binary"; op: string; left: Expression; right: Expression }
     | { type: "Logical"; op: "AND" | "OR"; left: Expression; right: Expression }
     | { type: "Alias"; input: Expression; alias: string }
-    | { type: "UnresolvedFunction"; name: string; args: Expression[] }
+    | { type: "UnresolvedFunction"; name: string; args: Expression[]; isDistinct?: true }
+    | { type: "ExpressionString"; expression: string }
+    | { type: "Cast"; input: Expression; dataType: string; evalMode?: CastEvalMode }
+    | { type: "LambdaFunction"; params: string[]; body: Expression }
+    | { type: "LambdaVariable"; name: string }
+    | { type: "UpdateFields"; struct: Expression; field: string; value?: Expression }
     | { type: "ExtractValue"; child: Expression; extraction: Expression }
     | { type: "SortKey"; input: Expression; direction: "asc" | "desc"; nulls?: "nullsFirst" | "nullsLast" }
     | { type: "UnresolvedStar" }

@@ -36,6 +36,19 @@ export const TraceExprAlg: ExprAlg<TraceNode> = {
     logical: (op, l, r) => node("logical", op, [l, r]),
     alias: (input, ...names) => node("alias", `alias(${names.join(",")})`, [input]),
     call: (fn, args) => node("call", fn, args),
+    callDistinct: (fn, args) => node("call", `${fn}(distinct)`, args),
+    exprString: sql => node("expr", `expr(${JSON.stringify(sql)})`),
+    cast: (input, type, evalMode) =>
+        node("cast", `${evalMode === "try" ? "try_cast" : "cast"}(${type}${
+            evalMode === undefined || evalMode === "try" ? "" : `,${evalMode}`
+        })`, [input]),
+    lambda: (params, body) => node("lambda", `lambda(${params.join(",")})`, [body]),
+    lambdaVar: name => node("lambdaVar", name),
+    updateFields: (struct, field, value) =>
+        value === undefined
+            ? node("dropField", `dropField(${field})`, [struct])
+            : node("withField", `withField(${field})`, [struct, value]),
+    extractValue: (child, extraction) => node("extract", "extract", [child, extraction]),
     sortKey: (input, direction, nulls) => node("sortKey", `sortKey(${sortLabel(direction, nulls)})`, [input]),
     star: () => node("star", "*"),
     caseWhen: (branches, elze) =>
