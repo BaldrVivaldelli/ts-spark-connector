@@ -136,7 +136,10 @@ describe("iceberg", () => {
         const back = await session.table(partitioned).as<typeof visits[number]>().collect();
         expect(byId(back)).toEqual(visits);
         const [created] = await session.sql(`SHOW CREATE TABLE ${partitioned}`).collect();
-        expect(JSON.stringify(created)).toMatch(/PARTITIONED BY \(years\(at\), bucket\(4, id\)\)/);
+        const statement = JSON.stringify(created);
+        expect(statement).toMatch(/PARTITIONED BY \(years\(at\)/);
+        // Spark 4.0.0 renders a bucket transform as a clustering clause.
+        expect(statement).toMatch(/bucket\(4, id\)|CLUSTERED BY \(id\)\\nINTO 4 BUCKETS/);
     });
 
     it("appends through the catalog identifier", async ctx => {
