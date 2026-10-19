@@ -139,6 +139,16 @@ export interface ArraySpec<Element extends FieldSpec = FieldSpec> {
 export function arrayType<const Element extends FieldSpec, const N extends boolean = false>(element: Element, nullable?: N): ArraySpec<Element> & NullableFlag<N>;
 
 // @public
+export type ArtifactKind = "jar" | "file" | "archive";
+
+// @public
+export type ArtifactUpload = {
+    path: string;
+    kind?: ArtifactKind;
+    name?: string;
+};
+
+// @public
 export const asc: (col: ColumnOrName) => SortKeyBuilder;
 
 // @public
@@ -285,6 +295,21 @@ export const CatalogEntryRow: DeclaredSchema<{
     description: "string?";
 }>;
 
+// @public (undocumented)
+export type CatalogFunction = InferSchema<typeof CatalogFunctionRow.def>;
+
+// @public
+export const CatalogFunctionRow: DeclaredSchema<{
+    name: "string";
+    catalog: "string?";
+    namespace: ArraySpec<"string?"> & {
+        readonly nullable: true;
+    };
+    description: "string?";
+    className: "string";
+    isTemporary: "boolean";
+}>;
+
 // @public
 export type CatalogMethod = CatalogOperation["method"];
 
@@ -330,6 +355,57 @@ export type CatalogOperation = {
 } | {
     readonly method: "dropGlobalTempView";
     readonly viewName: string;
+} | {
+    readonly method: "listFunctions";
+    readonly dbName?: string;
+    readonly pattern?: string;
+} | {
+    readonly method: "getDatabase";
+    readonly dbName: string;
+} | {
+    readonly method: "getTable";
+    readonly tableName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "getFunction";
+    readonly functionName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "createTable";
+    readonly tableName: string;
+    readonly path?: string;
+    readonly source?: string;
+    readonly description?: string;
+    readonly schema?: string;
+    readonly options?: Readonly<Record<string, string>>;
+} | {
+    readonly method: "createExternalTable";
+    readonly tableName: string;
+    readonly path?: string;
+    readonly source?: string;
+    readonly schema?: string;
+    readonly options?: Readonly<Record<string, string>>;
+} | {
+    readonly method: "cacheTable";
+    readonly tableName: string;
+    readonly storageLevel?: string;
+} | {
+    readonly method: "uncacheTable";
+    readonly tableName: string;
+} | {
+    readonly method: "isCached";
+    readonly tableName: string;
+} | {
+    readonly method: "clearCache";
+} | {
+    readonly method: "refreshTable";
+    readonly tableName: string;
+} | {
+    readonly method: "refreshByPath";
+    readonly path: string;
+} | {
+    readonly method: "recoverPartitions";
+    readonly tableName: string;
 };
 
 // @public (undocumented)
@@ -482,6 +558,15 @@ export function create_map(...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
 export function createSparkSession(sessionId?: string): SparkSession;
+
+// @public
+export type CreateTableOptions = {
+    path?: string;
+    source?: string;
+    schema?: DeclaredSchema<SchemaDef> | string;
+    description?: string;
+    options?: Readonly<Record<string, string>>;
+};
 
 // @public
 export function csc(col: ColumnOrName): EBuilder;
@@ -1827,6 +1912,15 @@ export function nvl2(col1: ColumnOrName, col2: ColumnOrName, col3: ColumnOrName)
 // @public
 export function octet_length(col: ColumnOrName): EBuilder;
 
+// @public
+export type OperationState = "UNSPECIFIED" | "UNKNOWN" | "RUNNING" | "TERMINATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+// @public (undocumented)
+export type OperationStatus = {
+    operationId: string;
+    state: OperationState;
+};
+
 // @public (undocumented)
 export type OutputMode = "append" | "update" | "complete";
 
@@ -1901,6 +1995,11 @@ export function random(seed?: number | EBuilder): EBuilder;
 
 // @public
 export function randstr(length: number | EBuilder, seed?: number | EBuilder): EBuilder;
+
+// @public
+export type RangeRow = {
+    id: bigint;
+};
 
 // @public
 export function rank(): EBuilder;
@@ -2362,20 +2461,33 @@ export function spark_partition_id(): EBuilder;
 // @public
 export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
     constructor(session: SparkSession);
+    cacheTable(tableName: string, storageLevel?: string): Promise<void>;
+    clearCache(): Promise<void>;
+    createExternalTable(tableName: string, options?: CreateTableOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+    createTable(tableName: string, options?: CreateTableOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     currentCatalog(): Promise<string>;
     currentDatabase(): Promise<string>;
     databaseExists(dbName: string): Promise<boolean>;
     dropGlobalTempView(viewName: string): Promise<boolean>;
     dropTempView(viewName: string): Promise<boolean>;
     functionExists(functionName: string, dbName?: string): Promise<boolean>;
+    getDatabase(dbName: string): Promise<CatalogDatabase>;
+    getFunction(functionName: string, dbName?: string): Promise<CatalogFunction>;
+    getTable(tableName: string, dbName?: string): Promise<CatalogTable>;
+    isCached(tableName: string): Promise<boolean>;
     listCatalogs(pattern?: string): ReadChainedDataFrame<CatalogEntry, R, E, G>;
     listColumns(tableName: string, dbName?: string): ReadChainedDataFrame<CatalogColumn, R, E, G>;
     listDatabases(pattern?: string): ReadChainedDataFrame<CatalogDatabase, R, E, G>;
+    listFunctions(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogFunction, R, E, G>;
     listTables(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogTable, R, E, G>;
     plan(op: CatalogOperation): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+    recoverPartitions(tableName: string): Promise<void>;
+    refreshByPath(path: string): Promise<void>;
+    refreshTable(tableName: string): Promise<void>;
     setCurrentCatalog(catalogName: string): Promise<void>;
     setCurrentDatabase(dbName: string): Promise<void>;
     tableExists(tableName: string, dbName?: string): Promise<boolean>;
+    uncacheTable(tableName: string): Promise<void>;
 }
 
 // @public
@@ -2488,9 +2600,13 @@ export class SparkSession implements SessionAlgebra {
         userContext?: Partial<SparkUserContext>;
         connectionConfig?: SparkConnectionConfig;
     });
+    addArtifact(localPath: string, kind?: ArtifactKind): Promise<string>;
+    addArtifacts(...uploads: Array<string | ArtifactUpload>): Promise<string[]>;
     addTag(tag: string): void;
+    artifactStatus(...names: string[]): Promise<Record<string, boolean>>;
     // (undocumented)
     static builder(): SparkSessionBuilder;
+    cacheArtifact(data: Uint8Array | string): Promise<string>;
     get catalog(): SparkCatalog;
     clearTags(): void;
     cloneSession(): Promise<SparkSession>;
@@ -2503,12 +2619,18 @@ export class SparkSession implements SessionAlgebra {
     getSessionConfig(): SessionConfigMap;
     // (undocumented)
     getSessionId(): string;
+    getStatus(operationIds?: readonly string[]): Promise<OperationStatus[]>;
     getTags(): string[];
     // (undocumented)
     getUserContext(): SparkUserContext;
     interruptAll(): Promise<string[]>;
     interruptOperation(operationId: string): Promise<string[]>;
     interruptTag(tag: string): Promise<string[]>;
+    isArtifactCached(hash: string): Promise<boolean>;
+    newSession(): SparkSession;
+    range<R = unknown, E = unknown, G = unknown>(end: number | bigint): ReadChainedDataFrame<RangeRow, R, E, G>;
+    // (undocumented)
+    range<R = unknown, E = unknown, G = unknown>(start: number | bigint, end: number | bigint, step?: number | bigint, numPartitions?: number): ReadChainedDataFrame<RangeRow, R, E, G>;
     // (undocumented)
     get read(): DataFrameReaderTF;
     // (undocumented)
@@ -2523,6 +2645,7 @@ export class SparkSession implements SessionAlgebra {
     stop(): Promise<void>;
     // (undocumented)
     table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
+    get udf(): SparkUdfRegistration;
     version(): Promise<string>;
     // (undocumented)
     writeStream<R = unknown, E = unknown, G = unknown, CDF = unknown, CEX = unknown>(df: ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingMark<R>, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>>;
@@ -2573,6 +2696,12 @@ export type SparkTelemetryEvent = {
     timestamp: string;
     attributes: Record<string, unknown>;
 };
+
+// @public
+export class SparkUdfRegistration {
+    registerJavaFunction(name: string, className: string, returnType?: FieldSpec | string): Promise<void>;
+    registerJavaUDAF(name: string, className: string): Promise<void>;
+}
 
 // @public (undocumented)
 export type SparkUserContext = {

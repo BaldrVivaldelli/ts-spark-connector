@@ -462,9 +462,63 @@ await session.catalog.dropTempView("people_view");
 
 Scalar operations (`currentCatalog`, `currentDatabase`, `databaseExists`,
 `tableExists`, `functionExists`, `dropTempView`, `dropGlobalTempView`,
-`setCurrentCatalog`, `setCurrentDatabase`) execute immediately and unwrap
-their single result. Catalog plans print through the same inspection surface
-as any other DataFrame (`toProtoJSON`, Mermaid, client AST).
+`setCurrentCatalog`, `setCurrentDatabase`, `isCached`) execute immediately and
+unwrap their single result; `getDatabase`, `getTable` and `getFunction` resolve
+to one typed row and reject when the object does not exist. `listFunctions`
+lists registered functions. Tables are created from data sources with
+`createTable(name, { path, source, schema, description, options })` (external
+when `path` is given) or `createExternalTable`, both returning the new table
+as a DataFrame; `cacheTable(name, storageLevel?)`, `uncacheTable`, `clearCache`,
+`refreshTable`, `refreshByPath` and `recoverPartitions` manage caches and
+metadata:
+
+```ts
+const people = session.catalog.createTable("people", {
+  path: "/data/people.tsv",
+  source: "csv",
+  schema: schema({ id: "int", name: "string" }),
+  options: { header: "true", delimiter: "\t" },
+});
+await people.show();
+await session.catalog.cacheTable("people", "MEMORY_ONLY");
+console.log(await session.catalog.isCached("people")); // true
+```
+
+Catalog plans print through the same inspection surface as any other
+DataFrame (`toProtoJSON`, Mermaid, client AST).
+
+## Sessions, artifacts and Java UDFs
+
+`session.range(end)` / `session.range(start, end, step?, numPartitions?)`
+builds Spark's `range` relation, typed as `{ id: bigint }`.
+`session.newSession()` returns an independent session with the same
+connection settings and user and no server round trip; unlike
+`cloneSession()` (Spark 4.1+), nothing is copied: temporary views and runtime
+configuration start empty.
+
+Local files are shipped to the server with `addArtifact(path, kind?)` and
+`addArtifacts(...uploads)`: a `.jar` joins the session's classpath, other
+files need `kind: "file"` or `"archive"`. Uploads stream through the
+`AddArtifacts` RPC (small files batched, large ones chunked, every chunk
+CRC-checked by the server) and resolve with the server-side names.
+`cacheArtifact(bytes)` stores a blob by its SHA-256 (PySpark's
+`cache_artifact`) and `isArtifactCached(hash)` checks it; those hashed blobs
+are the only artifacts Spark's `ArtifactStatus` reports on, so the raw
+`artifactStatus(...names)` answers `false` for jars and files. User-defined functions
+have to run on the server, so `session.udf.registerJavaFunction(name,
+className, returnType?)` and `registerJavaUDAF` register classes from an
+uploaded jar, after which SQL and `call(name, [...])` can use them:
+
+```ts
+await session.addArtifact("./build/udfs.jar");
+await session.udf.registerJavaFunction("shout", "io.example.Shout", "string");
+await session.sql("SELECT shout('hi') AS v").show(); // HI!
+```
+
+On Spark 4.2 and later, `session.getStatus(operationIds?)` reports the state
+of this session's operations (`RUNNING`, `SUCCEEDED`, `FAILED`, ...); pair it
+with `ExecutionOptions.operationId` to follow a query. Older servers reject
+it with `UnsupportedServerVersionError` before any RPC.
 
 ## Delta Lake and Iceberg
 
@@ -587,7 +641,7 @@ E2E suite passes in CI.
 Implemented and exposed in the public API:
 
 - Reads: CSV / JSON / Parquet / ORC / Avro
-- Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
+- Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation`, including decimal, array, map and struct columns; `session.range()`
 - Lakehouse formats against the bundled server: Delta Lake on every matrix version (reads, writes, time travel) and Iceberg on Spark 4.0/4.1 (Hadoop catalog and metadata tables)
 - Transformations: `select`, `selectExpr`, `filter`/`where` (expressions or SQL strings), `join`, `crossJoin`, `groupBy().agg()`, `sort`, `limit`, `offset`, `distinct`, `dropDuplicates`, `withColumn`, `withColumns`, `withColumnRenamed`, `withColumnsRenamed`, `toDF`, `alias`, `drop`, `unpivot` / `melt`, `transpose`, `sample`, `randomSplit`, `repartition` (by count or by columns), `repartitionByRange`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
 - Expressions: column methods (arithmetic, comparisons, `isin`, `between`, `like`/`rlike`, `cast`/`tryCast`, `getItem`/`getField`, `withField`/`dropFields`, ...), `expr()` SQL fragments, windows (`partitionBy`, `orderBy`, `rowsBetween`, `rangeBetween`) and the PySpark-style `functions` library: aggregate, window, string, date/time, math, array, map, JSON/CSV/XML, variant, URL, hash and higher-order functions with JS lambdas
@@ -595,7 +649,8 @@ Implemented and exposed in the public API:
 - Actions and introspection: `collect`, `toRows`, `show`, `count`, `first`, `head`, `take`, `tail`, `isEmpty`, `schema`, `columns`, `dtypes`, `printSchema` / `treeString`, `isLocal`, `isStreaming`, `inputFiles`, `sameSemantics`, `semanticHash`
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
 - SQL / temp views
-- Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables and columns, existence checks, and temp-view drops
+- Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables, columns and functions, `getDatabase`/`getTable`/`getFunction`, existence checks, temp-view drops, `createTable`/`createExternalTable`, cache management (`cacheTable`, `uncacheTable`, `isCached`, `clearCache`) and refreshes (`refreshTable`, `refreshByPath`, `recoverPartitions`)
+- Sessions: `newSession()`, `cloneSession()` (4.1+), `version()`, `getStatus()` (4.2+), artifact upload (`addArtifact`, `addArtifacts`, `artifactStatus`) and Java UDF registration (`session.udf`)
 - Batch writes plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
 - Table writes through `writeTo(table)` (DataFrameWriterV2: `create`, `replace`, `createOrReplace`, `append`, `overwrite(condition)`, `overwritePartitions`) and `mergeInto(table, condition)` (`MERGE INTO` with matched / not-matched / not-matched-by-source clauses)
 - `explain(...)`

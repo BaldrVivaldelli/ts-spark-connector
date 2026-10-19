@@ -14,8 +14,8 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | --- | --- | --- |
 | `SparkSession.builder` (remote, config, auth, TLS) | ✅ | `SparkSession.builder()`, `withAuth`, `enableTLS`, `withRetry`, `withRpcTimeout`, `withExecuteTimeout` |
 | `spark.sql`, `spark.table`, `spark.read`, `spark.readStream` | ✅ | |
-| `spark.createDataFrame` | ✅ | primitive column types; ⬜ decimal, array, map, struct (`LocalRelation` Arrow encoding) |
-| `spark.range` | ⬜ | `Relation.range` |
+| `spark.createDataFrame` | ✅ | primitive and complex column types (decimal, array, map, struct) over the `LocalRelation` Arrow encoding |
+| `spark.range` | ✅ | `Relation.range`, typed `{ id: bigint }` |
 | `spark.catalog` | ✅ | see Catalog below |
 | `spark.conf` | ✅ | `Config` RPC |
 | `spark.version` | ✅ | `session.version()` |
@@ -23,13 +23,13 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `addTag`, `removeTag`, `getTags`, `clearTags` | ✅ | |
 | `interruptAll`, `interruptTag`, `interruptOperation` | ✅ | plus per-call `ExecutionOptions.signal` |
 | `cloneSession` | ✅ | Spark 4.1+ |
-| `newSession` | ⬜ | a second `SparkSession` with the same connection config |
-| `addArtifact(s)` (jars, files) | ⬜ | `AddArtifacts` / `ArtifactStatus` RPCs, chunked upload |
-| `udf.registerJavaFunction` | ⬜ | `CommonInlineUserDefinedFunction.java_udf` + `register_function` |
+| `newSession` | ✅ | same connection config and user, no RPC |
+| `addArtifact(s)` (jars, files, archives), `cacheArtifact` / `isArtifactCached` | ✅ | `AddArtifacts` (batched / chunked, CRC-32 per chunk); `ArtifactStatus` reports only `cache/<hash>` blobs |
+| `udf.registerJavaFunction`, `udf.registerJavaUDAF` | ✅ | `CommonInlineUserDefinedFunction.java_udf` in a `register_function` command |
 | Python / pandas UDFs, `mapInPandas`, `applyInPandas` | ➖ | need a Python worker on the server |
 | `spark.streams` (StreamingQueryManager) | ⬜ | `streaming_query_manager_command` |
 | `spark.dataSource.register` | ➖ | Python data sources |
-| Operation status (`GetStatus`) | ⬜ | Spark 4.2+ `GetStatus` RPC |
+| Operation status (`session.getStatus`) | ✅ | Spark 4.2+ `GetStatus` RPC, gated on the server version |
 
 ## DataFrame transformations
 
@@ -105,10 +105,10 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | PySpark | Status | Notes / protocol |
 | --- | --- | --- |
 | current/set catalog and database, list catalogs/databases/tables/columns, exists checks, drop temp views | ✅ | |
-| `listFunctions`, `getTable`, `getDatabase`, `getFunction` | ⬜ | `Catalog` relation |
-| `createTable`, `createExternalTable` | ⬜ | `Catalog` relation |
-| `cacheTable`, `uncacheTable`, `isCached`, `clearCache` | ⬜ | `Catalog` relation |
-| `refreshTable`, `refreshByPath`, `recoverPartitions` | ⬜ | `Catalog` relation |
+| `listFunctions`, `getTable`, `getDatabase`, `getFunction` | ✅ | `Catalog` relation |
+| `createTable`, `createExternalTable` | ✅ | `Catalog` relation; schemas travel as unparsed DataType strings |
+| `cacheTable`, `uncacheTable`, `isCached`, `clearCache` | ✅ | `Catalog` relation |
+| `refreshTable`, `refreshByPath`, `recoverPartitions` | ✅ | `Catalog` relation |
 
 ## Streaming
 
