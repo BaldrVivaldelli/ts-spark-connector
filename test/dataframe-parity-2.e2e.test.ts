@@ -81,15 +81,37 @@ describe("grouping variants (E2E)", () => {
 });
 
 describe("partition-local sorting and deduplication (E2E)", () => {
-    it("sorts inside a single partition and drops duplicates within the watermark", async () => {
+    it("sorts inside a single partition", async () => {
         const rows = await sales().repartition(1).sortWithinPartitions(col("v").desc()).collect();
         expect(rows.map(row => row.v)).toEqual([3, 2, 1]);
-
-        const duplicated = sales().union(sales());
-        expect(await duplicated.count()).toBe(6n);
-        expect(await duplicated.dropDuplicatesWithinWatermark().count()).toBe(3n);
-        expect(await duplicated.dropDuplicatesWithinWatermark("k").count()).toBe(2n);
     });
+
+    it("drops duplicates within the watermark of a stream and refuses batch inputs", async () => {
+        // Spark only plans DeduplicateWithinWatermark for streams, and a row is
+        // emitted once the watermark passes its event time, hence the short delay.
+        await expect(sales().union(sales()).dropDuplicatesWithinWatermark().count())
+            .rejects.toThrow(/not supported with batch/);
+
+        const queryName = `parity2_dedup_${Date.now()}`;
+        const handle = await session.readStream("rate", { rowsPerSecond: "5", numPartitions: "1" })
+            .withWatermark(col("timestamp"), "1 second")
+            .dropDuplicatesWithinWatermark("value")
+            .writeStream()
+            .format("memory")
+            .outputMode("append")
+            .trigger({ processingTime: "500 milliseconds" })
+            .queryName(queryName)
+            .start();
+        expect(await handle.awaitTermination(6_000)).toBe(false);
+        await handle.stop();
+        expect(await handle.awaitTermination(30_000)).toBe(true);
+
+        const rows = await session.table(queryName).collect() as Array<{ value: bigint }>;
+        expect(rows.length).toBeGreaterThan(0);
+        // Every rate value is distinct, so deduplication keeps each one exactly once.
+        const values = rows.map(row => row.value).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+        expect(values).toEqual(values.map((_value, index) => BigInt(index)));
+    }, 120_000);
 });
 
 describe("column references (E2E)", () => {
