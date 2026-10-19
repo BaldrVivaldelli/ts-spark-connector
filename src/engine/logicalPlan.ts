@@ -83,6 +83,7 @@ export type Expression =
     | { type: "Logical"; op: "AND" | "OR"; left: Expression; right: Expression }
     | { type: "Alias"; input: Expression; alias: string }
     | { type: "UnresolvedFunction"; name: string; args: Expression[] }
+    | { type: "ExtractValue"; child: Expression; extraction: Expression }
     | { type: "SortKey"; input: Expression; direction: "asc" | "desc"; nulls?: "nullsFirst" | "nullsLast" }
     | { type: "UnresolvedStar" }
     | { type: "CaseWhen"; branches: Array<{ when: Expression; then: Expression }>; else?: Expression }

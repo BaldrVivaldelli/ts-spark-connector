@@ -381,14 +381,13 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: [input],
         }
     }),
+    // Spark has no `getfield` function; struct access is an extract value,
+    // exactly what PySpark's Column.getField sends.
     getField: (structExpr, fieldName) => ({
-        unresolved_function: {
-            function_name: "getfield",
-            arguments: [
-                structExpr,
-                {literal: {string: fieldName}}
-            ]
-        }
+        unresolved_extract_value: {
+            child: structExpr,
+            extraction: {literal: {string: fieldName}},
+        },
     }),
     map_keys: (mapExpr) => ({
         unresolved_function: {

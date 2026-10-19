@@ -62,10 +62,10 @@ describe("complete protobuf read compiler", () => {
             "unresolved_function.function_name",
             "posexplode",
         );
-        expect(ProtoExprAlg.getField(column, "nested")).toHaveProperty(
-            "unresolved_function.function_name",
-            "getfield",
-        );
+        // Spark registers no `getfield`; a struct field is an extract value.
+        expect(ProtoExprAlg.getField(column, "nested")).toEqual({
+            unresolved_extract_value: { child: column, extraction: { literal: { string: "nested" } } },
+        });
         expect(ProtoExprAlg.map_keys(column)).toHaveProperty(
             "unresolved_function.function_name",
             "map_keys",

@@ -65,12 +65,9 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         args: [input],
     }),
     getField: (input, field) => ({
-        type: "UnresolvedFunction",
-        name: "getfield",
-        args: [
-            input,
-            { type: "Literal", value: field },
-        ],
+        type: "ExtractValue",
+        child: input,
+        extraction: { type: "Literal", value: field },
     }),
     map_keys: (input) => ({
         type: "UnresolvedFunction",
