@@ -73,6 +73,25 @@ The E2E matrix currently covers Spark Connect 4.0.0, 4.0.4, 4.1.3 and 4.2.0
 over TLS. Other versions are not claimed as supported until their full behavior
 suite is green.
 
+## Maintainer access to npm
+
+npm only issues granular access tokens now (90 days at most, scoped to
+packages and permissions). Keep yours out of `~/.npmrc` and out of `.env`
+files: `scripts/npm-auth.mjs` stores it in the OS keyring, the same Secret
+Service `gh` uses, and runs npm with it only when asked.
+
+```bash
+node scripts/npm-auth.mjs login --expires 2026-12-31   # paste the token; it is verified with npm whoami
+node scripts/npm-auth.mjs status                        # user, validity and days left
+node scripts/npm-auth.mjs run dist-tag ls ts-spark-connector
+node scripts/npm-auth.mjs ci-secret                     # copies it into the NPM_TOKEN Actions secret
+node scripts/npm-auth.mjs logout
+```
+
+Create the token on npmjs.com with the smallest scope the task needs
+(read-only unless you publish). Releases from CI should move to npm trusted
+publishing (OIDC) rather than depend on a token at all.
+
 ## Pull Requests
 
 - Create a branch from `main` and open a PR
