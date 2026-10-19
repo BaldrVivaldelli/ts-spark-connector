@@ -9,3 +9,5 @@ example_data/dest
 *.log
 *.tsbuildinfo
 docs-site
+.env
+.env.*
