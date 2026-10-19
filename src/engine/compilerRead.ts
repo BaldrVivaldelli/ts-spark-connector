@@ -185,8 +185,12 @@ function protoLiteral(value: LiteralValue): ProtoExpr {
  * literal is rejected) and fractional numbers as doubles.
  */
 function naFillLiteral(value: LiteralValue): ProtoMessage {
-    if (typeof value === "number" && Number.isInteger(value)) {
-        return protoLiteral(BigInt(value)).literal as ProtoMessage;
+    // Integers that fit a long fill integral columns; anything larger is a
+    // double, as PySpark sends a float, instead of failing lazily at execution.
+    if (typeof value === "number") {
+        return Number.isSafeInteger(value)
+            ? protoLiteral(BigInt(value)).literal as ProtoMessage
+            : { double: value };
     }
     return protoLiteral(value).literal as ProtoMessage;
 }

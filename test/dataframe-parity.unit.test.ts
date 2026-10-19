@@ -500,3 +500,38 @@ describe("plan inspection of the new relations", () => {
         expect(stats).toContain("freqItems(a;support=0.5)");
     });
 });
+
+describe("na/stat review follow-ups", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("fills with a double when an integer does not fit a long, and rejects out-of-range bigints eagerly", () => {
+        expect(proto(people().fillna(1e19, ["score"])).fill_na).toMatchObject({ values: [{ double: 1e19 }] });
+        expect(proto(people().fillna(5, ["age"])).fill_na).toMatchObject({ values: [{ long: "5" }] });
+        expect(() => people().fillna(2n ** 64n, ["id"])).toThrow(/int64/);
+    });
+
+    it("refuses to replace null and explains string object keys", () => {
+        expect(() => people().replace(null, 0)).toThrow(/cannot replace null/);
+        expect(() => lax().na.replace(new Map([[null, "x"]]))).toThrow(/cannot replace null/);
+        expect(() => people().replace([1, null], 0)).toThrow(/cannot replace null/);
+        expect(proto(people().replace(1, null)).replace.replacements).toHaveLength(1);
+        expect(() => lax().replace({ 10: 20 })).toThrow(/keys are always strings; use a Map/);
+        expect(proto(lax().replace(new Map([[10, 20]]))).replace.replacements).toEqual([
+            { old_value: { double: 10 }, new_value: { double: 20 } },
+        ]);
+    });
+
+    it("rejects object strata for a declared non-string column and accepts them for strings", () => {
+        expect(() => people().sampleBy("age", { 30: 0.5 })).toThrow(/must be given as a Map/);
+        expect(proto(people().sampleBy("age", new Map([[30, 0.5]]))).sample_by).toMatchObject({
+            fractions: [{ stratum: { integer: 30 }, fraction: 0.5 }],
+        });
+        expect(proto(people().sampleBy("name", { ana: 1 })).sample_by).toMatchObject({
+            fractions: [{ stratum: { string: "ana" }, fraction: 1 }],
+        });
+        // Without a declared schema the client cannot tell and trusts the caller.
+        expect(proto(lax().sampleBy("age", { 30: 0.5 })).sample_by).toMatchObject({
+            fractions: [{ stratum: { string: "30" }, fraction: 0.5 }],
+        });
+    });
+});

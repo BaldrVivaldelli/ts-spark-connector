@@ -17,6 +17,9 @@ export function columnList(label: string, subset: string | readonly string[] | u
     return columns;
 }
 
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 function assertFillValue(label: string, value: NAFillValue): void {
     const kind = typeof value;
     if (kind !== "string" && kind !== "number" && kind !== "boolean" && kind !== "bigint") {
@@ -24,6 +27,9 @@ function assertFillValue(label: string, value: NAFillValue): void {
     }
     if (kind === "number" && !Number.isFinite(value)) {
         throw new RangeError(`${label} must be a finite number.`);
+    }
+    if (kind === "bigint" && ((value as bigint) < INT64_MIN || (value as bigint) > INT64_MAX)) {
+        throw new RangeError(`${label} is outside Spark's signed int64 range.`);
     }
 }
 
@@ -125,8 +131,18 @@ export function replaceSpec(args: readonly unknown[]): { columns: string[]; repl
         subset = third;
     }
 
+    if (pairs.some(([from]) => from === null)) {
+        // Spark picks the replacement column type from the replaced value, so a
+        // null there fails at execution with a bare MatchError.
+        throw new TypeError("replace() cannot replace null values; use fillna() instead.");
+    }
     const kinds = new Set(pairs.flat().map(replaceKind).filter(kind => kind !== undefined));
     if (kinds.size > 1) {
+        if (!(first instanceof Map) && isReplaceMapping(first)) {
+            throw new TypeError(
+                "replace() mapping keys are always strings; use a Map to replace numeric or boolean values."
+            );
+        }
         throw new TypeError(`replace() cannot mix ${[...kinds].join(" and ")} values.`);
     }
     return {

@@ -38,7 +38,7 @@ const kept = people
   .replace("n/a", null, "name")
   .alias("p")
   .offset(1)
-  .sampleBy("age", { a: 0.5 })
+  .sampleBy("age", new Map([[30, 0.5]]))
   .repartition(4, "id")
   .repartitionByRange(col("age").desc());
 type _Kept = Expect<Equal<SchemaOf<typeof kept>, PeopleRow>>;

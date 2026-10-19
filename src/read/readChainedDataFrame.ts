@@ -1234,6 +1234,16 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         seed?: number,
     ): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
         if (typeof col === "string") assertNonEmptyString("sampleBy() column", col);
+        if (!(fractions instanceof Map) && typeof col === "string") {
+            // Object keys are strings, and Spark matches strata by value and
+            // type, so a numeric column would silently sample nothing.
+            const spec = this.runtimeSchema?.[col];
+            if (spec !== undefined && spec !== "string" && spec !== "string?") {
+                throw new TypeError(
+                    `sampleBy() strata for the non-string column ${JSON.stringify(col)} must be given as a Map.`
+                );
+            }
+        }
         const strata = sampleFractions(fractions);
         assertOptionalSeed("sampleBy()", seed);
         const resolvedSeed = seed ?? freshSparkSeed();
