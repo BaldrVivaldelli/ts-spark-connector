@@ -193,3 +193,20 @@ describe("MergeIntoWriter", () => {
         expect(() => writer.whenNotMatchedBySource().update({ a: "x" as never })).toThrow(/wrap constants in lit/);
     });
 });
+
+describe("DataFrameWriterV2 partitioning", () => {
+    it("replaces earlier partitionedBy and clusterBy lists like PySpark", () => {
+        const command = source()
+            .writeTo("catalog.target")
+            .partitionedBy("a")
+            .clusterBy("c")
+            .partitionedBy("b")
+            .clusterBy("d")
+            .buildCommand("create") as { write_operation_v2: ProtoObject };
+        const operation = command.write_operation_v2;
+        expect(operation.partitioning_columns).toEqual([
+            { unresolved_attribute: { unparsed_identifier: "b" } },
+        ]);
+        expect(operation.clustering_columns).toEqual(["d"]);
+    });
+});

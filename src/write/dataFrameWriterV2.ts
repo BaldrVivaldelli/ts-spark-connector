@@ -121,6 +121,7 @@ export class DataFrameWriterV2 {
     /**
      * Partitions a created or replaced table by columns or partition
      * transforms (`call("years", [col("ts")])`, `call("bucket", [lit(4), col("id")])`).
+     * Like PySpark, a later call replaces the earlier list.
      */
     partitionedBy(...cols: Array<string | EBuilder>): DataFrameWriterV2 {
         if (cols.length === 0) throw new TypeError("partitionedBy() requires at least one column.");
@@ -130,14 +131,14 @@ export class DataFrameWriterV2 {
                 throw new TypeError("partitionedBy() columns must be names or column expressions.");
             }
         }
-        return this.with({ partitioning: [...this.spec.partitioning, ...cols] });
+        return this.with({ partitioning: [...cols] });
     }
 
-    /** Clusters a created or replaced table by columns. */
+    /** Clusters a created or replaced table by columns; a later call replaces the list. */
     clusterBy(...cols: string[]): DataFrameWriterV2 {
         if (cols.length === 0) throw new TypeError("clusterBy() requires at least one column.");
         for (const column of cols) requireNonEmpty(column, "clusterBy() column");
-        return this.with({ clustering: [...this.spec.clustering, ...cols] });
+        return this.with({ clustering: [...cols] });
     }
 
     /** Creates the table; fails if it already exists. */
