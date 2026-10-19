@@ -166,8 +166,9 @@ function resolve<S extends SchemaShape, E>(ref: ColRef<S, E>, EX: ExprAlg<E>): E
  * - `sum`, `avg`, `min`, `max` son nullables: pueden ser null sobre grupos
  *   vacíos o de entradas todo-null.
  *
- * COUNT/COUNT DISTINCT se modelan como `bigint`, acorde al BIGINT de Spark. Se
- * usa la función canónica `count_distinct`, no `count(col)`.
+ * COUNT/COUNT DISTINCT se modelan como `bigint`, acorde al BIGINT de Spark.
+ * COUNT DISTINCT es `count` con `is_distinct`: Spark no registra ninguna
+ * función `count_distinct`.
  * @public
  */
 export type AggFactory<S extends SchemaShape, E> = {
@@ -208,7 +209,7 @@ export function makeAggFactory<S extends SchemaShape, E>(): AggFactory<S, E> {
         count: () => new PendingAggregation<bigint, E>(EX => EX.call("count", [EX.lit(1)])),
         countDistinct: ref =>
             new PendingAggregation<bigint, E>(EX =>
-                EX.call("count_distinct", [resolve(ref, EX)])
+                EX.callDistinct("count", [resolve(ref, EX)])
             ),
         // Agregaciones nullables sobre grupos vacíos / todo-null.
         // INT widens to BIGINT, while FLOAT/DOUBLE remain JS number. Since the

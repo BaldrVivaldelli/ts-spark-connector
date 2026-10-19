@@ -183,11 +183,11 @@ describe("Plan-assertion: agregaciones tipadas vs call(...) no tipado", () => {
         sameProto(agg.count().as("n"), call("count", [lit(1)]));
     });
 
-    it("countDistinct produce el mismo proto", () => {
-        sameProto(
-            agg.countDistinct("amount").as("d"),
-            call("count_distinct", [col("amount")])
-        );
+    it("countDistinct produce count(DISTINCT ...)", () => {
+        // Spark registers no `count_distinct`: it is count with is_distinct.
+        sameProto(agg.countDistinct("amount").as("d"), {
+            build: ex => ex.callDistinct("count", [ex.col("amount")]),
+        });
     });
 
     it("sum produce el mismo proto", () => {
