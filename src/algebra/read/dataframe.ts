@@ -5,6 +5,7 @@ import {
     HintCap,
     NullHandlingCap,
     OffsetCap,
+    ParityCap,
     RepartitionByExpressionCap,
     RepartitionCap,
     ReshapeCap,
@@ -29,7 +30,8 @@ export type DFBatchCaps<R, E, G> =
     & StatCap<R, E>
     & ReshapeCap<R, E>
     & OffsetCap<R>
-    & RepartitionByExpressionCap<R, E>;
+    & RepartitionByExpressionCap<R, E>
+    & ParityCap<R, E>;
 
 // DFAlg abierto: le podés inyectar categorías nuevas sin tocar este archivo
 /** @internal */

@@ -1,4 +1,5 @@
-import { JoinHintName } from "../../engine/sparkConnectEnums";
+import { JoinHintName, JoinTypeInput } from "../../engine/sparkConnectEnums";
+import type { SortOrder } from "../../types";
 import type { LiteralValue } from "./expressions";
 
 // Gestión de cache/persist
@@ -104,4 +105,39 @@ export interface OffsetCap<R> {
  */
 export interface RepartitionByExpressionCap<R, E> {
     repartitionByExpression(plan: R, partitionExprs: E[], numPartitions: number | undefined, range: boolean): R;
+}
+
+/** Where an as-of join looks for the matching row. @public */
+export type AsOfDirection = "backward" | "forward" | "nearest";
+
+/** @internal `asOfJoin` parameters, mirroring Spark's `AsOfJoin` relation. */
+export type AsOfJoinSpec<E> = {
+    leftAsOf: E;
+    rightAsOf: E;
+    /** Join condition; absent when `usingColumns` is given. */
+    on?: E;
+    usingColumns?: string[];
+    joinType: string;
+    tolerance?: E;
+    allowExactMatches: boolean;
+    direction: AsOfDirection;
+};
+
+/** @internal Relations added for PySpark parity (issue #92). */
+export interface ParityCap<R, E> {
+    /** Sorts every partition on its own (`Sort.is_global = false`). */
+    sortWithinPartitions(plan: R, orders: SortOrder<E>[]): R;
+    /** `dropDuplicates` that also drops late duplicates within the watermark. */
+    dropDuplicatesWithinWatermark(plan: R, cols?: E[]): R;
+    /** `right` may reference columns of `left` (`LateralJoin`). */
+    lateralJoin(left: R, right: R, on: E | undefined, joinType: JoinTypeInput): R;
+    asOfJoin(left: R, right: R, spec: AsOfJoinSpec<E>): R;
+    /** `CollectMetrics`: named metrics evaluated over the rows the plan produces. */
+    observe(plan: R, name: string, metrics: E[]): R;
+    /** A relation checkpointed on the server (`CachedRemoteRelation`). */
+    cachedRemoteRelation(relationId: string): R;
+    /** Reconciles the rows to a DDL schema (`ToSchema`). */
+    toSchema(plan: R, ddl: string): R;
+    /** Re-emits `column` as `name` with JSON column metadata. */
+    withMetadata(plan: R, name: string, column: E, metadata: string): R;
 }

@@ -13,6 +13,7 @@ import type {ResolvedExecution} from "../client/executionOptions";
 import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
 import {CastEvalMode, DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
+import type {GroupingSpec} from "../algebra/read/df-core";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
 import {toProtoStorageLevel} from "../client/storageLevel";
 
@@ -356,6 +357,19 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     extractValue: (child, extraction) => ({
         unresolved_extract_value: {child, extraction},
     }),
+    colRegex: (regex, planId) => ({
+        unresolved_regex: {
+            col_name: regex,
+            ...(planId === undefined ? {} : { plan_id: planId }),
+        },
+    }),
+    metadataCol: (name, planId) => ({
+        unresolved_attribute: {
+            unparsed_identifier: name,
+            ...(planId === undefined ? {} : { plan_id: planId }),
+            is_metadata_column: true,
+        },
+    }),
     sortKey: (input, direction, nulls) => ({
         // No es expresión ejecutable; el DFAlg.orderBy lo "desenvuelve".
         sort_key_marker: {input, direction, nulls},
@@ -493,7 +507,7 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
 };
 
 export type ProtoGroup = {
-    __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: GroupTypeInput };
+    __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: GroupTypeInput; spec?: GroupingSpec<ProtoExpr> };
 };
 
 function protoSortedRelation(
@@ -727,18 +741,35 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         },
     }),
 
-    groupBy: (input, cols) => ({__group__: {input, keys: cols}}),
+    groupBy: (input, cols, spec) => ({__group__: {input, keys: cols, ...(spec ? { spec } : {})}}),
 
-    agg: (g, aggregations, groupType) => ({
-        aggregate: {
-            input: g.__group__.input,
-            grouping_expressions: g.__group__.keys,
-            group_type: toProtoGroupType(groupType ?? "groupby"),
-            aggregate_expressions: Object.entries(aggregations).map(([alias, expr]) => ({
-                alias: {expr, name: [alias]},
-            })),
-        },
-    }),
+    agg: (g, aggregations, groupType) => {
+        const spec = g.__group__.spec;
+        return {
+            aggregate: {
+                input: g.__group__.input,
+                grouping_expressions: g.__group__.keys,
+                group_type: toProtoGroupType(groupType ?? spec?.groupType ?? "groupby"),
+                aggregate_expressions: Object.entries(aggregations).map(([alias, expr]) => ({
+                    alias: {expr, name: [alias]},
+                })),
+                ...(spec?.pivot
+                    ? {
+                        pivot: {
+                            col: spec.pivot.column,
+                            // Pivot.values holds Literal messages, not Expressions.
+                            ...(spec.pivot.values
+                                ? { values: spec.pivot.values.map(value => protoLiteral(value).literal as ProtoMessage) }
+                                : {}),
+                        },
+                    }
+                    : {}),
+                ...(spec?.groupingSets
+                    ? { grouping_sets: spec.groupingSets.map(set => ({ grouping_set: set })) }
+                    : {}),
+            },
+        };
+    },
 
     orderBy: protoSortedRelation,
 
@@ -969,6 +1000,44 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             partition_exprs: partitionExprs.map(expr => protoPartitionExpression(expr, range)),
             ...(numPartitions !== undefined ? { num_partitions: numPartitions } : {}),
         },
+    }),
+    sortWithinPartitions: (input, orders) => ({
+        sort: { ...(protoSortedRelation(input, orders).sort as ProtoMessage), is_global: false },
+    }),
+    dropDuplicatesWithinWatermark: (input, cols) => ({
+        deduplicate: {
+            ...(ProtoDFAlg.dropDuplicates(input, cols).deduplicate as ProtoMessage),
+            within_watermark: true,
+        },
+    }),
+    lateralJoin: (left, right, on, joinType) => ({
+        lateral_join: {
+            left,
+            right,
+            ...(on === undefined ? {} : { join_condition: on }),
+            join_type: toProtoJoinType(joinType),
+        },
+    }),
+    asOfJoin: (left, right, spec) => ({
+        as_of_join: {
+            left,
+            right,
+            left_as_of: spec.leftAsOf,
+            right_as_of: spec.rightAsOf,
+            ...(spec.on === undefined ? {} : { join_expr: spec.on }),
+            ...(spec.usingColumns === undefined ? {} : { using_columns: spec.usingColumns }),
+            join_type: spec.joinType,
+            ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
+            allow_exact_matches: spec.allowExactMatches,
+            direction: spec.direction,
+        },
+    }),
+    observe: (input, name, metrics) => ({ collect_metrics: { input, name, metrics } }),
+    cachedRemoteRelation: relationId => ({ cached_remote_relation: { relation_id: relationId } }),
+    // The server parses the DDL; the client never builds DataType messages.
+    toSchema: (input, ddl) => ({ to_schema: { input, schema: { unparsed: { data_type_string: ddl } } } }),
+    withMetadata: (input, name, column, metadata) => ({
+        with_columns: { input, aliases: [{ expr: column, name: [name], metadata }] },
     }),
     withWatermark(input, eventTimeCol, delay) {
         const eventTimeColumn = protoExprToColumnName(eventTimeCol);

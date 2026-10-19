@@ -35,3 +35,35 @@ export function toProtoStorageLevel(level: string): StorageLevelProto {
     }
     return storage;
 }
+
+/** A Spark storage level, as `df.storageLevel()` reports it. @public */
+export type StorageLevel = {
+    useDisk: boolean;
+    useMemory: boolean;
+    useOffHeap: boolean;
+    deserialized: boolean;
+    replication: number;
+    /** Spark's name for this combination (`MEMORY_AND_DISK`, `NONE`, ...), when it has one. */
+    name?: string;
+};
+
+/** @internal Decodes the StorageLevel message of an AnalyzePlan response. */
+export function storageLevelFromProto(value: unknown): StorageLevel {
+    const proto = (value ?? {}) as Partial<Record<keyof StorageLevelProto, unknown>>;
+    const level: StorageLevel = {
+        useDisk: proto.use_disk === true,
+        useMemory: proto.use_memory === true,
+        useOffHeap: proto.use_off_heap === true,
+        deserialized: proto.deserialized === true,
+        replication: Number(proto.replication ?? 1),
+    };
+    const name = STORAGE_LEVEL_NAMES.find(key => {
+        const candidate = STORAGE_LEVELS[key]!;
+        return candidate.use_disk === level.useDisk
+            && candidate.use_memory === level.useMemory
+            && candidate.use_off_heap === level.useOffHeap
+            && candidate.deserialized === level.deserialized
+            && candidate.replication === level.replication;
+    });
+    return name === undefined ? level : { ...level, name };
+}

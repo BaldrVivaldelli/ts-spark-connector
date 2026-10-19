@@ -1,6 +1,20 @@
 import { SortOrder } from "../../types";
 import { CatalogOperation } from "../../types/catalog";
 import { GroupTypeInput, JoinTypeInput } from "../../engine/sparkConnectEnums";
+import type { LiteralValue } from "./expressions";
+
+/**
+ * Grouping beyond a plain `groupBy`: `rollup`, `cube`, `pivot` (with or
+ * without explicit values; without them Spark first collects the distinct
+ * values) and `groupingSets`. `agg`'s own `groupType` argument wins over
+ * `groupType` here when both are given.
+ * @internal
+ */
+export type GroupingSpec<E> = {
+    groupType: GroupTypeInput;
+    pivot?: { column: E; values?: LiteralValue[] };
+    groupingSets?: E[][];
+};
 
 /** @internal */
 export interface DFCore<R, E, G = unknown> {
@@ -37,7 +51,7 @@ export interface DFCore<R, E, G = unknown> {
 
     join(left: R, right: R, on: E, joinType?: JoinTypeInput): R;
 
-    groupBy(plan: R, cols: E[]): G;
+    groupBy(plan: R, cols: E[], spec?: GroupingSpec<E>): G;
     agg(group: G, aggregations: Record<string, E>, groupType?: GroupTypeInput): R;
 
     orderBy(plan: R, orders: SortOrder<E>[]): R;

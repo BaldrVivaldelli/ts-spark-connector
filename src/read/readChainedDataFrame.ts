@@ -12,6 +12,7 @@ import type { ExecutionOptions } from "../client/executionOptions";
 import {
     DEFAULT_JOIN_TYPE,
     ExplainModeInput,
+    GroupTypeInput,
     JoinHintName,
     JoinTypeInput,
 } from "../engine/sparkConnectEnums";
@@ -22,6 +23,7 @@ import { TraceDFAlg, TraceExprAlg, TraceNode } from "../trace/trace";
 import { NullsOrder, SortOrder } from "../types";
 import {DFAlg, DFProgram, EventTimeWatermarkCap, ExprAlg, LiteralValue, StreamingMark, StreamingReadCap} from "../algebra/read";
 import {
+    AsOfDirection,
     CacheCap,
     HintCap,
     RepartitionByExpressionCap,
@@ -29,7 +31,8 @@ import {
     SamplingCap,
     SqlCap,
 } from "../algebra/read/batch-capabilities";
-import type { AnalyzeField } from "../client/sparkConnectExecutor";
+import { type AnalyzeField } from "../client/sparkConnectExecutor";
+import { storageLevelFromProto, toProtoStorageLevel, type StorageLevel } from "../client/storageLevel";
 import type { EBuilder as ColumnExpression, SortKeyBuilder } from "../engine/column";
 import { DataFrameWriterV2 } from "../write/dataFrameWriterV2";
 import { MergeIntoWriter } from "../write/mergeIntoWriter";
@@ -41,6 +44,7 @@ import {
     NAReplaceValue,
 } from "./dataFrameFunctions";
 import { SparkStructType, sparkStructType } from "./dataTypes";
+import { Observation } from "./observation";
 import {
     assertQuantileArguments,
     assertSupport,
@@ -60,7 +64,7 @@ import {
     UnknownSchema,
     UsableColumnKey,
 } from "../schema/schema-model";
-import type { SchemaDef } from "../schema/schema";
+import { DeclaredSchema, type InferSchema, type SchemaDef } from "../schema/schema";
 import {
     Aggregated,
     Dropped,
@@ -328,6 +332,49 @@ function assertPartitionInputs(label: string, inputs: readonly unknown[]): void 
             throw new TypeError(`${label} columns must be names, column expressions or sort keys.`);
         }
     }
+}
+
+/**
+ * Options of `asOfJoin`; the names follow PySpark's `_joinAsOf` and Scala's
+ * `joinAsOf`.
+ * @public
+ */
+export type AsOfJoinOptions = {
+    /**
+     * Largest distance between the as-of values that still matches, as a
+     * number or an expression such as `expr("INTERVAL 1 HOUR")`.
+     */
+    tolerance?: ColumnExpression | number | bigint;
+    /** Whether an equal as-of value counts as a match (default `true`). */
+    allowExactMatches?: boolean;
+    /** `backward` (default), `forward` or `nearest`. */
+    direction?: AsOfDirection;
+};
+
+/**
+ * Grouping variant carried from `rollup` / `cube` / `pivot` / `groupingSets`
+ * to `agg`, with the inputs still unbuilt.
+ * @internal
+ */
+export type GroupingInput = {
+    groupType: GroupTypeInput;
+    pivot?: { column: string | EBuilder; values?: LiteralValue[] };
+    groupingSets?: Array<Array<string | EBuilder>>;
+};
+
+const LATERAL_JOIN_TYPES = new Set(["INNER", "CROSS", "LEFT", "LEFT_OUTER", "LEFTOUTER"]);
+const AS_OF_DIRECTIONS = new Set<AsOfDirection>(["backward", "forward", "nearest"]);
+
+/** The relation id a CheckpointCommand reports, if any. */
+function checkpointRelationId(responses: readonly unknown[]): string | undefined {
+    for (const response of responses) {
+        const result = (response as {
+            checkpoint_command_result?: { relation?: { relation_id?: unknown } };
+        } | null)?.checkpoint_command_result;
+        const relationId = result?.relation?.relation_id;
+        if (typeof relationId === "string" && relationId) return relationId;
+    }
+    return undefined;
 }
 
 export const col = (name: string): EBuilder => ({ build: EX => EX.col(name) });
@@ -1408,6 +1455,241 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     }
 
     // ---------------------------------------------------------------------
+    // Grouping variants, partition-local sorting, watermarks, joins, metrics
+    // ---------------------------------------------------------------------
+
+    /**
+     * Groups by every prefix of `by` (subtotals and a grand total). The key
+     * columns become nullable, so the result is untyped.
+     */
+    rollup(...by: Array<ColumnName<S> | EBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX> {
+        return this.grouped("rollup()", by, { groupType: "rollup" });
+    }
+
+    /** Groups by every combination of `by`. The result is untyped, like `rollup`. */
+    cube(...by: Array<ColumnName<S> | EBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX> {
+        return this.grouped("cube()", by, { groupType: "cube" });
+    }
+
+    /**
+     * Groups by the given grouping sets (`GROUP BY GROUPING SETS`). `by` lists
+     * the columns the sets draw from, in output order.
+     */
+    groupingSets(
+        sets: ReadonlyArray<ReadonlyArray<ColumnName<S> | EBuilder>>,
+        ...by: Array<ColumnName<S> | EBuilder>
+    ): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX> {
+        if (!Array.isArray(sets) || sets.length === 0) {
+            throw new TypeError("groupingSets() requires at least one grouping set.");
+        }
+        for (const set of sets) {
+            if (!Array.isArray(set)) throw new TypeError("groupingSets() sets must be arrays of columns.");
+            for (const column of set) {
+                if (typeof column === "string") assertNonEmptyString("groupingSets() column", column);
+            }
+        }
+        return this.grouped("groupingSets()", by, {
+            groupType: "grouping_sets",
+            groupingSets: sets.map(set => [...set]),
+        });
+    }
+
+    private grouped(
+        label: string,
+        by: ReadonlyArray<string | EBuilder>,
+        spec: GroupingInput,
+    ): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX> {
+        if (by.every((column): column is string => typeof column === "string")) {
+            assertUniqueColumnNames(label, by);
+        }
+        return new GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>(
+            this as unknown as ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>,
+            by,
+            spec,
+        );
+    }
+
+    /** Sorts each partition on its own, without a global shuffle. */
+    sortWithinPartitions(
+        ...colsOrKeys: Array<ColumnName<S> | EBuilder | TypedOrderFactory<S, E> | ((EX: ExprAlg<any>) => SortOrder<any>)>
+    ): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        if (colsOrKeys.length === 0) throw new TypeError("sortWithinPartitions() requires at least one column.");
+        return this.chain((df, EX, DF) =>
+            DF.sortWithinPartitions(df, colsOrKeys.map(k => resolveOrderInput(k, EX)))
+        );
+    }
+
+    /**
+     * `dropDuplicates` for streaming DataFrames with a watermark: duplicates
+     * that arrive within the watermark delay are dropped as well.
+     */
+    dropDuplicatesWithinWatermark<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropDuplicatesWithinWatermark(...cols: EBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropDuplicatesWithinWatermark(...cols: (string | EBuilder)[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        return this.chain((df, EX, DF) =>
+            DF.dropDuplicatesWithinWatermark(
+                df,
+                cols.length === 0 ? undefined : cols.map(c => (typeof c === "string" ? EX.col(c) : c.build(EX))),
+            )
+        );
+    }
+
+    /**
+     * Every column whose name matches `regex`, for `select`. Spark expects the
+     * regex between backticks: `` df.colRegex("`(id|name)`") ``.
+     */
+    colRegex(regex: string): EBuilder {
+        assertNonEmptyString("colRegex() regex", regex);
+        return { build: EX => EX.colRegex(regex) };
+    }
+
+    /** A metadata column of a file source, such as `_metadata`. */
+    metadataColumn(name: string): EBuilder {
+        assertNonEmptyString("metadataColumn() name", name);
+        return { build: EX => EX.metadataCol(name) };
+    }
+
+    /**
+     * Lateral join: `right` may reference this DataFrame's columns. Spark
+     * supports inner, cross and left outer lateral joins.
+     */
+    lateralJoin<RS, RCDF = unknown, RCEX = unknown>(
+        right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>,
+        on?: EBuilder,
+        how: JoinTypeInput = "INNER",
+    ): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX> {
+        if (!LATERAL_JOIN_TYPES.has(String(how).toUpperCase())) {
+            throw new RangeError(`lateralJoin() supports inner, cross and left outer joins; received ${String(how)}.`);
+        }
+        return this.chainAs<UnknownSchema, RCDF, RCEX>(
+            (df, EX, DF) => DF.lateralJoin(
+                df,
+                right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX),
+                on?.build(EX),
+                how,
+            ),
+            () => undefined,
+            this.streaming || right.streaming,
+        );
+    }
+
+    /**
+     * As-of join (PySpark `_joinAsOf`, Scala `joinAsOf`): every left row joins
+     * the right row whose `rightAsOfColumn` is closest to its
+     * `leftAsOfColumn`, looking `backward` by default. `on` is a column name,
+     * a list of names shared by both sides, or a join expression.
+     */
+    asOfJoin<RS, RCDF = unknown, RCEX = unknown>(
+        right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>,
+        leftAsOfColumn: string | EBuilder,
+        rightAsOfColumn: string | EBuilder,
+        on?: string | readonly string[] | EBuilder,
+        how = "inner",
+        options: AsOfJoinOptions = {},
+    ): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX> {
+        if (typeof leftAsOfColumn === "string") assertNonEmptyString("asOfJoin() leftAsOfColumn", leftAsOfColumn);
+        if (typeof rightAsOfColumn === "string") assertNonEmptyString("asOfJoin() rightAsOfColumn", rightAsOfColumn);
+        assertNonEmptyString("asOfJoin() how", how);
+        const direction = options.direction ?? "backward";
+        if (!AS_OF_DIRECTIONS.has(direction)) {
+            throw new RangeError(`asOfJoin() direction must be backward, forward or nearest; received ${String(direction)}.`);
+        }
+        const allowExactMatches = options.allowExactMatches ?? true;
+        if (typeof allowExactMatches !== "boolean") {
+            throw new TypeError("asOfJoin() allowExactMatches must be a boolean.");
+        }
+        const usingColumns = typeof on === "string"
+            ? [on]
+            : Array.isArray(on) ? [...(on as readonly string[])] : undefined;
+        if (usingColumns !== undefined) {
+            if (usingColumns.length === 0) throw new TypeError("asOfJoin() on must name at least one column.");
+            for (const column of usingColumns) assertNonEmptyString("asOfJoin() on column", column);
+        }
+        const tolerance = options.tolerance;
+        if (typeof tolerance === "number" && !Number.isFinite(tolerance)) {
+            throw new RangeError("asOfJoin() tolerance must be finite.");
+        }
+        return this.chainAs<UnknownSchema, RCDF, RCEX>(
+            (df, EX, DF) => {
+                const toExpr = (column: string | EBuilder) =>
+                    typeof column === "string" ? EX.col(column) : column.build(EX);
+                return DF.asOfJoin(df, right.getProgram()(DF as DFAlg<R, E, G, RCDF>, EX as ExprAlg<E> & RCEX), {
+                    leftAsOf: toExpr(leftAsOfColumn),
+                    rightAsOf: toExpr(rightAsOfColumn),
+                    ...(usingColumns !== undefined
+                        ? { usingColumns }
+                        : on === undefined ? {} : { on: (on as EBuilder).build(EX) }),
+                    joinType: how,
+                    ...(tolerance === undefined
+                        ? {}
+                        : { tolerance: typeof tolerance === "object" ? tolerance.build(EX) : EX.lit(tolerance) }),
+                    allowExactMatches,
+                    direction,
+                });
+            },
+            () => undefined,
+            this.streaming || right.streaming,
+        );
+    }
+
+    /**
+     * Collects named aggregate metrics while an action runs, without a second
+     * pass over the data. With an `Observation`, the values are available
+     * from `observation.get()` after the action; with a plain name they only
+     * reach query listeners and the UI, as in PySpark.
+     */
+    observe(observation: Observation | string, ...metrics: EBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        if (metrics.length === 0) throw new TypeError("observe() requires at least one metric expression.");
+        const name = typeof observation === "string" ? observation : observation.name;
+        assertNonEmptyString("observe() name", name);
+        if (typeof observation !== "string") this.session.registerObservation(observation);
+        return this.chain((df, EX, DF) => DF.observe(df, name, metrics.map(metric => metric.build(EX))));
+    }
+
+    /**
+     * Reconciles every row to `schema`: columns are reordered and cast,
+     * missing nullable columns are filled with null. A declared schema types
+     * the result; a DDL string such as `"id INT, name STRING"` leaves it untyped.
+     */
+    to<D extends SchemaDef>(declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G, CDF, CEX>;
+    to(ddl: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    to(target: DeclaredSchema<SchemaDef> | string): ReadChainedDataFrame<any, R, E, G, CDF, CEX> {
+        if (typeof target === "string") {
+            assertNonEmptyString("to() schema", target);
+            return this.chainAs<UnknownSchema>((df, _EX, DF) => DF.toSchema(df, target), () => undefined);
+        }
+        if (!(target instanceof DeclaredSchema)) {
+            throw new TypeError("to() requires a DDL string or a schema declared with schema({...}).");
+        }
+        const ddl = target.toDDL();
+        return this.chainAs<any>((df, _EX, DF) => DF.toSchema(df, ddl), () => target.def);
+    }
+
+    /** Attaches column metadata (a JSON object) to `column`, keeping its values. */
+    withMetadata(column: ColumnName<S>, metadata: Readonly<Record<string, unknown>> | string): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        assertNonEmptyString("withMetadata() column", column);
+        const json = typeof metadata === "string" ? metadata : JSON.stringify(metadata);
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(json);
+        } catch {
+            throw new TypeError("withMetadata() metadata must be a JSON object.");
+        }
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new TypeError("withMetadata() metadata must be a JSON object.");
+        }
+        return this.chain((df, EX, DF) => DF.withMetadata(df, column, EX.col(column), json));
+    }
+
+    /** One `value` string column holding each row as a JSON document. */
+    toJSON(): ReadChainedDataFrame<{ value: string }, R, E, G, CDF, CEX> {
+        return this.chainAs<{ value: string }>(
+            (df, EX, DF) => DF.select(df, [EX.alias(EX.call("to_json", [EX.call("struct", [EX.star()])]), "value")]),
+            () => ({ value: "string" }),
+        );
+    }
+
+    // ---------------------------------------------------------------------
     // Actions
     // ---------------------------------------------------------------------
 
@@ -1511,6 +1793,93 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     /** Hash of the logical plan; equal for semantically equal plans. */
     async semanticHash(): Promise<number> {
         return Number((await this.analyze("semantic_hash")).result);
+    }
+
+    /** The storage level the plan is cached with (`NONE` when it is not). */
+    async storageLevel(): Promise<StorageLevel> {
+        const result = await this.analyzeWith("get_storage_level", root => ({ relation: root }));
+        return storageLevelFromProto(result.storage_level);
+    }
+
+    // ---------------------------------------------------------------------
+    // Checkpoints and views
+    // ---------------------------------------------------------------------
+
+    /**
+     * Materializes the plan on the server (a reliable checkpoint, written to
+     * the checkpoint directory) and returns a DataFrame that reads it back.
+     * Spark keeps the data until the session closes, which releases it.
+     */
+    checkpoint(eager = true): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>> {
+        return this.checkpointWith("checkpoint()", false, eager);
+    }
+
+    /**
+     * Like `checkpoint` but stored with the executors (`storageLevel`
+     * defaults to Spark's `MEMORY_AND_DISK`): faster and not fault tolerant.
+     */
+    localCheckpoint(eager = true, storageLevel?: string): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>> {
+        return this.checkpointWith("localCheckpoint()", true, eager, storageLevel);
+    }
+
+    private async checkpointWith(
+        label: string,
+        local: boolean,
+        eager: boolean,
+        storageLevel?: string,
+    ): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>> {
+        if (this.streaming) throw new Error(`${label} is not available on a streaming DataFrame.`);
+        if (typeof eager !== "boolean") throw new TypeError(`${label} eager must be a boolean.`);
+        const level = storageLevel === undefined ? undefined : toProtoStorageLevel(storageLevel);
+        const root = this.toProtoRelation();
+        const executor = await applyPendingAnalyzeActions(root, this.session);
+        const responses = await executor.runCommand({
+            checkpoint_command: {
+                relation: root,
+                local,
+                eager,
+                ...(level === undefined ? {} : { storage_level: level }),
+            },
+        });
+        const relationId = checkpointRelationId(responses);
+        if (relationId === undefined) {
+            throw new Error("Invalid CheckpointCommand response: missing the cached relation id.");
+        }
+        this.session.trackCachedRelation(relationId);
+        return new ReadChainedDataFrame<S, R, E, G, CDF, CEX>(
+            DF => DF.cachedRemoteRelation(relationId),
+            this.session,
+            false,
+            this.runtimeSchema,
+        );
+    }
+
+    /**
+     * `write()` for a DataFrame the `this:` guards above already proved to be
+     * batch; the cast keeps the nested `Exclude` out of the public signatures.
+     */
+    private batchWriter(): DataFrameWriterTF<R, E, G, WBatch, any, CEX, BatchWriterAlg<R>> {
+        return (this as unknown as ReadChainedDataFrame<S, R, E, G, any, CEX>).write();
+    }
+
+    /** Registers this DataFrame as a session temp view; fails if the name exists. */
+    createTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void> {
+        return this.batchWriter().createTempView(name);
+    }
+
+    /** Registers or replaces this DataFrame as a session temp view. */
+    createOrReplaceTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void> {
+        return this.batchWriter().createOrReplaceTempView(name);
+    }
+
+    /** Registers this DataFrame as `global_temp.<name>`, visible to every session; fails if it exists. */
+    createGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void> {
+        return this.batchWriter().createGlobalTempView(name);
+    }
+
+    /** Registers or replaces `global_temp.<name>`. */
+    createOrReplaceGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void> {
+        return this.batchWriter().createOrReplaceGlobalTempView(name);
     }
 
     // ---------------------------------------------------------------------
@@ -1636,7 +2005,31 @@ export class GroupedDataFrameTF<
     constructor(
         private readonly source: ReadChainedDataFrame<S, R, E, G, CDF, CEX>,
         private readonly grouping: ReadonlyArray<string | EBuilder>,
+        private readonly spec?: GroupingInput,
     ) {}
+
+    /**
+     * Pivots `column` into one output column per value. Without `values`
+     * Spark first runs a job to collect the distinct values; the result is
+     * untyped because its columns depend on the data.
+     */
+    pivot(
+        column: string | EBuilder,
+        values?: readonly LiteralValue[],
+    ): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX> {
+        if (this.spec !== undefined) {
+            throw new TypeError("pivot() applies to a plain groupBy(), not to rollup, cube or grouping sets.");
+        }
+        if (typeof column === "string") assertNonEmptyString("pivot() column", column);
+        if (values !== undefined && (!Array.isArray(values) || values.length === 0)) {
+            throw new TypeError("pivot() values must be a non-empty array when given.");
+        }
+        return new GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>(
+            this.source as unknown as ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>,
+            this.grouping,
+            { groupType: "pivot", pivot: { column, ...(values === undefined ? {} : { values: [...values] }) } },
+        );
+    }
 
     agg<const A extends readonly TypedAggregation<string, ColumnType, E>[]>(
         build: TypedAggBuilder<S, E, A>,
@@ -1657,7 +2050,25 @@ export class GroupedDataFrameTF<
             const keys = this.grouping.map(key =>
                 typeof key === "string" ? EX.col(key) : key.build(EX)
             );
-            const grouped = DF.groupBy(this.source.getProgram()(DF, EX), keys);
+            const toExpr = (column: string | EBuilder) =>
+                typeof column === "string" ? EX.col(column) : column.build(EX);
+            const spec = this.spec === undefined
+                ? undefined
+                : {
+                    groupType: this.spec.groupType,
+                    ...(this.spec.pivot === undefined
+                        ? {}
+                        : {
+                            pivot: {
+                                column: toExpr(this.spec.pivot.column),
+                                ...(this.spec.pivot.values === undefined ? {} : { values: this.spec.pivot.values }),
+                            },
+                        }),
+                    ...(this.spec.groupingSets === undefined
+                        ? {}
+                        : { groupingSets: this.spec.groupingSets.map(set => set.map(toExpr)) }),
+                };
+            const grouped = DF.groupBy(this.source.getProgram()(DF, EX), keys, spec);
 
             if (typeof input === "function") {
                 const built = (input as (
@@ -1680,7 +2091,7 @@ export class GroupedDataFrameTF<
                 const expressions = Object.fromEntries(
                     built.map(aggregation => [aggregation.alias, aggregation.build(EX)])
                 );
-                return DF.agg(grouped, expressions);
+                return DF.agg(grouped, expressions, spec?.groupType);
             }
 
             const expressions = Object.fromEntries(
@@ -1690,7 +2101,7 @@ export class GroupedDataFrameTF<
                     return [alias, EX.call(fn, [EX.col(arg)])];
                 })
             );
-            return DF.agg(grouped, expressions);
+            return DF.agg(grouped, expressions, spec?.groupType);
         };
 
         return new ReadChainedDataFrame(

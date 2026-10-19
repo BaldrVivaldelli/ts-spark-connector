@@ -39,6 +39,8 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         ...(value === undefined ? {} : { value }),
     }),
     extractValue: (child, extraction) => ({ type: "ExtractValue", child, extraction }),
+    colRegex: (regex, planId) => ({ type: "ColumnRegex", regex, ...(planId === undefined ? {} : { planId }) }),
+    metadataCol: (name, planId) => ({ type: "MetadataColumn", name, ...(planId === undefined ? {} : { planId }) }),
     sortKey: (input, direction, nulls) => ({ type: "SortKey", input, direction, nulls }),
     star: () => ({ type: "UnresolvedStar" }),
     caseWhen: (branches, elze) => ({ type: "CaseWhen", branches, else: elze }),
@@ -158,12 +160,21 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<L
         on,
         joinType: joinType.toUpperCase() as JoinTypeInput,
     }),
-    groupBy: (plan, cols) => ({ type: "GroupBy", input: plan, expressions: cols }),
+    groupBy: (plan, cols, spec) => ({
+        type: "GroupBy",
+        input: plan,
+        expressions: cols,
+        ...(spec === undefined ? {} : {
+            groupType: spec.groupType,
+            ...(spec.pivot === undefined ? {} : { pivot: spec.pivot }),
+            ...(spec.groupingSets === undefined ? {} : { groupingSets: spec.groupingSets }),
+        }),
+    }),
     agg: (group, aggregations, groupType?: GroupTypeInput) => ({
         type: "Aggregate",
         input: group,
         aggregations,
-        groupType,
+        groupType: groupType ?? group.groupType,
     }),
     orderBy: (plan, orders: SortOrder<Expression>[]) => ({
         type: "Sort",
@@ -322,6 +333,37 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<L
         ...(numPartitions !== undefined ? { numPartitions } : {}),
         range,
     }),
+    sortWithinPartitions: (plan, orders) => ({
+        type: "Sort",
+        input: plan,
+        orders: orders.map(o => o.expr.type === "SortKey"
+            ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
+            : { expr: o.expr, direction: "asc" as const }
+        ),
+        isGlobal: false,
+    }),
+    dropDuplicatesWithinWatermark: (plan, cols) => {
+        if (!cols || cols.length === 0) {
+            return { type: "Deduplicate", input: plan, withinWatermark: true };
+        }
+        const columnNames = exprsToColumnNames(cols);
+        if (!columnNames) {
+            throw new Error("dropDuplicatesWithinWatermark(...) currently only supports plain column references.");
+        }
+        return { type: "Deduplicate", input: plan, columnNames, withinWatermark: true };
+    },
+    lateralJoin: (left, right, on, joinType) => ({
+        type: "LateralJoin",
+        left,
+        right,
+        ...(on === undefined ? {} : { on }),
+        joinType: joinType.toUpperCase() as JoinTypeInput,
+    }),
+    asOfJoin: (left, right, spec) => ({ type: "AsOfJoin", left, right, spec }),
+    observe: (plan, name, metrics) => ({ type: "CollectMetrics", input: plan, name, metrics }),
+    cachedRemoteRelation: relationId => ({ type: "CachedRemoteRelation", relationId }),
+    toSchema: (plan, schema) => ({ type: "ToSchema", input: plan, schema }),
+    withMetadata: (plan, name, column, metadata) => ({ type: "WithMetadata", input: plan, name, column, metadata }),
     readStream: (format, options) => ({
         type: "Read",
         data_source: {

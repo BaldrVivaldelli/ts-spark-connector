@@ -50,7 +50,8 @@ export type AnalyzeField =
     | "is_streaming"
     | "input_files"
     | "same_semantics"
-    | "semantic_hash";
+    | "semantic_hash"
+    | "get_storage_level";
 
 type AnalyzeAction =
     | { kind: "persist"; relation: unknown; level: string }
@@ -83,6 +84,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
             sparkGrpcClient.executePlan(request, this.connectionConfigFor(execution))
         );
         responses.forEach(response => this.session.observeServerSideSessionId(response));
+        responses.forEach(response => this.session.recordObservedMetrics(response));
         return responses;
     }
 
@@ -99,6 +101,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
                 this.connectionConfigFor(execution)
             )) {
                 this.session.observeServerSideSessionId(response);
+                this.session.recordObservedMetrics(response);
                 yield response;
             }
         } catch (error) {

@@ -93,10 +93,15 @@ export type {
     UniqueAggregationTuple,
     ValidRenameMap,
     ValidRenameTarget,
+    GroupingInput,
 } from "./read/readChainedDataFrame";
 export { DataFrameNaFunctions, DataFrameStatFunctions } from "./read/dataFrameFunctions";
 export type { NAFillValue, NAHow, NAReplaceValue } from "./read/dataFrameFunctions";
 export type { SparkStructField, SparkStructType } from "./read/dataTypes";
+export { Observation } from "./read/observation";
+export type { AsOfJoinOptions } from "./read/readChainedDataFrame";
+export type { AsOfDirection } from "./algebra/read/batch-capabilities";
+export type { StorageLevel } from "./client/storageLevel";
 export { DataFrameReaderTF } from "./read/dataFrameReaderTF";
 export {
     SparkCatalog,
@@ -175,6 +180,8 @@ export type {
     NAReplacement,
     NullHandlingCap,
     OffsetCap,
+    ParityCap,
+    AsOfJoinSpec,
     RepartitionByExpressionCap,
     RepartitionCap,
     ReshapeCap,
@@ -184,7 +191,7 @@ export type {
     StatCap,
     SummaryCap,
 } from "./algebra/read/batch-capabilities";
-export type { DFCore } from "./algebra/read/df-core";
+export type { DFCore, GroupingSpec } from "./algebra/read/df-core";
 export type {
     EventTimeWatermarkCap,
     StreamingMark,

@@ -3,6 +3,7 @@ import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import { SparkCatalog } from "./catalog";
 import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
+import { Observation, observedMetricsOf } from "../read/observation";
 import { DFProgram, StreamingMark } from "../algebra/read";
 import { SqlCap } from "../algebra/read/batch-capabilities";
 import { DeclaredSchema, InferSchema, SchemaDef, schema } from "../schema/schema";
@@ -282,6 +283,8 @@ export class SparkSession implements SessionAlgebra {
     private readonly runtimeConfig: SparkRuntimeConfig;
     private readonly tags = new Set<string>();
     private serverVersion?: Promise<string>;
+    private readonly observations = new Map<string, Observation>();
+    private readonly cachedRelationIds = new Set<string>();
 
     constructor(
         sessionId?: string,
@@ -690,6 +693,23 @@ export class SparkSession implements SessionAlgebra {
         };
     }
 
+    /** @internal Routes the observed metrics of later actions to `observation`. */
+    registerObservation(observation: Observation): void {
+        this.observations.set(observation.name, observation);
+    }
+
+    /** @internal Delivers the observed metrics of an ExecutePlan response to the matching observations. */
+    recordObservedMetrics(response: unknown): void {
+        for (const metrics of observedMetricsOf(response)) {
+            this.observations.get(metrics.name)?.record(metrics.values);
+        }
+    }
+
+    /** @internal Remembers a checkpointed relation so `close()` releases it on the server. */
+    trackCachedRelation(relationId: string): void {
+        this.cachedRelationIds.add(relationId);
+    }
+
     /** @internal Snapshots per-execution controls when an action starts. */
     resolveExecution(options?: ExecutionOptions): ResolvedExecution {
         return resolveExecution(this.tags, options);
@@ -827,6 +847,9 @@ export class SparkSession implements SessionAlgebra {
         this.closePromise = (async () => {
             let releaseFailure: { error: unknown } | undefined;
             if (this.remoteTouched && !this.invalidatedError) {
+                // Only when something was checkpointed: the extra await would
+                // otherwise delay ReleaseSession by a microtask for nothing.
+                if (this.cachedRelationIds.size > 0) await this.releaseCachedRelations(cleanupConfig);
                 try {
                     const response = await sparkGrpcClient.releaseSession({
                         session_id: this.sessionId,
@@ -852,6 +875,33 @@ export class SparkSession implements SessionAlgebra {
             this.closePromise = undefined;
         });
         return this.closePromise;
+    }
+
+    /**
+     * Checkpointed relations stay cached on the server until released, as
+     * PySpark does when the DataFrame is garbage collected. Best effort: a
+     * failure here never blocks closing, and the server drops the cache with
+     * the session eventually.
+     */
+    private async releaseCachedRelations(config: SparkConnectionConfig): Promise<void> {
+        const relationIds = [...this.cachedRelationIds];
+        this.cachedRelationIds.clear();
+        for (const relationId of relationIds) {
+            try {
+                await sparkGrpcClient.executePlan({
+                    plan: { command: { remove_cached_remote_relation_command: { relation: { relation_id: relationId } } } },
+                    session_id: this.sessionId,
+                    user_context: this.getUserContext(),
+                    client_type: "ts-spark-connector",
+                    operation_id: crypto.randomUUID(),
+                    ...(this.serverSideSessionId
+                        ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                        : {}),
+                }, config);
+            } catch {
+                // Cleanup only; see above.
+            }
+        }
     }
 
     /** Alias matching Spark clients that call session shutdown `stop()`. */

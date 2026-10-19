@@ -32,6 +32,10 @@ export interface ExprAlg<E> {
     updateFields(struct: E, field: string, value?: E): E;
     /** `child[extraction]`: array index (0-based), map key or struct field. */
     extractValue(child: E, extraction: E): E;
+    /** Every column whose name matches `regex` (`df.colRegex`), optionally scoped to a plan. */
+    colRegex(regex: string, planId?: number): E;
+    /** A metadata column such as `_metadata` (`df.metadataColumn`). */
+    metadataCol(name: string, planId?: number): E;
     sortKey(input: E, direction: SortDirection, nulls?: NullsOrder): E;
     star(): E;
     caseWhen(branches: Array<{ when: E; then: E }>, elze?: E): E;

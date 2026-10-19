@@ -167,6 +167,16 @@ export function asin(col: ColumnOrName): EBuilder;
 export function asinh(col: ColumnOrName): EBuilder;
 
 // @public
+export type AsOfDirection = "backward" | "forward" | "nearest";
+
+// @public
+export type AsOfJoinOptions = {
+    tolerance?: EBuilder | number | bigint;
+    allowExactMatches?: boolean;
+    direction?: AsOfDirection;
+};
+
+// @public
 export function assert_true(col: ColumnOrName, errMsg?: string | EBuilder): EBuilder;
 
 // @public
@@ -666,6 +676,12 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
     checkpoint(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, path: string): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
     // (undocumented)
     console(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
+    createGlobalTempView(viewName: string): Promise<void>;
+    // (undocumented)
+    createGlobalTempView(viewName: string, impl: WriterBackendImplementation<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
+    createOrReplaceGlobalTempView(viewName: string): Promise<void>;
+    // (undocumented)
+    createOrReplaceGlobalTempView(viewName: string, impl: WriterBackendImplementation<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
     // (undocumented)
     createOrReplaceTempView(viewName: string): Promise<void>;
     // (undocumented)
@@ -1509,11 +1525,12 @@ export function greatest(...cols: ColumnOrName[]): EBuilder;
 
 // @public
 export class GroupedDataFrameTF<S, K extends PropertyKey, R, E, G, CDF, CEX> {
-    constructor(source: ReadChainedDataFrame<S, R, E, G, CDF, CEX>, grouping: ReadonlyArray<string | DataFrameExpressionBuilder>);
+    constructor(source: ReadChainedDataFrame<S, R, E, G, CDF, CEX>, grouping: ReadonlyArray<string | DataFrameExpressionBuilder>, spec?: GroupingInput | undefined);
     // (undocumented)
     agg<const A extends readonly TypedAggregation<string, ColumnType, E>[]>(build: TypedAggBuilder<S, E, A>): ReadChainedDataFrame<AggregatedSchema<S, K, A>, R, E, G, CDF, CEX>;
     // (undocumented)
     agg(aggregations: Record<string, DataFrameExpressionBuilder | string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    pivot(column: string | DataFrameExpressionBuilder, values?: readonly LiteralValue[]): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
 }
 
 // @public
@@ -1523,7 +1540,7 @@ export function grouping(col: ColumnOrName): EBuilder;
 export function grouping_id(...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
-export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot";
+export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot" | "grouping_sets";
 
 // @public
 export function hash(...cols: ColumnOrName[]): EBuilder;
@@ -1910,6 +1927,15 @@ export function nvl(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
 export function nvl2(col1: ColumnOrName, col2: ColumnOrName, col3: ColumnOrName): EBuilder;
 
 // @public
+export class Observation {
+    constructor(name?: string);
+    get(): Promise<Record<string, unknown>>;
+    // (undocumented)
+    readonly name: string;
+    get values(): Record<string, unknown> | undefined;
+}
+
+// @public
 export function octet_length(col: ColumnOrName): EBuilder;
 
 // @public
@@ -2012,10 +2038,12 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     // (undocumented)
     approxQuantile(cols: readonly ColumnName<S>[], probabilities: readonly number[], relativeError: number): Promise<number[][]>;
     as<T extends Schema>(): ReadChainedDataFrame<T, R, E, G, CDF, CEX>;
+    asOfJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, leftAsOfColumn: string | DataFrameExpressionBuilder, rightAsOfColumn: string | DataFrameExpressionBuilder, on?: string | readonly string[] | DataFrameExpressionBuilder, how?: string, options?: AsOfJoinOptions): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     broadcast(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
     // (undocumented)
     cache(): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    checkpoint(eager?: boolean): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>>;
     // (undocumented)
     coalesce(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     // (undocumented)
@@ -2024,12 +2052,18 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     collect(options?: ExecutionOptions): Promise<Array<RowOf<S>>>;
     collectRaw(options?: ExecutionOptions): Promise<unknown[]>;
+    colRegex(regex: string): DataFrameExpressionBuilder;
     columns(): Promise<string[]>;
     corr(col1: ColumnName<S>, col2: ColumnName<S>, method?: "pearson"): Promise<number>;
     count(): Promise<bigint>;
     cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number>;
+    createGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createOrReplaceGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createOrReplaceTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
     crossJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<CrossJoinSchema<S, RS>, R, E, G, CDF & RCDF, CEX & RCEX>;
     crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    cube(...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
     // (undocumented)
     describe<K extends ColumnName<S>>(colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -2040,6 +2074,9 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     dropDuplicates<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     dropDuplicates(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropDuplicatesWithinWatermark<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    dropDuplicatesWithinWatermark(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     dropna(how?: NAHow, thresh?: number, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     dtypes(): Promise<Array<[string, string]>>;
     // (undocumented)
@@ -2066,6 +2103,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     groupBy<K extends ColumnName<S>>(...by: K[]): GroupedDataFrameTF<S, K, R, E, G, CDF, CEX>;
     // (undocumented)
     groupBy(...by: DataFrameExpressionBuilder[]): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
+    groupingSets(sets: ReadonlyArray<ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>>, ...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
     head(): Promise<RowOf<S> | undefined>;
     // (undocumented)
     head(n: number): Promise<Array<RowOf<S>>>;
@@ -2083,13 +2121,17 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     join<RS extends SchemaShape, JT extends JoinTypeInput = "INNER", RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: TypedJoinPredicate<S, RS, E>, jt?: JT): ReadChainedDataFrame<JoinSchema<S, RS, JT>, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     join<RS = unknown, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: DataFrameExpressionBuilder, jt?: JoinTypeInput): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
+    lateralJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on?: DataFrameExpressionBuilder, how?: JoinTypeInput): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     limit(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    localCheckpoint(eager?: boolean, storageLevel?: string): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>>;
     melt(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     mergeHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
     mergeInto(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, table: string, condition: EBuilder): MergeIntoWriter;
+    metadataColumn(name: string): DataFrameExpressionBuilder;
     get na(): DataFrameNaFunctions<S, R, E, G, CDF, CEX>;
+    observe(observation: Observation | string, ...metrics: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     offset(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     orderBy(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E>>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
@@ -2113,6 +2155,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     replace(toReplace: NAReplaceValue | readonly NAReplaceValue[], value: NAReplaceValue | readonly NAReplaceValue[], subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     replace(mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    rollup(...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
     // (undocumented)
     runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R;
     sameSemantics<RS, RCDF, RCEX>(other: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): Promise<boolean>;
@@ -2135,20 +2178,28 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E>>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    sortWithinPartitions(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E> | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // @deprecated (undocumented)
     sql(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & SqlCap<R>, CEX>;
     get stat(): DataFrameStatFunctions<S, R, E, G, CDF, CEX>;
+    storageLevel(): Promise<StorageLevel>;
     streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void>;
     // (undocumented)
     summary<K extends ColumnName<S>>(metrics: readonly string[] | undefined, colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
     tail(n: number): Promise<Array<RowOf<S>>>;
     take(n: number): Promise<Array<RowOf<S>>>;
+    to<D extends SchemaDef>(declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G, CDF, CEX>;
+    // (undocumented)
+    to(ddl: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     toArrowBatches(options?: ExecutionOptions): AsyncGenerator<Buffer, void, void>;
     // (undocumented)
     toClientASTJSON(): string;
     // (undocumented)
     toClientASTMermaid(): string;
     toDF(...names: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    toJSON(): ReadChainedDataFrame<{
+        value: string;
+    }, R, E, G, CDF, CEX>;
     // (undocumented)
     toProtoJSON(): string;
     toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void>;
@@ -2181,6 +2232,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     withColumns(columns: Readonly<Record<string, DataFrameExpressionBuilder>>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumnsRenamed<const M extends Record<string, string>>(mapping: ValidRenameMap<S, M>): ReadChainedDataFrame<RenamedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
+    withMetadata(column: ColumnName<S>, metadata: Readonly<Record<string, unknown>> | string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     withWatermark(eventTimeCol: DataFrameExpressionBuilder, delay: string): ReadChainedDataFrame<S, R, E, G, CDF & EventTimeWatermarkCap<R, E>, CEX>;
     // (undocumented)
@@ -2738,6 +2790,16 @@ export function stddev_pop(col: ColumnOrName): EBuilder;
 
 // @public
 export function stddev_samp(col: ColumnOrName): EBuilder;
+
+// @public
+export type StorageLevel = {
+    useDisk: boolean;
+    useMemory: boolean;
+    useOffHeap: boolean;
+    deserialized: boolean;
+    replication: number;
+    name?: string;
+};
 
 // @public
 export function str_to_map(text: ColumnOrName, pairDelim?: string | EBuilder, keyValueDelim?: string | EBuilder): EBuilder;

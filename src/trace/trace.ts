@@ -49,6 +49,10 @@ export const TraceExprAlg: ExprAlg<TraceNode> = {
             ? node("dropField", `dropField(${field})`, [struct])
             : node("withField", `withField(${field})`, [struct, value]),
     extractValue: (child, extraction) => node("extract", "extract", [child, extraction]),
+    colRegex: (regex, planId) =>
+        node("colRegex", `colRegex(${regex}${planId === undefined ? "" : `@${planId}`})`),
+    metadataCol: (name, planId) =>
+        node("metadataCol", `metadataCol(${name}${planId === undefined ? "" : `@${planId}`})`),
     sortKey: (input, direction, nulls) => node("sortKey", `sortKey(${sortLabel(direction, nulls)})`, [input]),
     star: () => node("star", "*"),
     caseWhen: (branches, elze) =>
@@ -123,7 +127,21 @@ export const TraceDFAlg: TraceDFAlgebra = {
 
     join: (l, r, on, jt?: JoinTypeInput) => node("join", `join(${jt ?? "INNER"})`, [l, r, on]),
 
-    groupBy: (df, keys) => node("groupBy", `groupBy[${keys.length}]`, [df, ...keys]),
+    groupBy: (df, keys, spec) =>
+        spec === undefined
+            ? node("groupBy", `groupBy[${keys.length}]`, [df, ...keys])
+            : node(
+                "groupBy",
+                `${spec.groupType}[${keys.length}]${spec.pivot?.values ? `(values[${spec.pivot.values.length}])` : ""}${
+                    spec.groupingSets ? `(sets[${spec.groupingSets.length}])` : ""
+                }`,
+                [
+                    df,
+                    ...keys,
+                    ...(spec.pivot ? [spec.pivot.column] : []),
+                    ...(spec.groupingSets ?? []).flat(),
+                ],
+            ),
 
     agg: (dfOrG, pairs, groupType?: GroupTypeInput) =>
         node("agg", `agg[${Object.keys(pairs).length}]${groupType ? `(${groupType})` : ""}`, [
@@ -245,6 +263,39 @@ export const TraceDFAlg: TraceDFAlgebra = {
             `repartition${range ? "ByRange" : ""}[${exprs.length}]${numPartitions === undefined ? "" : `(${numPartitions})`}`,
             [df, ...exprs],
         ),
+
+    sortWithinPartitions: (df, orders) =>
+        node("sortWithinPartitions", `sortWithinPartitions[${orders.length}]`, [df, ...orderLabels(orders)]),
+
+    dropDuplicatesWithinWatermark: (df, exprs) =>
+        node("dropDup", `dropDuplicatesWithinWatermark[${exprs?.length ?? 0}]`, [df, ...(exprs ?? [])]),
+
+    lateralJoin: (l, r, on, joinType) =>
+        node("join", `lateralJoin(${String(joinType).toUpperCase()})`, [l, r, ...(on === undefined ? [] : [on])]),
+
+    asOfJoin: (l, r, spec) =>
+        node(
+            "join",
+            `asOfJoin(${spec.joinType},${spec.direction}${spec.allowExactMatches ? "" : ",strict"}${
+                spec.usingColumns ? `;using[${spec.usingColumns.join(",")}]` : ""
+            })`,
+            [
+                l,
+                r,
+                spec.leftAsOf,
+                spec.rightAsOf,
+                ...(spec.on === undefined ? [] : [spec.on]),
+                ...(spec.tolerance === undefined ? [] : [spec.tolerance]),
+            ],
+        ),
+
+    observe: (df, name, metrics) => node("observe", `observe(${name})[${metrics.length}]`, [df, ...metrics]),
+
+    cachedRemoteRelation: relationId => node("checkpoint", `checkpoint(${relationId})`),
+
+    toSchema: (df, ddl) => node("toSchema", `to(${ddl})`, [df]),
+
+    withMetadata: (df, name, column, _metadata) => node("withMetadata", `withMetadata(${name})`, [df, column]),
 
     readStream: (format, options) =>
         node("readStream", `readStream(${format}${options ? ",opts" : ""})`),
