@@ -53,8 +53,41 @@ export const CatalogColumnRow = schema({
     isCluster: "boolean",
 });
 
+/**
+ * Row shape of `catalog.listFunctions()` and `catalog.getFunction()`.
+ * @public
+ */
+export const CatalogFunctionRow = schema({
+    name: "string",
+    catalog: "string?",
+    namespace: arrayType("string?", true),
+    description: "string?",
+    className: "string",
+    isTemporary: "boolean",
+});
+
 /** @public */
 export type CatalogEntry = InferSchema<typeof CatalogEntryRow.def>;
+/** @public */
+export type CatalogFunction = InferSchema<typeof CatalogFunctionRow.def>;
+
+/**
+ * Options of `catalog.createTable()` and `catalog.createExternalTable()`,
+ * mirroring PySpark's keyword arguments.
+ * @public
+ */
+export type CreateTableOptions = {
+    /** Data location; required for external tables. */
+    path?: string;
+    /** Data source format, e.g. `parquet` (Spark's default source when omitted). */
+    source?: string;
+    /** Table schema: a `schema({...})` declaration or a DDL string. Inferred from the data when omitted. */
+    schema?: DeclaredSchema<SchemaDef> | string;
+    /** Table comment (`createTable` only). */
+    description?: string;
+    /** Data source options. */
+    options?: Readonly<Record<string, string>>;
+};
 /** @public */
 export type CatalogDatabase = InferSchema<typeof CatalogDatabaseRow.def>;
 /** @public */
@@ -71,6 +104,34 @@ function requireName(value: string, label: string): string {
 
 function optionalName(value: string | undefined, label: string): string | undefined {
     return value === undefined ? undefined : requireName(value, label);
+}
+
+/** Validates the fields `createTable` and `createExternalTable` share. */
+function createTableFields(label: string, options: CreateTableOptions): {
+    path?: string;
+    source?: string;
+    schema?: string;
+    options?: Readonly<Record<string, string>>;
+} {
+    const path = optionalName(options.path, `${label} path`);
+    const source = optionalName(options.source, `${label} source`);
+    const schema = options.schema === undefined
+        ? undefined
+        : options.schema instanceof DeclaredSchema
+            ? options.schema.toDDL()
+            : requireName(options.schema, `${label} schema`);
+    if (options.options !== undefined) {
+        for (const [key, value] of Object.entries(options.options)) {
+            requireName(key, `${label} option name`);
+            if (typeof value !== "string") throw new TypeError(`${label} option ${JSON.stringify(key)} must be a string.`);
+        }
+    }
+    return {
+        ...(path !== undefined ? { path } : {}),
+        ...(source !== undefined ? { source } : {}),
+        ...(schema !== undefined ? { schema } : {}),
+        ...(options.options !== undefined ? { options: { ...options.options } } : {}),
+    };
 }
 
 /**
@@ -205,6 +266,125 @@ export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
         );
     }
 
+    /** Functions registered in a database (the current one when omitted), optionally filtered by pattern. */
+    listFunctions(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogFunction, R, E, G> {
+        const db = optionalName(dbName, "listFunctions() dbName");
+        const match = optionalName(pattern, "listFunctions() pattern");
+        return this.list(
+            {
+                method: "listFunctions",
+                ...(db !== undefined ? { dbName: db } : {}),
+                ...(match !== undefined ? { pattern: match } : {}),
+            },
+            CatalogFunctionRow,
+        );
+    }
+
+    /** Metadata of one database; rejects when it does not exist. */
+    async getDatabase(dbName: string): Promise<CatalogDatabase> {
+        return this.single<CatalogDatabase>(
+            { method: "getDatabase", dbName: requireName(dbName, "getDatabase() dbName") },
+            CatalogDatabaseRow,
+        );
+    }
+
+    /** Metadata of one table or view; rejects when it does not exist. */
+    async getTable(tableName: string, dbName?: string): Promise<CatalogTable> {
+        const db = optionalName(dbName, "getTable() dbName");
+        return this.single<CatalogTable>(
+            {
+                method: "getTable",
+                tableName: requireName(tableName, "getTable() tableName"),
+                ...(db !== undefined ? { dbName: db } : {}),
+            },
+            CatalogTableRow,
+        );
+    }
+
+    /** Metadata of one function; rejects when it does not exist. */
+    async getFunction(functionName: string, dbName?: string): Promise<CatalogFunction> {
+        const db = optionalName(dbName, "getFunction() dbName");
+        return this.single<CatalogFunction>(
+            {
+                method: "getFunction",
+                functionName: requireName(functionName, "getFunction() functionName"),
+                ...(db !== undefined ? { dbName: db } : {}),
+            },
+            CatalogFunctionRow,
+        );
+    }
+
+    /**
+     * Creates a table from a data source (an external table when `path` is
+     * given, a managed one otherwise) and returns it as a DataFrame.
+     */
+    createTable(tableName: string, options: CreateTableOptions = {}): ReadChainedDataFrame<UnknownSchema, R, E, G> {
+        return this.plan({
+            method: "createTable",
+            tableName: requireName(tableName, "createTable() tableName"),
+            ...createTableFields("createTable()", options),
+            ...(options.description !== undefined
+                ? { description: requireName(options.description, "createTable() description") }
+                : {}),
+        });
+    }
+
+    /** Creates an external table backed by `path` and returns it as a DataFrame. */
+    createExternalTable(tableName: string, options: CreateTableOptions = {}): ReadChainedDataFrame<UnknownSchema, R, E, G> {
+        return this.plan({
+            method: "createExternalTable",
+            tableName: requireName(tableName, "createExternalTable() tableName"),
+            ...createTableFields("createExternalTable()", options),
+        });
+    }
+
+    /** Caches a table in memory (or at the given storage level, e.g. `DISK_ONLY`). */
+    async cacheTable(tableName: string, storageLevel?: string): Promise<void> {
+        await this.execute({
+            method: "cacheTable",
+            tableName: requireName(tableName, "cacheTable() tableName"),
+            ...(storageLevel !== undefined
+                ? { storageLevel: requireName(storageLevel, "cacheTable() storageLevel") }
+                : {}),
+        });
+    }
+
+    /** Removes a table from the cache. */
+    async uncacheTable(tableName: string): Promise<void> {
+        await this.execute({ method: "uncacheTable", tableName: requireName(tableName, "uncacheTable() tableName") });
+    }
+
+    /** Whether a table is currently cached. */
+    async isCached(tableName: string): Promise<boolean> {
+        return this.scalar<boolean>(
+            { method: "isCached", tableName: requireName(tableName, "isCached() tableName") },
+            "boolean",
+        );
+    }
+
+    /** Removes every cached table from the cache. */
+    async clearCache(): Promise<void> {
+        await this.execute({ method: "clearCache" });
+    }
+
+    /** Invalidates cached metadata and data of a table. */
+    async refreshTable(tableName: string): Promise<void> {
+        await this.execute({ method: "refreshTable", tableName: requireName(tableName, "refreshTable() tableName") });
+    }
+
+    /** Invalidates cached metadata and data of every table under a path. */
+    async refreshByPath(path: string): Promise<void> {
+        await this.execute({ method: "refreshByPath", path: requireName(path, "refreshByPath() path") });
+    }
+
+    /** Recovers the partitions of a partitioned table from its directory layout. */
+    async recoverPartitions(tableName: string): Promise<void> {
+        await this.execute({
+            method: "recoverPartitions",
+            tableName: requireName(tableName, "recoverPartitions() tableName"),
+        });
+    }
+
     /**
      * The catalog operation as an uncollected DataFrame plan, for inspection
      * through `toProtoJSON()` and the client AST printers.
@@ -222,6 +402,19 @@ export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
     ): ReadChainedDataFrame<InferSchema<D>, R, E, G> {
         const prog: DFProgram<R, E, G> = DF => DF.catalog(op);
         return new ReadChainedDataFrame<InferSchema<D>, R, E, G>(prog, this.session, false, declared.def);
+    }
+
+    /** Collects the single row of a get-style operation, rejecting an empty result. */
+    private async single<Row>(op: CatalogOperation, declared: DeclaredSchema<SchemaDef>): Promise<Row> {
+        // Untyped at the TypeScript level (the row type is the caller's) but
+        // still decoded and validated against the declared runtime schema.
+        const prog: DFProgram<R, E, G> = DF => DF.catalog(op);
+        const [row] = await new ReadChainedDataFrame<UnknownSchema, R, E, G>(prog, this.session, false, declared.def)
+            .collect();
+        if (row === undefined) {
+            throw new TypeError(`catalog.${op.method} expected a single row but received none.`);
+        }
+        return row as Row;
     }
 
     /** Runs an operation executed only for its server-side effect. */

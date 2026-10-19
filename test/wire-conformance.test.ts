@@ -298,6 +298,31 @@ describe("Spark Connect protobuf wire conformance", () => {
     expect(single.plan.root.range).not.toHaveProperty("_start");
   });
 
+  it("encodes catalog cache levels, unparsed schemas and options", () => {
+    const cached = wireRoundTrip(ProtoDFAlg.catalog({ method: "cacheTable", tableName: "t", storageLevel: "DISK_ONLY" }));
+    expect(cached.plan.root.catalog.cache_table).toMatchObject({
+      table_name: "t",
+      storage_level: { use_disk: true, use_memory: false, use_off_heap: false, deserialized: false, replication: 1 },
+    });
+    const created = wireRoundTrip(ProtoDFAlg.catalog({
+      method: "createTable",
+      tableName: "people",
+      source: "parquet",
+      schema: "id INT, name STRING",
+      options: { mergeSchema: "true" },
+    }));
+    expect(created.plan.root.catalog.create_table).toMatchObject({
+      table_name: "people",
+      source: "parquet",
+      schema: { unparsed: { data_type_string: "id INT, name STRING" } },
+      options: { mergeSchema: "true" },
+    });
+    expect(created.plan.root.catalog.create_table).not.toHaveProperty("_path");
+    const functions = wireRoundTrip(ProtoDFAlg.catalog({ method: "listFunctions", pattern: "up*" }));
+    expect(functions.plan.root.catalog.list_functions).toMatchObject({ pattern: "up*" });
+    expect(functions.plan.root.catalog.list_functions).not.toHaveProperty("_db_name");
+  });
+
   it("rejects empty batch paths before producing an invalid request", () => {
     expect(() => session().read.csv()).toThrow(/at least one non-empty path/i);
     expect(() => session().read.sql(" ")).toThrow(/exactly one non-empty string/i);

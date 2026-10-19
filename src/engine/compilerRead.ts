@@ -14,6 +14,7 @@ import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
 import {CastEvalMode, DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
+import {toProtoStorageLevel} from "../client/storageLevel";
 
 type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
 
@@ -569,7 +570,78 @@ function catalogProtoPayload(op: CatalogOperation): ProtoMessage {
             return { drop_temp_view: { view_name: op.viewName } };
         case "dropGlobalTempView":
             return { drop_global_temp_view: { view_name: op.viewName } };
+        case "listFunctions":
+            return {
+                list_functions: {
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                    ...(op.pattern !== undefined ? { pattern: op.pattern } : {}),
+                },
+            };
+        case "getDatabase":
+            return { get_database: { db_name: op.dbName } };
+        case "getTable":
+            return {
+                get_table: {
+                    table_name: op.tableName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "getFunction":
+            return {
+                get_function: {
+                    function_name: op.functionName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "createTable":
+            return {
+                create_table: {
+                    table_name: op.tableName,
+                    ...(op.path !== undefined ? { path: op.path } : {}),
+                    ...(op.source !== undefined ? { source: op.source } : {}),
+                    ...(op.description !== undefined ? { description: op.description } : {}),
+                    ...(op.schema !== undefined ? { schema: unparsedDataType(op.schema) } : {}),
+                    options: { ...(op.options ?? {}) },
+                },
+            };
+        case "createExternalTable":
+            return {
+                create_external_table: {
+                    table_name: op.tableName,
+                    ...(op.path !== undefined ? { path: op.path } : {}),
+                    ...(op.source !== undefined ? { source: op.source } : {}),
+                    ...(op.schema !== undefined ? { schema: unparsedDataType(op.schema) } : {}),
+                    options: { ...(op.options ?? {}) },
+                },
+            };
+        case "cacheTable":
+            return {
+                cache_table: {
+                    table_name: op.tableName,
+                    ...(op.storageLevel !== undefined ? { storage_level: toProtoStorageLevel(op.storageLevel) } : {}),
+                },
+            };
+        case "uncacheTable":
+            return { uncache_table: { table_name: op.tableName } };
+        case "isCached":
+            return { is_cached: { table_name: op.tableName } };
+        case "clearCache":
+            return { clear_cache: {} };
+        case "refreshTable":
+            return { refresh_table: { table_name: op.tableName } };
+        case "refreshByPath":
+            return { refresh_by_path: { path: op.path } };
+        case "recoverPartitions":
+            return { recover_partitions: { table_name: op.tableName } };
     }
+}
+
+/**
+ * A `DataType` the server parses itself: Spark accepts both a type string
+ * (`struct<a:int>`) and a DDL column list (`a INT, b STRING`).
+ */
+export function unparsedDataType(dataTypeString: string): ProtoMessage {
+    return { unparsed: { data_type_string: dataTypeString } };
 }
 
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {

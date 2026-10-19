@@ -5,6 +5,7 @@ import type { ProtoRel } from "../engine/compilerRead";
 import { sparkGrpcClient, StreamingQueryHandle } from "./sparkClient";
 import { ProtoPlan, ProtoWriteRoot, protoWriteRootToPlan } from "../write/compilerWrite";
 import { ExplainModeInput, toProtoExplainMode } from "../engine/sparkConnectEnums";
+import { toProtoStorageLevel } from "./storageLevel";
 
 type ExecutePlanResponse = Record<string, unknown>;
 type UserContext = ReturnType<SparkSession["getUserContext"]>;
@@ -54,24 +55,6 @@ export type AnalyzeField =
 type AnalyzeAction =
     | { kind: "persist"; relation: unknown; level: string }
     | { kind: "unpersist"; relation: unknown; blocking?: boolean };
-
-type StorageLevelProto = {
-    use_disk: boolean;
-    use_memory: boolean;
-    use_off_heap: boolean;
-    deserialized: boolean;
-    replication: number;
-};
-
-const STORAGE_LEVELS: Record<string, StorageLevelProto> = {
-    NONE: { use_disk: false, use_memory: false, use_off_heap: false, deserialized: false, replication: 1 },
-    DISK_ONLY: { use_disk: true, use_memory: false, use_off_heap: false, deserialized: false, replication: 1 },
-    MEMORY_ONLY: { use_disk: false, use_memory: true, use_off_heap: false, deserialized: true, replication: 1 },
-    MEMORY_AND_DISK: { use_disk: true, use_memory: true, use_off_heap: false, deserialized: true, replication: 1 },
-    MEMORY_ONLY_SER: { use_disk: false, use_memory: true, use_off_heap: false, deserialized: false, replication: 1 },
-    MEMORY_AND_DISK_SER: { use_disk: true, use_memory: true, use_off_heap: false, deserialized: false, replication: 1 },
-    OFF_HEAP: { use_disk: true, use_memory: true, use_off_heap: true, deserialized: false, replication: 1 },
-};
 
 /**
  * Runs already-compiled Spark Connect relations. `ProtoDFAlg` produces the
@@ -148,7 +131,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
                 ...requestBase,
                 persist: {
                     relation: action.relation,
-                    storage_level: this.storageLevel(action.level),
+                    storage_level: toProtoStorageLevel(action.level),
                 },
             }
             : {
@@ -355,17 +338,6 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     private observedServerSessionField(): { client_observed_server_side_session_id?: string } {
         const id = this.session.getServerSideSessionId();
         return id ? { client_observed_server_side_session_id: id } : {};
-    }
-
-    private storageLevel(level: string): StorageLevelProto {
-        const normalized = level.toUpperCase();
-        const storage = STORAGE_LEVELS[normalized];
-        if (!storage) {
-            throw new RangeError(
-                `Unsupported storage level "${level}". Expected one of: ${Object.keys(STORAGE_LEVELS).join(", ")}.`
-            );
-        }
-        return storage;
     }
 
     private reorderStreamingCommands(plan: ProtoPlan[]): ProtoPlan[] {

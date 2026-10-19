@@ -101,12 +101,15 @@ export {
     CatalogDatabaseRow,
     CatalogTableRow,
     CatalogColumnRow,
+    CatalogFunctionRow,
 } from "./client/catalog";
 export type {
     CatalogEntry,
     CatalogDatabase,
     CatalogTable,
     CatalogColumn,
+    CatalogFunction,
+    CreateTableOptions,
 } from "./client/catalog";
 export type { CatalogOperation, CatalogMethod } from "./types/catalog";
 export type {
