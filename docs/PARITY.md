@@ -55,7 +55,7 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 | `colRegex`, `metadataColumn` | ✅ | `UnresolvedRegex`, `UnresolvedAttribute.is_metadata_column` |
 | `lateralJoin`, `asOfJoin` | ✅ | `LateralJoin`, `AsOfJoin` (PySpark `_joinAsOf` parameters) |
 | `observe` | ✅ | `CollectMetrics`; `Observation.get()` resolves with `ExecutePlanResponse.observed_metrics` |
-| `checkpoint`, `localCheckpoint` | ✅ | `checkpoint_command`, `CachedRemoteRelation`; released with `remove_cached_remote_relation_command` on `close()` |
+| `checkpoint`, `localCheckpoint` | ✅ | `checkpoint_command`, `CachedRemoteRelation`; `releaseCheckpoint()` or `close()` send `remove_cached_remote_relation_command` |
 | `transform(func)` | ✅ | client-side helper |
 | `to(schema)` | ✅ | `ToSchema` with an unparsed DDL type; typed when given a `schema({...})` |
 | `withMetadata` | ✅ | `WithColumns` alias with JSON metadata |

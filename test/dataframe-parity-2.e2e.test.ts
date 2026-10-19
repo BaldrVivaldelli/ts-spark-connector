@@ -81,17 +81,38 @@ describe("grouping variants (E2E)", () => {
 });
 
 describe("partition-local sorting and deduplication (E2E)", () => {
-    it("sorts inside a single partition", async () => {
-        const rows = await sales().repartition(1).sortWithinPartitions(col("v").desc()).collect();
-        expect(rows.map(row => row.v)).toEqual([3, 2, 1]);
+    it("sorts each partition on its own, not the whole result", async () => {
+        // 1..30 in a scrambled order, spread over three partitions.
+        const Values = schema({ v: "int" });
+        const scrambled = session.createDataFrame(
+            [...Array(30).keys()].map(index => ({ v: ((index * 7) % 30) + 1 })),
+            Values,
+        ).repartition(3);
+
+        const rows = await scrambled
+            .sortWithinPartitions("v")
+            .select(col("v"), F.spark_partition_id().alias("p"))
+            .collect() as Array<{ v: number; p: number }>;
+        const partitions = new Map<number, number[]>();
+        for (const row of rows) partitions.set(row.p, [...(partitions.get(row.p) ?? []), row.v]);
+        expect(partitions.size).toBeGreaterThan(1);
+        for (const values of partitions.values()) {
+            expect(values).toEqual([...values].sort((left, right) => left - right));
+        }
+        const flat = rows.map(row => row.v);
+        expect(flat).not.toEqual([...flat].sort((left, right) => left - right));
+        // The physical plan carries the partition-local flag Spark planned with.
+        expect(await scrambled.sortWithinPartitions("v").explain()).toMatch(/Sort \[v#\d+ ASC NULLS FIRST\], false, 0/);
     });
 
     it("drops duplicates within the watermark of a stream and refuses batch inputs", async () => {
-        // Spark only plans DeduplicateWithinWatermark for streams, and a row is
-        // emitted once the watermark passes its event time, hence the short delay.
+        // Spark only plans DeduplicateWithinWatermark for streams.
         await expect(sales().union(sales()).dropDuplicatesWithinWatermark().count())
             .rejects.toThrow(/not supported with batch/);
 
+        // Output is immediate; the watermark only bounds how long each key's
+        // state is kept. Some Spark lines need a few batches before the first
+        // rows reach the memory sink, so the sink is polled with a generous budget.
         const queryName = `parity2_dedup_${Date.now()}`;
         const handle = await session.readStream("rate", { rowsPerSecond: "5", numPartitions: "1" })
             .withWatermark(col("timestamp"), "1 second")
@@ -102,11 +123,15 @@ describe("partition-local sorting and deduplication (E2E)", () => {
             .trigger({ processingTime: "500 milliseconds" })
             .queryName(queryName)
             .start();
-        expect(await handle.awaitTermination(6_000)).toBe(false);
+        let rows: Array<{ value: bigint }> = [];
+        const deadline = Date.now() + 30_000;
+        while (rows.length === 0 && Date.now() < deadline) {
+            expect(await handle.awaitTermination(1_000)).toBe(false);
+            rows = await session.table(queryName).collect() as Array<{ value: bigint }>;
+        }
         await handle.stop();
         expect(await handle.awaitTermination(30_000)).toBe(true);
 
-        const rows = await session.table(queryName).collect() as Array<{ value: bigint }>;
         expect(rows.length).toBeGreaterThan(0);
         // Every rate value is distinct, so deduplication keeps each one exactly once.
         const values = rows.map(row => row.value).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
@@ -187,6 +212,12 @@ describe("checkpoints and storage levels (E2E)", () => {
         expect(await reliable.count()).toBe(3n);
         const lazy = await sales().localCheckpoint(false, "MEMORY_ONLY");
         expect(await lazy.count()).toBe(3n);
+
+        // Explicit release is idempotent and the data is gone afterwards.
+        await local.releaseCheckpoint();
+        await local.releaseCheckpoint();
+        await expect(local.count()).rejects.toThrow();
+        expect(await reliable.count()).toBe(3n);
     });
 
     it("reports the storage level after persist", async () => {
@@ -204,6 +235,16 @@ describe("checkpoints and storage levels (E2E)", () => {
 describe("schema reconciliation, metadata, JSON and global views (E2E)", () => {
     it("reconciles rows to a declared schema or a DDL string", async () => {
         const typed = await sales().to(schema({ name: "string?", k: "string", v: "long" })).collect();
+        // File sources report every column nullable; the declaration still
+        // types and verifies the rows.
+        const path = `/tmp/parity2_to_${Date.now()}`;
+        await sales().write().parquet().mode("overwrite").save(path);
+        const fromParquet = await session.read.parquet(path).to(schema({ v: "long", k: "string", name: "string" })).collect();
+        expect(sorted(fromParquet, "v")).toEqual([
+            { v: 1n, k: "a", name: "x" },
+            { v: 2n, k: "a", name: "y" },
+            { v: 3n, k: "b", name: "x" },
+        ]);
         expect(sorted(typed, "k", "name")).toEqual([
             { name: "x", k: "a", v: 1n },
             { name: "y", k: "a", v: 2n },
@@ -220,7 +261,10 @@ describe("schema reconciliation, metadata, JSON and global views (E2E)", () => {
     it("keeps values with column metadata and renders rows as JSON", async () => {
         const withMeta = sales().withMetadata("k", { comment: "key" });
         expect(await withMeta.count()).toBe(3n);
-        expect((await withMeta.schema()).fields.map(field => field.name)).toEqual(["k", "name", "v"]);
+        const { fields } = await withMeta.schema();
+        expect(fields.map(field => field.name)).toEqual(["k", "name", "v"]);
+        expect(JSON.parse(fields[0]!.metadata!)).toEqual({ comment: "key" });
+        expect(fields[1]!.metadata).toBeUndefined();
 
         const json = await sales().orderBy("v").toJSON().collect();
         expect(json.map(row => JSON.parse(row.value))).toEqual([

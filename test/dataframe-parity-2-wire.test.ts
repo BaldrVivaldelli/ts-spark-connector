@@ -23,6 +23,9 @@ const packageDefinition = loadSync(
 const executePlanRequest = packageDefinition[
     "spark.connect.ExecutePlanRequest"
 ] as MessageTypeDefinition<ProtoObject, ProtoObject>;
+const analyzePlanRequest = packageDefinition[
+    "spark.connect.AnalyzePlanRequest"
+] as MessageTypeDefinition<ProtoObject, ProtoObject>;
 
 /** Serializes with the vendored descriptor and decodes again: unknown fields vanish. */
 function wire(plan: ProtoObject): any {
@@ -122,7 +125,8 @@ describe("parity relations survive a protobuf round trip", () => {
 
         expect(rootOf(people().to("name STRING, id INT")).to_schema.schema.unparsed.data_type_string).toBe("name STRING, id INT");
         const declared = schema({ name: "string?", id: "int" });
-        expect(rootOf(people().to(declared)).to_schema.schema.unparsed.data_type_string).toBe(declared.toDDL());
+        // Nullable on the wire: Spark refuses NOT NULL targets for nullable sources.
+        expect(rootOf(people().to(declared)).to_schema.schema.unparsed.data_type_string).toBe("name STRING, id INT");
 
         const alias = rootOf(people().withMetadata("id", { comment: "pk" })).with_columns.aliases[0];
         expect(alias.name).toEqual(["id"]);
@@ -133,6 +137,37 @@ describe("parity relations survive a protobuf round trip", () => {
         expect(json.expr.unresolved_function.function_name).toBe("to_json");
         expect(json.expr.unresolved_function.arguments[0].unresolved_function.arguments[0]).toHaveProperty("unresolved_star");
         expect(lit(1)).toBeDefined();
+    });
+
+    it("keeps checkpoint commands and the storage-level analysis", () => {
+        const root = JSON.parse(people().toProtoJSON()) as ProtoObject;
+        const checkpoint = wire({
+            command: {
+                checkpoint_command: {
+                    relation: root,
+                    local: true,
+                    eager: false,
+                    storage_level: { use_disk: true, use_memory: false, use_off_heap: false, deserialized: false, replication: 1 },
+                },
+            },
+        }).command.checkpoint_command;
+        expect(checkpoint).toMatchObject({ local: true, eager: false });
+        expect(checkpoint.storage_level).toMatchObject({ use_disk: true, use_memory: false, replication: 1 });
+        expect(checkpoint.relation.read.data_source.format).toBe("parquet");
+
+        const remove = wire({
+            command: { remove_cached_remote_relation_command: { relation: { relation_id: "cp-1" } } },
+        }).command.remove_cached_remote_relation_command;
+        expect(remove.relation.relation_id).toBe("cp-1");
+
+        const encoded = analyzePlanRequest.serialize({
+            session_id: "00112233-4455-6677-8899-aabbccddeeff",
+            user_context: { user_id: "parity-2-wire-conformance" },
+            get_storage_level: { relation: ProtoDFAlg.cachedRemoteRelation("cp-1") },
+        });
+        const analyze = analyzePlanRequest.deserialize(encoded) as any;
+        expect(analyze.analyze).toBe("get_storage_level");
+        expect(analyze.get_storage_level.relation.cached_remote_relation.relation_id).toBe("cp-1");
     });
 
     it("keeps global temp view commands", () => {
