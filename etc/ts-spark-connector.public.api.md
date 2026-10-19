@@ -2877,7 +2877,6 @@ export interface StreamingQueryHandle {
     processAllAvailable(): Promise<void>;
     recentProgress(): Promise<StreamingQueryProgress[]>;
     readonly runId: string;
-    // (undocumented)
     status(): Promise<StreamingQueryStatus>;
     // (undocumented)
     stop(): Promise<unknown>;

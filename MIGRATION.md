@@ -23,6 +23,16 @@ Custom interpreters passed to `ReadChainedDataFrame.runWith(DF, EX)` must
 implement the expression operations added in this release (`callDistinct`,
 `exprString`, `cast`, `lambda`, `lambdaVar`, `updateFields`, `extractValue`).
 
+## After 3.2.0: `StreamingQueryHandle` has more members
+
+The handle returned by `writeStream().start()` / `toTable()` now mirrors
+Spark's `StreamingQuery`: `id`, `runId`, `isActive()`, `status()`,
+`lastProgress()`, `recentProgress()`, `explain()`, `exception()` and
+`processAllAvailable()` are required members of `StreamingQueryHandle`.
+Code that only calls handles is unaffected; code that *implements* the
+interface (test doubles, custom writer backends returning handles) must add
+them.
+
 ## After 3.2.0: `close()` always closes
 
 `SparkSession.close()` used to leave the session open when `ReleaseSession`

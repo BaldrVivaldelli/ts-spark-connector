@@ -64,6 +64,7 @@ export interface StreamingQueryHandle {
     stop(): Promise<unknown>;
     /** Whether the query is still running. */
     isActive(): Promise<boolean>;
+    /** What the query is doing right now: Spark's `StreamingQuery.status()`. */
     status(): Promise<StreamingQueryStatus>;
     /** The most recent progress report, or `undefined` before the first batch completed. */
     lastProgress(): Promise<StreamingQueryProgress | undefined>;
