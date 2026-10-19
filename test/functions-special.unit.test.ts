@@ -154,4 +154,29 @@ describe("higher-order functions", () => {
             "A higher-order function callback must return a column expression.",
         );
     });
+
+    it("builds partition transforms and dynamic calls", () => {
+        const fn = (e: EBuilder) => (e.build(ProtoExprAlg) as { unresolved_function: Record<string, unknown> }).unresolved_function;
+        const ts = { unresolved_attribute: { unparsed_identifier: "ts" } };
+        expect(fn(F.years("ts"))).toEqual({ function_name: "years", arguments: [ts] });
+        expect(fn(F.months(col("ts")))).toEqual({ function_name: "months", arguments: [ts] });
+        expect(fn(F.days("ts"))).toEqual({ function_name: "days", arguments: [ts] });
+        expect(fn(F.hours("ts"))).toEqual({ function_name: "hours", arguments: [ts] });
+        expect(fn(F.bucket(4, "id"))).toEqual({
+            function_name: "bucket",
+            arguments: [{ literal: { integer: 4 } }, { unresolved_attribute: { unparsed_identifier: "id" } }],
+        });
+        expect(() => F.bucket(0, "id")).toThrow(RangeError);
+        expect(() => F.bucket(1.5, "id")).toThrow(RangeError);
+
+        expect(fn(F.call_function("greatest", "a", col("b")))).toEqual({
+            function_name: "greatest",
+            arguments: [
+                { unresolved_attribute: { unparsed_identifier: "a" } },
+                { unresolved_attribute: { unparsed_identifier: "b" } },
+            ],
+        });
+        expect(fn(F.call_function("now"))).toEqual({ function_name: "now", arguments: [] });
+        expect(() => F.call_function("")).toThrow(TypeError);
+    });
 });

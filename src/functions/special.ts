@@ -342,3 +342,50 @@ export const desc: (col: ColumnOrName) => SortKeyBuilder = sortKey("desc");
 export const desc_nulls_first: (col: ColumnOrName) => SortKeyBuilder = sortKey("desc", "nullsFirst");
 /** Descending sort key with nulls last. @public */
 export const desc_nulls_last: (col: ColumnOrName) => SortKeyBuilder = sortKey("desc", "nullsLast");
+
+// Partition transforms --------------------------------------------------------
+// Accepted by `writeTo(table).partitionedBy(...)` on catalogs that support
+// transforms (Iceberg does); Spark resolves them only there, not in a
+// projection.
+
+/** `years(col)` partition transform: one partition per year of a date or timestamp column. */
+export function years(col: ColumnOrName): EBuilder {
+    return invoke("years", [c(col)]);
+}
+
+/** `months(col)` partition transform. */
+export function months(col: ColumnOrName): EBuilder {
+    return invoke("months", [c(col)]);
+}
+
+/** `days(col)` partition transform. */
+export function days(col: ColumnOrName): EBuilder {
+    return invoke("days", [c(col)]);
+}
+
+/** `hours(col)` partition transform. */
+export function hours(col: ColumnOrName): EBuilder {
+    return invoke("hours", [c(col)]);
+}
+
+/** `bucket(numBuckets, col)` partition transform: hashes `col` into `numBuckets` partitions. */
+export function bucket(numBuckets: number, col: ColumnOrName): EBuilder {
+    if (!Number.isInteger(numBuckets) || numBuckets < 1) {
+        throw new RangeError("bucket() numBuckets must be a positive integer.");
+    }
+    return invoke("bucket", [l(numBuckets), c(col)]);
+}
+
+// Dynamic calls ---------------------------------------------------------------
+
+/**
+ * `call_function(name, ...cols)`: calls any Spark SQL function by name, with
+ * PySpark's argument rules (a bare string is a column name). Use `call()` from
+ * the package root when some arguments must be literals.
+ */
+export function call_function(name: string, ...cols: ColumnOrName[]): EBuilder {
+    if (typeof name !== "string" || name.trim() === "") {
+        throw new TypeError("call_function() needs a function name.");
+    }
+    return invoke(name, cols.map(c));
+}

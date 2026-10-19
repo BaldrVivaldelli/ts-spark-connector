@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SparkSession, col, schema } from "../src";
+import { SparkSession, bucket, col, schema, years } from "../src";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
 const caPath = process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt";
@@ -114,6 +114,29 @@ describe("iceberg", () => {
 
         const snapshots = await session.sql(`SELECT COUNT(*) AS n FROM ${table}.snapshots`).collect();
         expect(Number(snapshots[0]!.n)).toBeGreaterThan(0);
+    });
+
+    it("creates a table partitioned by transforms through writeTo", async ctx => {
+        if (!icebergExpected) return ctx.skip();
+
+        const partitioned = "iceberg.e2e.lakehouse_partitioned";
+        const Visits = schema({ id: "long", at: "timestamp" });
+        const visits = [
+            { id: 1n, at: "2024-01-02T03:04:05.000Z" },
+            { id: 2n, at: "2025-06-07T08:09:10.000Z" },
+        ];
+        await session.sql(`DROP TABLE IF EXISTS ${partitioned}`).collectRaw();
+        await session
+            .createDataFrame(visits, Visits)
+            .writeTo(partitioned)
+            .using("iceberg")
+            .partitionedBy(years(col("at")), bucket(4, col("id")))
+            .create();
+
+        const back = await session.table(partitioned).as<typeof visits[number]>().collect();
+        expect(byId(back)).toEqual(visits);
+        const [created] = await session.sql(`SHOW CREATE TABLE ${partitioned}`).collect();
+        expect(JSON.stringify(created)).toMatch(/PARTITIONED BY \(years\(at\), bucket\(4, id\)\)/);
     });
 
     it("appends through the catalog identifier", async ctx => {
