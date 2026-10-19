@@ -15,6 +15,8 @@ export interface SparkStructField {
     readonly dataType: string;
     /** Whether Spark allows nulls in the column. */
     readonly nullable: boolean;
+    /** Column metadata as the JSON Spark stores it (`withMetadata`), when any. */
+    readonly metadata?: string;
 }
 
 /**
@@ -138,6 +140,7 @@ function structFields(struct: ProtoDataType): SparkStructField[] {
             name: String(field.name),
             dataType: sparkDataTypeString(field.data_type),
             nullable: field.nullable === true,
+            ...(typeof field.metadata === "string" && field.metadata !== "" ? { metadata: field.metadata } : {}),
         };
     });
 }

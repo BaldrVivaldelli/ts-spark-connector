@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { SparkConnectionConfig, SparkSession } from "./session";
 import { combineSignals, ResolvedExecution } from "./executionOptions";
+import { Observation, observedMetricsOf } from "../read/observation";
 import type { ProtoRel } from "../engine/compilerRead";
 import { sparkGrpcClient, StreamingQueryHandle } from "./sparkClient";
 import type { NormalizedStreamingQueryInstanceId } from "./streamingProtocol";
@@ -58,6 +59,30 @@ type AnalyzeAction =
     | { kind: "persist"; relation: unknown; level: string }
     | { kind: "unpersist"; relation: unknown; blocking?: boolean };
 
+function beginObservations(execution: ResolvedExecution): readonly Observation[] {
+    const observations = execution.observations ?? [];
+    for (const observation of observations) observation.begin();
+    return observations;
+}
+
+/** Hands each ObservedMetrics of a response to the observations of this execution with that name. */
+function deliverObservedMetrics(observations: readonly Observation[], response: unknown): void {
+    if (observations.length === 0) return;
+    for (const metrics of observedMetricsOf(response)) {
+        for (const observation of observations) {
+            if (observation.name === metrics.name) observation.record(metrics.values);
+        }
+    }
+}
+
+function settleObservations(observations: readonly Observation[], failure?: unknown): void {
+    if (observations.length === 0) return;
+    const error = failure === undefined
+        ? undefined
+        : failure instanceof Error ? failure : new Error(String(failure));
+    for (const observation of observations) observation.settle(error);
+}
+
 /**
  * Runs already-compiled Spark Connect relations. `ProtoDFAlg` produces the
  * `ProtoRel` directly; the client-side `LogicalPlan` AST in ../engine/logicalPlan
@@ -81,12 +106,14 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     ): Promise<ExecutePlanResponse[]> {
         await this.prepareSession();
         const request = this.buildExecuteRequest(plan, execution);
-        const responses = await this.remote(() =>
-            sparkGrpcClient.executePlan(request, this.connectionConfigFor(execution))
-        );
-        responses.forEach(response => this.session.observeServerSideSessionId(response));
-        responses.forEach(response => this.session.recordObservedMetrics(response));
-        return responses;
+        return this.observing(execution, async observations => {
+            const responses = await this.remote(() =>
+                sparkGrpcClient.executePlan(request, this.connectionConfigFor(execution))
+            );
+            responses.forEach(response => this.session.observeServerSideSessionId(response));
+            responses.forEach(response => deliverObservedMetrics(observations, response));
+            return responses;
+        });
     }
 
     /** Streams ExecutePlan responses without materializing the complete result. */
@@ -96,18 +123,30 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
         await this.prepareSession();
         const request = this.buildExecuteRequest(plan, execution);
+        const observations = beginObservations(execution);
+        let completed = false;
+        let failure: unknown;
         try {
             for await (const response of sparkGrpcClient.executePlanStream(
                 request,
                 this.connectionConfigFor(execution)
             )) {
                 this.session.observeServerSideSessionId(response);
-                this.session.recordObservedMetrics(response);
+                deliverObservedMetrics(observations, response);
                 yield response;
             }
+            completed = true;
         } catch (error) {
+            failure = error;
             this.session.observeRemoteError(error);
             throw error;
+        } finally {
+            // A consumer that stops iterating early lands here without a
+            // failure; the observations must not wait for a response that will
+            // never be read.
+            settleObservations(observations, failure ?? (completed ? undefined : new Error(
+                "The result stream was abandoned before Spark reported the observed metrics."
+            )));
         }
     }
 
@@ -195,9 +234,12 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
             ...this.observedServerSessionField(),
         };
         const config = this.connectionConfigFor(execution);
-        const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
-        responses.forEach(response => this.session.observeServerSideSessionId(response));
-        return responses;
+        return this.observing(execution, async observations => {
+            const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
+            responses.forEach(response => this.session.observeServerSideSessionId(response));
+            responses.forEach(response => deliverObservedMetrics(observations, response));
+            return responses;
+        });
     }
 
     /**
@@ -270,9 +312,12 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         const config = this.connectionConfigFor(execution);
         // ExecutePlan recovery uses ReattachExecute with this stable operation id;
         // the original mutating command is never replayed.
-        const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
-        responses.forEach(response => this.session.observeServerSideSessionId(response));
-        return responses;
+        return this.observing(execution, async observations => {
+            const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
+            responses.forEach(response => this.session.observeServerSideSessionId(response));
+            responses.forEach(response => deliverObservedMetrics(observations, response));
+            return responses;
+        });
     }
 
     async runStream(root: ProtoWriteRoot): Promise<StreamingQueryHandle> {
@@ -319,6 +364,22 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         }
 
         return handle;
+    }
+
+    /** Runs one action, settling the execution's observations however it ends. */
+    private async observing<T>(
+        execution: ResolvedExecution,
+        action: (observations: readonly Observation[]) => Promise<T>,
+    ): Promise<T> {
+        const observations = beginObservations(execution);
+        try {
+            const result = await action(observations);
+            settleObservations(observations);
+            return result;
+        } catch (error) {
+            settleObservations(observations, error);
+            throw error;
+        }
     }
 
     private buildExecuteRequest(root: ProtoRel, execution: ResolvedExecution): ExecutePlanRequest {

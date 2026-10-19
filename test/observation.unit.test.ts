@@ -29,6 +29,32 @@ describe("Observation", () => {
         observation.record({ rows: 4n });
         await expect(observation.get()).resolves.toEqual({ rows: 4n });
     });
+
+    it("tracks overlapping actions and settles pending readers without metrics", async () => {
+        const observation = new Observation("stats");
+        observation.begin();
+        observation.begin();
+        const pending = observation.get();
+        observation.record({ rows: 1n });
+        observation.settle();
+        // Still in flight for the second action: readers wait for it.
+        const waiting = observation.get();
+        observation.settle();
+        await expect(pending).resolves.toEqual({ rows: 1n });
+        await expect(waiting).resolves.toEqual({ rows: 1n });
+
+        const silent = new Observation("silent");
+        silent.begin();
+        const unanswered = silent.get();
+        silent.settle();
+        await expect(unanswered).rejects.toThrow(/without Spark reporting the metrics of observation "silent"/);
+        await expect(silent.get()).rejects.toThrow(/without Spark reporting/);
+
+        const failed = new Observation("failed");
+        failed.begin();
+        failed.settle(new Error("boom"));
+        await expect(failed.get()).rejects.toThrow("boom");
+    });
 });
 
 describe("literalValue", () => {

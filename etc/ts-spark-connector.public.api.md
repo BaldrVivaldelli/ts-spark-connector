@@ -721,6 +721,7 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
         EXE?: DFWritingExec<W>;
         DF?: DFAlg<R, E, G, CDF>;
         EX?: ExprAlg<E> & CEX;
+        observations?: readonly Observation[];
     }): DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>;
     // (undocumented)
     static fromStreamProgram<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>, prog: StreamWProgram<R, E, G, CDF, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>;
@@ -2106,7 +2107,9 @@ export function rank(): EBuilder;
 
 // @public
 export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G = unknown, CDF = {}, CEX = {}> {
-    constructor(p: DFProgram<R, E, G, CDF, CEX>, session: SparkSession, streaming?: boolean, runtimeSchema?: SchemaDef | undefined);
+    constructor(p: DFProgram<R, E, G, CDF, CEX>, session: SparkSession, streaming?: boolean, runtimeSchema?: SchemaDef | undefined,
+    observations?: readonly Observation[],
+    checkpointRelationId?: string | undefined);
     alias(name: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
     // (undocumented)
@@ -2218,6 +2221,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<S, R, E, G, CDF & SamplingCap<R>, CEX>[];
     // (undocumented)
     static readStream<R, E, G, CDF = unknown, CEX = unknown>(format: string, session: SparkSession, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingReadCap<R> & StreamingMark<R>, CEX>;
+    releaseCheckpoint(): Promise<void>;
     repartition(numPartitions: number, shuffle?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     // (undocumented)
     repartition(numPartitions: number, ...cols: [ColumnName<S> | DataFrameExpressionBuilder, ...Array<ColumnName<S> | DataFrameExpressionBuilder>]): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
@@ -2808,6 +2812,7 @@ export class SparkSessionBuilder {
 // @public
 export interface SparkStructField {
     readonly dataType: string;
+    readonly metadata?: string;
     readonly name: string;
     readonly nullable: boolean;
 }

@@ -1,10 +1,16 @@
 import crypto from "crypto";
 
+type Waiter = {
+    resolve: (values: Record<string, unknown>) => void;
+    reject: (error: Error) => void;
+};
+
 /**
  * Named metrics collected while an action runs over a DataFrame that called
  * `observe(observation, ...metrics)`. Spark evaluates the aggregate
  * expressions over the rows the plan produces and reports the values once
- * per action, so `get()` resolves after the action that ran them.
+ * per action (`collect`, `toRows`, `save`, `writeTo`, `mergeInto`, ...), so
+ * `get()` resolves after the action that ran them.
  *
  * ```ts
  * const stats = new Observation("stats");
@@ -15,8 +21,10 @@ import crypto from "crypto";
  */
 export class Observation {
     readonly name: string;
-    private latest?: Record<string, unknown>;
-    private waiters: Array<(values: Record<string, unknown>) => void> = [];
+    private outcome?: { values: Record<string, unknown> } | { error: Error };
+    private inFlight = 0;
+    private delivered = false;
+    private waiters: Waiter[] = [];
 
     /** `name` defaults to a unique `observation_<uuid>`. */
     constructor(name?: string) {
@@ -27,27 +35,65 @@ export class Observation {
     }
 
     /**
-     * The metrics of the last action that ran this observation, or of the next
-     * one when none has run yet. Each key is the metric's column alias.
+     * The metrics of the last action that ran this observation. While an
+     * action is running it waits for that action; after one that failed, or
+     * whose result stream was abandoned before Spark reported the metrics, it
+     * rejects with that failure. Before any action it waits for the first one,
+     * like PySpark's blocking `Observation.get`.
      */
     get(): Promise<Record<string, unknown>> {
-        if (this.latest !== undefined) return Promise.resolve({ ...this.latest });
-        return new Promise(resolve => {
-            this.waiters.push(resolve);
+        if (this.inFlight === 0 && this.outcome !== undefined) {
+            return "values" in this.outcome
+                ? Promise.resolve({ ...this.outcome.values })
+                : Promise.reject(this.outcome.error);
+        }
+        return new Promise((resolve, reject) => {
+            this.waiters.push({ resolve, reject });
         });
     }
 
-    /** The last metrics received, or `undefined` before any action ran. */
+    /** The last metrics received, or `undefined` before any action reported them. */
     get values(): Record<string, unknown> | undefined {
-        return this.latest === undefined ? undefined : { ...this.latest };
+        return this.outcome !== undefined && "values" in this.outcome ? { ...this.outcome.values } : undefined;
     }
 
-    /** @internal Called by the session when an ExecutePlan response carries this observation. */
+    /** @internal An action over a plan that observes this starts. */
+    begin(): void {
+        if (this.inFlight === 0) this.delivered = false;
+        this.inFlight += 1;
+    }
+
+    /** @internal Spark reported the metrics of the running action. */
     record(values: Record<string, unknown>): void {
-        this.latest = values;
+        this.outcome = { values };
+        this.delivered = true;
+        for (const waiter of this.takeWaiters()) waiter.resolve({ ...values });
+    }
+
+    /**
+     * @internal The action ended. Without metrics, `error` says why (the
+     * action failed or its stream was abandoned); nobody is left waiting.
+     */
+    settle(error?: Error): void {
+        this.inFlight = Math.max(0, this.inFlight - 1);
+        if (this.delivered) {
+            // Readers that arrived after the metrics (an overlapping action,
+            // for instance) get the values that were delivered.
+            const { values } = this.outcome as { values: Record<string, unknown> };
+            for (const waiter of this.takeWaiters()) waiter.resolve({ ...values });
+            return;
+        }
+        const failure = error ?? new Error(
+            `The action ended without Spark reporting the metrics of observation ${JSON.stringify(this.name)}.`
+        );
+        this.outcome = { error: failure };
+        for (const waiter of this.takeWaiters()) waiter.reject(failure);
+    }
+
+    private takeWaiters(): Waiter[] {
         const waiting = this.waiters;
         this.waiters = [];
-        for (const resolve of waiting) resolve({ ...values });
+        return waiting;
     }
 }
 

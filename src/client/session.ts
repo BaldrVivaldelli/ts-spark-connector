@@ -3,7 +3,6 @@ import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import { SparkCatalog } from "./catalog";
 import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
-import { Observation, observedMetricsOf } from "../read/observation";
 import { DFProgram, StreamingMark } from "../algebra/read";
 import { SqlCap } from "../algebra/read/batch-capabilities";
 import { DeclaredSchema, InferSchema, SchemaDef, schema } from "../schema/schema";
@@ -266,6 +265,8 @@ function rangeBound(label: string, value: number | bigint): bigint {
     }
     return BigInt(value);
 }
+/** gRPC status UNAVAILABLE: the server cannot be reached, so further cleanup RPCs are pointless. */
+const GRPC_UNAVAILABLE = 14;
 
 /** @public */
 export class SparkSession implements SessionAlgebra {
@@ -284,7 +285,6 @@ export class SparkSession implements SessionAlgebra {
     private readonly runtimeConfig: SparkRuntimeConfig;
     private readonly tags = new Set<string>();
     private serverVersion?: Promise<string>;
-    private readonly observations = new Map<string, Observation>();
     private readonly cachedRelationIds = new Set<string>();
     private streamingQueryManager?: StreamingQueryManager;
     /** Connection config as given to the builder, before runtime `conf.set()` mirrors into it. */
@@ -717,21 +717,14 @@ export class SparkSession implements SessionAlgebra {
         };
     }
 
-    /** @internal Routes the observed metrics of later actions to `observation`. */
-    registerObservation(observation: Observation): void {
-        this.observations.set(observation.name, observation);
-    }
-
-    /** @internal Delivers the observed metrics of an ExecutePlan response to the matching observations. */
-    recordObservedMetrics(response: unknown): void {
-        for (const metrics of observedMetricsOf(response)) {
-            this.observations.get(metrics.name)?.record(metrics.values);
-        }
-    }
-
     /** @internal Remembers a checkpointed relation so `close()` releases it on the server. */
     trackCachedRelation(relationId: string): void {
         this.cachedRelationIds.add(relationId);
+    }
+
+    /** @internal Forgets a relation about to be released; false when it was released already. */
+    untrackCachedRelation(relationId: string): boolean {
+        return this.cachedRelationIds.delete(relationId);
     }
 
     /** @internal Snapshots per-execution controls when an action starts. */
@@ -906,30 +899,29 @@ export class SparkSession implements SessionAlgebra {
     }
 
     /**
-     * Checkpointed relations stay cached on the server until released, as
-     * PySpark does when the DataFrame is garbage collected. Best effort: a
-     * failure here never blocks closing, and the server drops the cache with
-     * the session eventually.
+     * Checkpointed relations not released with `releaseCheckpoint()` are
+     * released here, as PySpark does when the DataFrame is garbage collected.
+     * Best effort and bounded: every release runs at once under the cleanup
+     * deadline, the first UNAVAILABLE cancels the rest (ReleaseSession drops
+     * the cache anyway), and no failure blocks closing.
      */
     private async releaseCachedRelations(config: SparkConnectionConfig): Promise<void> {
         const relationIds = [...this.cachedRelationIds];
         this.cachedRelationIds.clear();
-        for (const relationId of relationIds) {
-            try {
-                await sparkGrpcClient.executePlan({
-                    plan: { command: { remove_cached_remote_relation_command: { relation: { relation_id: relationId } } } },
-                    session_id: this.sessionId,
-                    user_context: this.getUserContext(),
-                    client_type: "ts-spark-connector",
-                    operation_id: crypto.randomUUID(),
-                    ...(this.serverSideSessionId
-                        ? { client_observed_server_side_session_id: this.serverSideSessionId }
-                        : {}),
-                }, config);
-            } catch {
-                // Cleanup only; see above.
-            }
-        }
+        const unreachable = new AbortController();
+        const releaseConfig = { ...config, signal: unreachable.signal };
+        await Promise.all(relationIds.map(relationId => sparkGrpcClient.executePlan({
+            plan: { command: { remove_cached_remote_relation_command: { relation: { relation_id: relationId } } } },
+            session_id: this.sessionId,
+            user_context: this.getUserContext(),
+            client_type: "ts-spark-connector",
+            operation_id: crypto.randomUUID(),
+            ...(this.serverSideSessionId
+                ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                : {}),
+        }, releaseConfig).catch(error => {
+            if ((error as { code?: unknown } | null)?.code === GRPC_UNAVAILABLE) unreachable.abort(error);
+        })));
     }
 
     /** Alias matching Spark clients that call session shutdown `stop()`. */

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { CANONICAL_UUID } from "./sessionConfig";
+import type { Observation } from "../read/observation";
 
 /**
  * Per-execution controls accepted by DataFrame actions such as `collect()`.
@@ -34,6 +35,8 @@ export type ResolvedExecution = {
     signal?: AbortSignal;
     tags: string[];
     operationId: string;
+    /** Observations of the plan being run; the executor delivers their metrics and settles them. */
+    observations?: readonly Observation[];
 };
 
 /** Mirrors Spark Connect's server-side tag validation. */

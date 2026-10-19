@@ -1,4 +1,5 @@
 // src/write/dataFrameWriterTF.ts
+import type { Observation } from "../read/observation";
 import { SparkSession } from "../client/session";
 
 import { ProtoDFAlg, ProtoExprAlg } from "../engine/compilerRead";
@@ -186,7 +187,9 @@ export class DataFrameWriterTF<
         private readonly WR?: WRALG,
         private readonly EXE?: DFWritingExec<W>,
         private readonly DF?: DFAlg<R, E, G, CDF>,
-        private readonly EX?: ExprAlg<E> & CEX
+        private readonly EX?: ExprAlg<E> & CEX,
+        /** Observations of the source DataFrame; their metrics arrive with the write. */
+        private readonly observations: readonly Observation[] = [],
     ) {}
 
     static fromBatchProgram<R, E, G, CDF, CEX>(
@@ -219,6 +222,7 @@ export class DataFrameWriterTF<
         EXE?: DFWritingExec<W>;
         DF?: DFAlg<R, E, G, CDF>;
         EX?: ExprAlg<E> & CEX;
+        observations?: readonly Observation[];
     }) {
         return new DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>(
             args.session,
@@ -227,7 +231,8 @@ export class DataFrameWriterTF<
             args.WR,
             args.EXE,
             args.DF,
-            args.EX
+            args.EX,
+            args.observations,
         );
     }
 
@@ -239,7 +244,8 @@ export class DataFrameWriterTF<
             impl.WR,
             impl.EXE,
             impl.DF,
-            impl.EX
+            impl.EX,
+            this.observations,
         );
     }
 
@@ -253,8 +259,15 @@ export class DataFrameWriterTF<
             this.WR,
             this.EXE,
             this.DF,
-            this.EX
+            this.EX,
+            this.observations,
         );
+    }
+
+    /** Runs a batch write, handing the executor the source's observations when there are any. */
+    private runBatch(EXE: DFWritingExec<W>, root: W): Promise<void> {
+        if (this.observations.length === 0) return EXE.run(root, this.session);
+        return EXE.run(root, this.session, { ...this.session.resolveExecution(), observations: this.observations });
     }
 
     private sharedWriterAlg(WR: WRALG): SharedWriterRuntimeAlg<W> {
@@ -316,7 +329,7 @@ export class DataFrameWriterTF<
         }
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.batchWriterAlg(WR).mode(this.wProgram(WR, DF, EX) as WBatch, m);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     bucketBy(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, n: number, col: string, ...cols: string[]) {
@@ -328,14 +341,14 @@ export class DataFrameWriterTF<
         requireColumns([col, ...cols], "bucketBy()");
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.batchWriterAlg(WR).bucketBy(this.wProgram(WR, DF, EX) as WBatch, n, col, ...cols);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     sortBy(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, col: string, ...cols: string[]) {
         requireColumns([col, ...cols], "sortBy()");
         const next: WProgram<R, E, G, WBatch, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.batchWriterAlg(WR).sortBy(this.wProgram(WR, DF, EX) as WBatch, col, ...cols);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     outputMode(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, m: "append" | "complete" | "update") {
@@ -344,21 +357,21 @@ export class DataFrameWriterTF<
         }
         const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.streamWriterAlg(WR).outputMode(this.wProgram(WR, DF, EX) as WStream, m);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     trigger(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, t: StreamTriggerInput) {
         validateTrigger(t);
         const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.streamWriterAlg(WR).trigger(this.wProgram(WR, DF, EX) as WStream, t);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     checkpoint(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, path: string) {
         requireNonEmpty(path, "checkpoint() path");
         const next: WProgram<R, E, G, WStream, CDF, CEX, WRALG> =
             (WR, DF, EX) => this.streamWriterAlg(WR).option(this.wProgram(WR, DF, EX) as WStream, "checkpointLocation", path);
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     queryName(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string) {
@@ -371,7 +384,7 @@ export class DataFrameWriterTF<
                     ? queryName(this.wProgram(WR, DF, EX) as WStream, name)
                     : writerAlg.option(this.wProgram(WR, DF, EX) as WStream, "queryName", name);
             };
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     async save(): Promise<void>;
@@ -385,7 +398,7 @@ export class DataFrameWriterTF<
         const { DF, EX, WR, EXE } = impl;
         const writer = this.wProgram(WR, DF, EX);
         const root = path ? this.sharedWriterAlg(WR).targetPath(writer, path) : writer;
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     async createOrReplaceTempView(viewName: string): Promise<void>;
@@ -395,7 +408,7 @@ export class DataFrameWriterTF<
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createOrReplaceTempView, "createOrReplaceTempView");
         const root = method(this.wProgram(WR, DF, EX), viewName);
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     async createTempView(viewName: string): Promise<void>;
@@ -405,7 +418,7 @@ export class DataFrameWriterTF<
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createTempView, "createTempView");
         const root = method(this.wProgram(WR, DF, EX), viewName);
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     /** Registers the DataFrame as a global temp view (`global_temp.<name>`); fails if it exists. */
@@ -416,7 +429,7 @@ export class DataFrameWriterTF<
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const method = this.requireWriteMethod(this.sharedWriterAlg(WR).createGlobalTempView, "createGlobalTempView");
         const root = method(this.wProgram(WR, DF, EX), viewName);
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     /** Registers or replaces the DataFrame as a global temp view (`global_temp.<name>`). */
@@ -430,7 +443,7 @@ export class DataFrameWriterTF<
             "createOrReplaceGlobalTempView",
         );
         const root = method(this.wProgram(WR, DF, EX), viewName);
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     async saveAsTable(table: string): Promise<void>;
@@ -439,7 +452,7 @@ export class DataFrameWriterTF<
         requireNonEmpty(table, "saveAsTable() table");
         const { DF, EX, WR, EXE } = impl ?? this.defaults();
         const root = this.sharedWriterAlg(WR).targetTable(this.wProgram(WR, DF, EX), table);
-        return EXE.run(root, this.session);
+        return this.runBatch(EXE, root);
     }
 
     /**
@@ -584,7 +597,7 @@ export class DataFrameWriterTF<
                 const method = this.requireWriteMethod(this.streamWriterAlg(WR).awaitTermination, "awaitTermination");
                 return method(this.wProgram(WR, DF, EX) as WStream);
             };
-        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX);
+        return new DataFrameWriterTF(this.session, this.dfProgram, next, this.WR, this.EXE, this.DF, this.EX, this.observations);
     }
 
     private defaults(): Impl<R, E, G, W, CDF, CEX, WRALG> {

@@ -44,7 +44,6 @@ function fakeSession(serverId?: string) {
         observeRemoteError: vi.fn(),
         getServerSideSessionId: vi.fn(() => serverId),
         resolveExecution: vi.fn((options?: ExecutionOptions) => resolveExecution([], options)),
-        recordObservedMetrics: vi.fn(),
         notifyStreamingQueryStarted: vi.fn(),
     };
     return {

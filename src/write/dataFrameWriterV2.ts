@@ -1,5 +1,6 @@
 import type { SparkSession } from "../client/session";
 import { applyPendingAnalyzeActions, ProtoExprAlg, ProtoRel } from "../engine/compilerRead";
+import type { Observation } from "../read/observation";
 import type { EBuilder } from "../engine/column";
 import type { WriterOptionValue } from "./dataFrameWriterTF";
 
@@ -79,12 +80,14 @@ export class DataFrameWriterV2 {
         private readonly session: SparkSession,
         private readonly relation: () => unknown,
         private readonly table: string,
+        /** Observations of the source DataFrame; their metrics arrive with the write. */
+        private readonly observations: readonly Observation[] = [],
     ) {
         requireNonEmpty(table, "writeTo() table");
     }
 
     private with(patch: Partial<WriterV2Spec>): DataFrameWriterV2 {
-        const next = new DataFrameWriterV2(this.session, this.relation, this.table);
+        const next = new DataFrameWriterV2(this.session, this.relation, this.table, this.observations);
         next.spec = { ...this.spec, ...patch };
         return next;
     }
@@ -222,6 +225,6 @@ export class DataFrameWriterV2 {
         const executor = await applyPendingAnalyzeActions(input, this.session);
         await executor.runCommand({
             write_operation_v2: this.operation(input, mode, condition),
-        });
+        }, { ...this.session.resolveExecution(), observations: this.observations });
     }
 }

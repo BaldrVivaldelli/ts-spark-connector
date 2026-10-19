@@ -1,5 +1,6 @@
 import type { SparkSession } from "../client/session";
 import { applyPendingAnalyzeActions, ProtoExpr, ProtoExprAlg, ProtoRel } from "../engine/compilerRead";
+import type { Observation } from "../read/observation";
 import type { EBuilder } from "../engine/column";
 
 
@@ -78,6 +79,8 @@ export class MergeIntoWriter {
         private readonly source: () => unknown,
         private readonly table: string,
         private readonly condition: EBuilder,
+        /** Observations of the source DataFrame; their metrics arrive with the merge. */
+        private readonly observations: readonly Observation[] = [],
     ) {
         if (typeof table !== "string" || !table.trim()) {
             throw new TypeError("mergeInto() table must be a non-empty string.");
@@ -88,7 +91,7 @@ export class MergeIntoWriter {
     }
 
     private with(patch: Partial<MergeSpec>): MergeIntoWriter {
-        const next = new MergeIntoWriter(this.session, this.source, this.table, this.condition);
+        const next = new MergeIntoWriter(this.session, this.source, this.table, this.condition, this.observations);
         next.spec = { ...this.spec, ...patch };
         return next;
     }
@@ -123,7 +126,7 @@ export class MergeIntoWriter {
         const source = this.source() as ProtoRel;
         const command = this.command(source);
         const executor = await applyPendingAnalyzeActions(source, this.session);
-        await executor.runCommand(command);
+        await executor.runCommand(command, { ...this.session.resolveExecution(), observations: this.observations });
     }
 
     /** @internal The `merge_into_table_command` sent to Spark; used by plan-inspection tests. */

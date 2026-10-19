@@ -31,8 +31,9 @@ import {
     SamplingCap,
     SqlCap,
 } from "../algebra/read/batch-capabilities";
-import { type AnalyzeField } from "../client/sparkConnectExecutor";
+import { SparkConnectExecutor, type AnalyzeField } from "../client/sparkConnectExecutor";
 import { storageLevelFromProto, toProtoStorageLevel, type StorageLevel } from "../client/storageLevel";
+import type { ResolvedExecution } from "../client/executionOptions";
 import type { EBuilder as ColumnExpression, SortKeyBuilder } from "../engine/column";
 import { DataFrameWriterV2 } from "../write/dataFrameWriterV2";
 import { MergeIntoWriter } from "../write/mergeIntoWriter";
@@ -64,7 +65,7 @@ import {
     UnknownSchema,
     UsableColumnKey,
 } from "../schema/schema-model";
-import { DeclaredSchema, type InferSchema, type SchemaDef } from "../schema/schema";
+import { DeclaredSchema, schema as declareSchema, type FieldSpec, type InferSchema, type SchemaDef } from "../schema/schema";
 import {
     Aggregated,
     Dropped,
@@ -362,8 +363,33 @@ export type GroupingInput = {
     groupingSets?: Array<Array<string | EBuilder>>;
 };
 
-const LATERAL_JOIN_TYPES = new Set(["INNER", "CROSS", "LEFT", "LEFT_OUTER", "LEFTOUTER"]);
+const LATERAL_JOIN_TYPES = new Set(["INNER", "CROSS", "LEFT", "LEFT_OUTER"]);
 const AS_OF_DIRECTIONS = new Set<AsOfDirection>(["backward", "forward", "nearest"]);
+
+/**
+ * `to(schema)` reconciles a source whose columns Spark already reports as
+ * nullable (every file and table source), and Spark refuses to cast those to
+ * NOT NULL fields. The DDL sent is therefore nullable throughout, while the
+ * declaration itself stays the runtime schema, which the Arrow decoder
+ * enforces against the data.
+ */
+function nullableSpec(spec: FieldSpec): FieldSpec {
+    if (typeof spec === "string") return (spec.endsWith("?") ? spec : `${spec}?`) as FieldSpec;
+    switch (spec.kind) {
+        case "array":
+            return { ...spec, element: nullableSpec(spec.element), nullable: true };
+        case "map":
+            return { ...spec, value: nullableSpec(spec.value), nullable: true };
+        case "struct":
+            return { ...spec, fields: nullableFields(spec.fields), nullable: true };
+        default:
+            return { ...spec, nullable: true };
+    }
+}
+
+function nullableFields(def: SchemaDef): SchemaDef {
+    return Object.fromEntries(Object.entries(def).map(([name, spec]) => [name, nullableSpec(spec)]));
+}
 
 /** The relation id a CheckpointCommand reports, if any. */
 function checkpointRelationId(responses: readonly unknown[]): string | undefined {
@@ -424,6 +450,10 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         private readonly session: SparkSession,
         private readonly streaming = false,
         private readonly runtimeSchema?: SchemaDef,
+        /** Observations registered with `observe()` anywhere in this plan. */
+        private readonly observations: readonly Observation[] = [],
+        /** Set on the DataFrame `checkpoint()` returns; `releaseCheckpoint()` needs it. */
+        private readonly checkpointRelationId?: string,
     ) {
         this.prog = p;
     }
@@ -468,6 +498,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         step: (df: R, EX: ExprAlg<E> & CEX & CEX2, DF: DFAlg<R, E, G, CDF & CDF2>) => R,
         schemaTransform: (schema: SchemaDef | undefined) => SchemaDef | undefined = schema => schema,
         streaming: boolean = this.streaming,
+        observations: readonly Observation[] = this.observations,
     ): ReadChainedDataFrame<NS, R, E, G, CDF & CDF2, CEX & CEX2> {
         const next: DFProgram<R, E, G, CDF & CDF2, CEX & CEX2> = (DF, EX) =>
             step(this.prog(DF, EX), EX, DF);
@@ -476,7 +507,19 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             this.session,
             streaming,
             schemaTransform(this.runtimeSchema),
+            observations,
         );
+    }
+
+    /** Per-execution controls for an action, including this plan's observations. */
+    private execution(options?: ExecutionOptions): ResolvedExecution {
+        const resolved = this.session.resolveExecution(options);
+        return this.observations.length === 0 ? resolved : { ...resolved, observations: this.observations };
+    }
+
+    /** @internal Observations registered anywhere in this plan. */
+    getObservations(): readonly Observation[] {
+        return this.observations;
     }
 
     select<K extends ColumnName<S>>(
@@ -598,7 +641,8 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                 )
                 : on;
             return DF.join(leftPlan, rightPlan, condition.build(EX), jt);
-        }, schema => joinRuntimeSchema(schema, right.runtimeSchema, jt), this.streaming || right.streaming);
+        }, schema => joinRuntimeSchema(schema, right.runtimeSchema, jt), this.streaming || right.streaming,
+            [...this.observations, ...right.observations]);
     }
 
 
@@ -664,6 +708,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -690,6 +735,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
                 ? schema
                 : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -703,6 +749,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -717,6 +764,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -730,6 +778,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -744,6 +793,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => schemaDefsEqual(schema, right.runtimeSchema) ? schema : undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -945,6 +995,8 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             this.session,
             this.streaming,
             undefined,
+            this.observations,
+            this.checkpointRelationId,
         );
     }
 
@@ -971,7 +1023,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
      * cancels or tags this execution only; see `ExecutionOptions`.
      */
     async collectRaw(options?: ExecutionOptions): Promise<unknown[]> {
-        const execution = this.session.resolveExecution(options);
+        const execution = this.execution(options);
         const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         return ProtoExec.collect(root, this.session, execution);
     }
@@ -981,7 +1033,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
      * Session tags are read when iteration starts.
      */
     async *streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void> {
-        const execution = this.session.resolveExecution(options);
+        const execution = this.execution(options);
         const root = this.interpretWith<ProtoRel>(ProtoDFAlg, ProtoExprAlg);
         const executor = await applyPendingAnalyzeActions(root, this.session);
         for await (const response of executor.stream(root, execution)) {
@@ -1070,6 +1122,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             session: this.getSession(),
             dfProgram,
             wProgram,
+            observations: this.observations,
         });
     }
 
@@ -1429,6 +1482,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             schema => joinRuntimeSchema(schema, right.runtimeSchema, "CROSS"),
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -1580,6 +1634,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             ),
             () => undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
@@ -1639,21 +1694,33 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             },
             () => undefined,
             this.streaming || right.streaming,
+            [...this.observations, ...right.observations],
         );
     }
 
     /**
      * Collects named aggregate metrics while an action runs, without a second
      * pass over the data. With an `Observation`, the values are available
-     * from `observation.get()` after the action; with a plain name they only
-     * reach query listeners and the UI, as in PySpark.
+     * from `observation.get()` after any action on this DataFrame or one
+     * derived from it (`collect`, `toRows`, `save`, `writeTo`, `mergeInto`,
+     * ...); with a plain name they only reach query listeners and the UI, as
+     * in PySpark. Streaming DataFrames report metrics to listeners only.
      */
     observe(observation: Observation | string, ...metrics: EBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX> {
+        if (this.streaming) {
+            throw new TypeError(
+                "observe() is not available on a streaming DataFrame: Spark reports its metrics to streaming query listeners only."
+            );
+        }
         if (metrics.length === 0) throw new TypeError("observe() requires at least one metric expression.");
         const name = typeof observation === "string" ? observation : observation.name;
         assertNonEmptyString("observe() name", name);
-        if (typeof observation !== "string") this.session.registerObservation(observation);
-        return this.chain((df, EX, DF) => DF.observe(df, name, metrics.map(metric => metric.build(EX))));
+        return this.chainAs<S>(
+            (df, EX, DF) => DF.observe(df, name, metrics.map(metric => metric.build(EX))),
+            schema => schema,
+            this.streaming,
+            typeof observation === "string" ? this.observations : [...this.observations, observation],
+        );
     }
 
     /**
@@ -1671,7 +1738,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         if (!(target instanceof DeclaredSchema)) {
             throw new TypeError("to() requires a DDL string or a schema declared with schema({...}).");
         }
-        const ddl = target.toDDL();
+        const ddl = declareSchema(nullableFields(target.def)).toDDL();
         return this.chainAs<any>((df, _EX, DF) => DF.toSchema(df, ddl), () => target.def);
     }
 
@@ -1861,7 +1928,30 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
             this.session,
             false,
             this.runtimeSchema,
+            [],
+            relationId,
         );
+    }
+
+    /**
+     * Frees the server-side data behind the DataFrame `checkpoint()` or
+     * `localCheckpoint()` returned. Idempotent; `close()` releases whatever
+     * was not released explicitly.
+     */
+    async releaseCheckpoint(): Promise<void> {
+        const relationId = this.checkpointRelationId;
+        if (relationId === undefined) {
+            throw new TypeError("releaseCheckpoint() applies to the DataFrame returned by checkpoint() or localCheckpoint().");
+        }
+        if (!this.session.untrackCachedRelation(relationId)) return;
+        try {
+            await SparkConnectExecutor.for(this.session).runCommand({
+                remove_cached_remote_relation_command: { relation: { relation_id: relationId } },
+            });
+        } catch (error) {
+            this.session.trackCachedRelation(relationId);
+            throw error;
+        }
     }
 
     /**
@@ -1904,7 +1994,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         if (this.streaming) {
             throw new Error("Cannot use writeTo() on a streaming DataFrame. Use writeStream() instead.");
         }
-        return new DataFrameWriterV2(this.session, () => this.toProtoRelation(), table);
+        return new DataFrameWriterV2(this.session, () => this.toProtoRelation(), table, this.observations);
     }
 
     /**
@@ -1920,7 +2010,7 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
         if (this.streaming) {
             throw new Error("Cannot use mergeInto() on a streaming DataFrame.");
         }
-        return new MergeIntoWriter(this.session, () => this.toProtoRelation(), table, condition);
+        return new MergeIntoWriter(this.session, () => this.toProtoRelation(), table, condition, this.observations);
     }
 
     private toProtoRelation(): ProtoRel {
@@ -2118,6 +2208,8 @@ export class GroupedDataFrameTF<
             next,
             this.source.getSession(),
             this.source.isStreamingDataFrame(),
+            undefined,
+            this.source.getObservations(),
         );
     }
 }

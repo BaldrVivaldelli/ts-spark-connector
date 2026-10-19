@@ -7,6 +7,16 @@ import { ProtoDFAlg, ProtoExprAlg } from "../src/engine/compilerRead";
 import { ProtoWritingAlg } from "../src/write/compilerWrite";
 import { storageLevelFromProto } from "../src/client/storageLevel";
 
+function metricsResponse(name: string, values: Record<string, bigint>): Record<string, unknown> {
+    return {
+        observed_metrics: [{
+            name,
+            keys: Object.keys(values),
+            values: Object.values(values).map(value => ({ literal_type: "long", long: String(value) })),
+        }],
+    };
+}
+
 type ProtoObject = Record<string, any>;
 
 function proto(df: { toProtoJSON(): string }): ProtoObject {
@@ -142,6 +152,7 @@ describe("lateral and as-of joins", () => {
         expect(bare).not.toHaveProperty("join_condition");
         expect(proto(people().lateralJoin(right, undefined, "cross")).lateral_join.join_type).toBe(JoinType.JOIN_TYPE_CROSS);
         expect(() => people().lateralJoin(right, undefined, "RIGHT")).toThrow(/inner, cross and left outer/);
+        expect(() => people().lateralJoin(right, undefined, "LEFTOUTER" as never)).toThrow(/inner, cross and left outer/);
         expect(people().lateralJoin(session.readStream("rate")).isStreamingDataFrame()).toBe(true);
     });
 
@@ -227,6 +238,112 @@ describe("observe", () => {
         expect(proto(lax().observe("named", col("k"))).collect_metrics.name).toBe("named");
         expect(() => lax().observe("named")).toThrow(/at least one metric/);
         expect(() => lax().observe("", col("k"))).toThrow(TypeError);
+        expect(() => session.readStream("rate").observe(new Observation("s"), col("value")))
+            .toThrow(/streaming DataFrame/);
+    });
+
+    it("delivers metrics through save", async () => {
+        const saved = new Observation("saved");
+        const execute = mockExecute(metricsResponse("saved", { ks: 2n }));
+        await lax().observe(saved, col("k").alias("ks")).write().parquet().mode("overwrite").save("/tmp/out");
+        expect(execute).toHaveBeenCalledOnce();
+        expect(saved.values).toEqual({ ks: 2n });
+        await expect(saved.get()).resolves.toEqual({ ks: 2n });
+    });
+
+    it("delivers metrics through writeTo", async () => {
+        const appended = new Observation("appended");
+        mockExecute(metricsResponse("appended", { ks: 3n }));
+        await lax().observe(appended, col("k").alias("ks")).writeTo("catalog.t").append();
+        expect(appended.values).toEqual({ ks: 3n });
+        await expect(appended.get()).resolves.toEqual({ ks: 3n });
+    });
+
+    it("delivers metrics through mergeInto", async () => {
+        const merged = new Observation("merged");
+        mockExecute(metricsResponse("merged", { ks: 4n }));
+        await lax().observe(merged, col("k").alias("ks"))
+            .mergeInto("catalog.t", col("catalog.t.k").eq(col("k")))
+            .whenMatched().updateAll()
+            .merge();
+        expect(merged.values).toEqual({ ks: 4n });
+        await expect(merged.get()).resolves.toEqual({ ks: 4n });
+    });
+
+    it("hands a writer backend the observations with the execution", async () => {
+        const run = vi.fn(async () => undefined);
+        const impl = { DF: ProtoDFAlg, EX: ProtoExprAlg, WR: ProtoWritingAlg, EXE: { run, runStream: vi.fn() } } as never;
+        const stats = new Observation("stats");
+        await lax().observe(stats, col("k")).write().save("/x", impl);
+        expect(run.mock.calls[0]).toHaveLength(3);
+        expect((run.mock.calls[0] as unknown[])[2]).toMatchObject({ observations: [stats], tags: [] });
+        await lax().write().save("/x", impl);
+        expect(run.mock.calls[1]).toHaveLength(2);
+    });
+
+    it("settles the observation when the action fails or its stream is abandoned", async () => {
+        const failed = new Observation("failed");
+        vi.spyOn(sparkGrpcClient, "executePlan").mockRejectedValueOnce(new Error("boom"));
+        const df = lax().observe(failed, col("k").alias("ks"));
+        await expect(df.collect()).rejects.toThrow("boom");
+        await expect(failed.get()).rejects.toThrow("boom");
+
+        // Anything thrown that is not an Error still settles the observation.
+        vi.spyOn(sparkGrpcClient, "executePlan").mockRejectedValueOnce("plain failure");
+        await expect(df.collect()).rejects.toBe("plain failure");
+        await expect(failed.get()).rejects.toThrow("plain failure");
+
+        // A later successful action replaces the failure.
+        mockExecute(metricsResponse("failed", { ks: 1n }), arrowResponse({ k: ["a"] }));
+        await df.collect();
+        await expect(failed.get()).resolves.toEqual({ ks: 1n });
+
+        const abandoned = new Observation("abandoned");
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(async function* () {
+            yield arrowResponse({ k: ["a"] });
+            yield metricsResponse("abandoned", { ks: 1n });
+        });
+        for await (const row of lax().observe(abandoned, col("k").alias("ks")).toRows()) {
+            expect(row).toEqual({ k: "a" });
+            break;
+        }
+        await expect(abandoned.get()).rejects.toThrow(/abandoned before Spark reported/);
+
+        const silent = new Observation("silent");
+        mockExecute(arrowResponse({ k: ["a"] }));
+        await lax().observe(silent, col("k").alias("ks")).collect();
+        await expect(silent.get()).rejects.toThrow(/without Spark reporting the metrics/);
+    });
+
+    it("delivers only to the observations of the plan that ran, even with equal names", async () => {
+        const first = new Observation("stats");
+        const second = new Observation("stats");
+        const one = lax().observe(first, col("k").alias("ks"));
+        const two = lax().observe(second, col("k").alias("ks"));
+        const pendingSecond = second.get();
+
+        mockExecute(metricsResponse("stats", { ks: 1n }));
+        await one.collect();
+        expect(first.values).toEqual({ ks: 1n });
+        expect(second.values).toBeUndefined();
+
+        mockExecute(metricsResponse("stats", { ks: 2n }));
+        await two.collect();
+        await expect(pendingSecond).resolves.toEqual({ ks: 2n });
+    });
+
+    it("carries observations through binary operations, grouping and schema casts", async () => {
+        const left = new Observation("left");
+        const right = new Observation("right");
+        const grouped = new Observation("grouped");
+        mockExecute(metricsResponse("left", { ks: 1n }), metricsResponse("right", { ks: 2n }));
+        await lax().observe(left, col("k").alias("ks")).union(lax().observe(right, col("k").alias("ks"))).collect();
+        expect(left.values).toEqual({ ks: 1n });
+        expect(right.values).toEqual({ ks: 2n });
+
+        mockExecute(metricsResponse("grouped", { ks: 3n }));
+        await lax().observe(grouped, col("k").alias("ks")).groupBy("k").agg({ n: "count(k)" }).as().collect();
+        expect(grouped.values).toEqual({ ks: 3n });
     });
 });
 
@@ -238,7 +355,7 @@ describe("schema reconciliation, metadata and JSON rows", () => {
         });
         const declared = schema({ name: "string?", id: "int" });
         const typed = lax().to(declared);
-        expect(proto(typed).to_schema.schema.unparsed.data_type_string).toBe(declared.toDDL());
+        expect(proto(typed).to_schema.schema.unparsed.data_type_string).toBe("name STRING, id INT");
 
         const table = new arrow.Table({
             name: arrow.vectorFromArray(["ada"], new arrow.Utf8()),
@@ -249,6 +366,47 @@ describe("schema reconciliation, metadata and JSON rows", () => {
 
         expect(() => lax().to("")).toThrow(TypeError);
         expect(() => lax().to({} as never)).toThrow(/DDL string or a schema/);
+    });
+
+    it("sends a nullable DDL for to(schema) while enforcing the declaration on decode", async () => {
+        const declared = schema({
+            id: "long",
+            tags: { kind: "array", element: "int" },
+            labels: { kind: "map", key: "string", value: "int" },
+            nested: { kind: "struct", fields: { a: "int", b: "string?" } },
+            amount: { kind: "decimal", precision: 10, scale: 2 },
+        });
+        const ddl = proto(lax().to(declared)).to_schema.schema.unparsed.data_type_string as string;
+        expect(ddl).not.toMatch(/NOT NULL/);
+        expect(ddl).toContain("id BIGINT");
+        expect(ddl).toContain("ARRAY<INT>");
+        expect(ddl).toMatch(/MAP<STRING, ?INT>/);
+        expect(ddl).toContain("STRUCT<");
+        expect(ddl).toMatch(/DECIMAL\(10, ?2\)/);
+
+        const table = new arrow.Table({
+            id: arrow.vectorFromArray([1n, null], new arrow.Int64()),
+        });
+        mockExecute({ arrow_batch: { data: Buffer.from(arrow.tableToIPC(table, "stream")) } });
+        await expect(lax().to(schema({ id: "long" })).collect()).rejects.toThrow(/id/);
+    });
+
+    it("exposes column metadata reported by Spark's schema", async () => {
+        mockAnalyze({
+            schema: {
+                schema: {
+                    struct: {
+                        fields: [
+                            { name: "k", data_type: { string: {} }, nullable: true, metadata: '{"comment":"key"}' },
+                            { name: "v", data_type: { integer: {} }, nullable: false, metadata: "" },
+                        ],
+                    },
+                },
+            },
+        });
+        const { fields } = await lax().withMetadata("k", { comment: "key" }).schema();
+        expect(fields[0]).toEqual({ name: "k", dataType: "string", nullable: true, metadata: '{"comment":"key"}' });
+        expect(fields[1]).toEqual({ name: "v", dataType: "int", nullable: false });
     });
 
     it("attaches JSON metadata to a column and rejects anything but objects", () => {
@@ -377,6 +535,69 @@ describe("checkpoints", () => {
             client_observed_server_side_session_id: "server-1",
             plan: { command: { remove_cached_remote_relation_command: { relation: { relation_id: "cp-1" } } } },
         });
+    });
+
+    it("releases a checkpoint explicitly, once, and only from the DataFrame checkpoint() returned", async () => {
+        const execute = mockExecute(checkpointResult);
+        const checkpointed = await lax().localCheckpoint();
+        await checkpointed.releaseCheckpoint();
+        expect(executedPlan(execute, 1).command).toEqual({
+            remove_cached_remote_relation_command: { relation: { relation_id: "cp-1" } },
+        });
+        await checkpointed.releaseCheckpoint();
+        expect(execute).toHaveBeenCalledTimes(2);
+        await expect(checkpointed.filter(col("k").eq("a")).releaseCheckpoint()).rejects.toThrow(/returned by checkpoint/);
+        await expect(lax().releaseCheckpoint()).rejects.toThrow(TypeError);
+        await expect(checkpointed.as().releaseCheckpoint()).resolves.toBeUndefined();
+    });
+
+    it("keeps tracking a checkpoint whose release failed so close() retries it", async () => {
+        const owner = SparkSession.builder().getOrCreate();
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan")
+            .mockResolvedValueOnce([checkpointResult] as never)
+            .mockRejectedValueOnce(new Error("down"))
+            .mockResolvedValueOnce([] as never);
+        vi.spyOn(sparkGrpcClient, "releaseSession").mockResolvedValue({});
+        vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
+
+        const checkpointed = await owner.read.parquet("/data/a.parquet").localCheckpoint();
+        await expect(checkpointed.releaseCheckpoint()).rejects.toThrow("down");
+        await owner.close();
+        expect(execute).toHaveBeenCalledTimes(3);
+        expect(executedPlan(execute, 2).command).toEqual({
+            remove_cached_remote_relation_command: { relation: { relation_id: "cp-1" } },
+        });
+    });
+
+    it("releases the remaining checkpoints in parallel and stops at the first UNAVAILABLE", async () => {
+        const owner = SparkSession.builder().getOrCreate();
+        const settled: string[] = [];
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan")
+            .mockResolvedValueOnce([checkpointResult] as never)
+            .mockResolvedValueOnce([{ checkpoint_command_result: { relation: { relation_id: "cp-2" } } }] as never)
+            .mockImplementationOnce(async () => {
+                settled.push("first");
+                throw Object.assign(new Error("unavailable"), { code: 14 });
+            })
+            .mockImplementationOnce(async (_request, config) => {
+                await new Promise(resolve => setTimeout(resolve, 5));
+                settled.push(`second:${config?.signal?.aborted}`);
+                return [];
+            });
+        vi.spyOn(sparkGrpcClient, "releaseSession").mockResolvedValue({});
+        vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
+
+        await owner.read.parquet("/data/a.parquet").localCheckpoint();
+        await owner.read.parquet("/data/b.parquet").checkpoint();
+        await owner.close();
+
+        // Both releases were in flight at once and share one abort signal,
+        // which the UNAVAILABLE failure tripped before the second one finished.
+        expect(settled).toEqual(["first", "second:true"]);
+        const releases = execute.mock.calls.slice(2);
+        expect(releases).toHaveLength(2);
+        expect(releases[0]![1]?.signal).toBeInstanceOf(AbortSignal);
+        expect(releases[0]![1]?.signal).toBe(releases[1]![1]?.signal);
     });
 
     it("sends no release when nothing was checkpointed", async () => {
