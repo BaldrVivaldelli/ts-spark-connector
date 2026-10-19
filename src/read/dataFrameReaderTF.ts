@@ -18,10 +18,11 @@ export type ReaderOptionValue = string | number | boolean | bigint;
  * @public
  */
 export type JdbcReadOptions = {
-    /** Numeric, date or timestamp column used to split the reads; requires the three bounds below. */
+    /** Numeric, date or timestamp column used to split the reads; requires `lowerBound`, `upperBound` and `numPartitions`. */
     column?: string;
     lowerBound?: number | bigint | string;
     upperBound?: number | bigint | string;
+    /** Number of partitions of a split read; alone, the maximum parallelism of the read. */
     numPartitions?: number;
     /** One partition per WHERE clause; cannot be combined with `column`. */
     predicates?: readonly string[];
@@ -115,19 +116,22 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown>  {
         }
         const { column, lowerBound, upperBound, numPartitions, predicates, properties } = options;
         const partitioning: Record<string, string> = {};
+        if (numPartitions !== undefined && (!Number.isSafeInteger(numPartitions) || numPartitions < 1)) {
+            throw new RangeError("jdbc() numPartitions must be a positive safe integer.");
+        }
         if (column !== undefined) {
             nonEmpty(column, "jdbc() column");
             if (lowerBound === undefined || upperBound === undefined || numPartitions === undefined) {
                 throw new TypeError("jdbc() column requires lowerBound, upperBound and numPartitions.");
             }
-            if (!Number.isSafeInteger(numPartitions) || numPartitions < 1) {
-                throw new RangeError("jdbc() numPartitions must be a positive safe integer.");
-            }
             partitioning.partitionColumn = column;
             partitioning.lowerBound = optionValue(lowerBound, "jdbc() lowerBound");
             partitioning.upperBound = optionValue(upperBound, "jdbc() upperBound");
-            partitioning.numPartitions = String(numPartitions);
+        } else if (lowerBound !== undefined || upperBound !== undefined) {
+            throw new TypeError("jdbc() lowerBound and upperBound require a partition column.");
         }
+        // Spark accepts numPartitions alone: it caps the parallelism of the read.
+        if (numPartitions !== undefined) partitioning.numPartitions = String(numPartitions);
         if (predicates !== undefined) {
             if (column !== undefined) {
                 throw new TypeError("jdbc() predicates cannot be combined with a partition column.");

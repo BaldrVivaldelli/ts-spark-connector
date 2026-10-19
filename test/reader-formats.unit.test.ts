@@ -70,6 +70,11 @@ describe("DataFrameReader.jdbc()", () => {
         expect(() => read.jdbc("jdbc:x", "t", { column: " ", lowerBound: 0, upperBound: 9, numPartitions: 2 })).toThrow(TypeError);
         expect(() => read.jdbc("jdbc:x", "t", { column: "id", lowerBound: 0, upperBound: 9, numPartitions: 2, predicates: ["a"] }))
             .toThrow(/cannot be combined/);
+        expect(() => read.jdbc("jdbc:x", "t", { lowerBound: 0 })).toThrow(/require a partition column/);
+        expect(() => read.jdbc("jdbc:x", "t", { upperBound: 9 })).toThrow(/require a partition column/);
+        expect(() => read.jdbc("jdbc:x", "t", { numPartitions: 0 })).toThrow(RangeError);
+        expect(dataSource(read.jdbc("jdbc:x", "t", { numPartitions: 3 })).options).toMatchObject({ numPartitions: "3" });
+        expect(dataSource(read.jdbc("jdbc:x", "t", { numPartitions: 3 })).options).not.toHaveProperty("partitionColumn");
         expect(() => read.jdbc("jdbc:x", "t", { predicates: [] })).toThrow(/non-empty array/);
         expect(() => read.jdbc("jdbc:x", "t", { predicates: [" "] })).toThrow(/non-empty array/);
         expect(() => read.jdbc("jdbc:x", "t", { properties: { "": "x" } })).toThrow(TypeError);
