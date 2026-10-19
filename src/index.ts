@@ -11,7 +11,7 @@ export type {
     TLSConfig, RetryConfig, RetryEvent,
     SparkConnectionConfig, SparkLogger, SparkTelemetryEvent,
     SparkMetric, SparkMetricObserver,
-    SessionConfigMap, SessionConfigValue, SparkUserContext,
+    SessionConfigMap, SessionConfigValue, SparkUserContext, RangeRow,
 } from "./client/session";
 export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";

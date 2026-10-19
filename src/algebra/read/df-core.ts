@@ -21,6 +21,13 @@ export interface DFCore<R, E, G = unknown> {
      */
     localRelation(ddl: string, data: Uint8Array | undefined, rowCount: number): R;
 
+    /**
+     * Roots the plan at Spark's `range` relation: a single `id` column of
+     * longs from `start` (0 when omitted) up to, excluding, `end`, in steps
+     * of `step`, optionally split into `numPartitions` partitions.
+     */
+    range(start: bigint | undefined, end: bigint, step: bigint, numPartitions: number | undefined): R;
+
     /** Binds a relation root to the id used by qualified unresolved attributes. */
     withPlanId?(plan: R, planId: number): R;
 

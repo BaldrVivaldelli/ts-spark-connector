@@ -601,6 +601,15 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         };
     },
     catalog: op => ({ catalog: catalogProtoPayload(op) }),
+    // int64 fields travel as decimal strings so values beyond 2^53 survive.
+    range: (start, end, step, numPartitions) => ({
+        range: {
+            ...(start !== undefined ? { start: start.toString() } : {}),
+            end: end.toString(),
+            step: step.toString(),
+            ...(numPartitions !== undefined ? { num_partitions: numPartitions } : {}),
+        },
+    }),
     localRelation: (ddl, data, _rowCount) => ({
         local_relation: {
             schema: ddl,

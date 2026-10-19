@@ -106,6 +106,10 @@ export const TraceDFAlg: TraceDFAlgebra = {
         node("rel", `relation(${format}${schema ? ",schema" : ""})`),
 
     catalog: op => node("rel", `catalog(${op.method})`),
+    range: (start, end, step, numPartitions) => node(
+        "rel",
+        `range[${start ?? 0n}..${end} step ${step}${numPartitions !== undefined ? ` partitions ${numPartitions}` : ""}]`,
+    ),
 
     localRelation: (_ddl, _data, rowCount) => node("rel", `localRelation[${rowCount}]`),
 

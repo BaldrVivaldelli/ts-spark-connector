@@ -283,6 +283,21 @@ describe("Spark Connect protobuf wire conformance", () => {
     expect(selectExpr.input.filter.condition.expression_string.expression).toBe("amount > 10");
   });
 
+  it("encodes range bounds as int64 and keeps absent start/partitions unset", () => {
+    const decoded = wireRoundTrip(planOf(session().range(1n, 9007199254740993n, 2, 3)));
+    expect(decoded.plan.root.range).toEqual({
+      start: "1",
+      end: "9007199254740993",
+      step: "2",
+      num_partitions: 3,
+      _start: "start",
+      _num_partitions: "num_partitions",
+    });
+    const single = wireRoundTrip(planOf(session().range(4)));
+    expect(single.plan.root.range).toMatchObject({ end: "4", step: "1" });
+    expect(single.plan.root.range).not.toHaveProperty("_start");
+  });
+
   it("rejects empty batch paths before producing an invalid request", () => {
     expect(() => session().read.csv()).toThrow(/at least one non-empty path/i);
     expect(() => session().read.sql(" ")).toThrow(/exactly one non-empty string/i);

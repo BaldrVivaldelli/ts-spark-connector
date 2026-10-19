@@ -5,7 +5,7 @@ import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
 import { DFProgram, StreamingMark } from "../algebra/read";
 import { SqlCap } from "../algebra/read/batch-capabilities";
-import { DeclaredSchema, InferSchema, SchemaDef } from "../schema/schema";
+import { DeclaredSchema, InferSchema, SchemaDef, schema } from "../schema/schema";
 import { encodeLocalRelation } from "../typed/arrow-encode";
 import { StreamingReadCap } from "../algebra/read/streaming-capabilities";
 import { DataFrameWriterTF } from "../write/dataFrameWriterTF";
@@ -201,6 +201,29 @@ export type SparkConnectionConfig = {
     sessionConfig?: SessionConfigMap;
 };
 
+/** Schema of `session.range()`: Spark names the column `id` and never makes it null. */
+const RANGE_SCHEMA = schema({ id: "long" });
+
+/**
+ * Row shape of `session.range()`.
+ * @public
+ */
+export type RangeRow = { id: bigint };
+
+/** Validates a `range()` bound and promotes it to the int64 the relation carries. */
+function rangeBound(label: string, value: number | bigint): bigint {
+    if (typeof value === "bigint") {
+        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+            throw new RangeError(`${label} is outside Spark's signed int64 range.`);
+        }
+        return value;
+    }
+    if (!Number.isSafeInteger(value)) {
+        throw new TypeError(`${label} must be a safe integer or a bigint.`);
+    }
+    return BigInt(value);
+}
+
 /** @public */
 export class SparkSession implements SessionAlgebra {
     private readonly sessionId: string;
@@ -295,6 +318,52 @@ export class SparkSession implements SessionAlgebra {
         const rowCount = rows.length;
         const prog: DFProgram<R, E, G> = DF => DF.localRelation(ddl, data, rowCount);
         return new ReadChainedDataFrame<InferSchema<D>, R, E, G>(prog, this, false, declared.def);
+    }
+
+    /**
+     * Spark's `range`: a DataFrame with one `id` column of longs from `start`
+     * (0 when only `end` is given) up to, excluding, `end`, stepping by
+     * `step`. Bounds accept numbers or bigints; `numPartitions` splits the
+     * range server-side.
+     */
+    range<R = unknown, E = unknown, G = unknown>(end: number | bigint): ReadChainedDataFrame<RangeRow, R, E, G>;
+    range<R = unknown, E = unknown, G = unknown>(
+        start: number | bigint,
+        end: number | bigint,
+        step?: number | bigint,
+        numPartitions?: number,
+    ): ReadChainedDataFrame<RangeRow, R, E, G>;
+    range<R = unknown, E = unknown, G = unknown>(
+        startOrEnd: number | bigint,
+        end?: number | bigint,
+        step: number | bigint = 1,
+        numPartitions?: number,
+    ): ReadChainedDataFrame<RangeRow, R, E, G> {
+        this.assertOpen();
+        const bounds = end === undefined
+            ? { start: undefined, end: rangeBound("range() end", startOrEnd) }
+            : { start: rangeBound("range() start", startOrEnd), end: rangeBound("range() end", end) };
+        const stride = rangeBound("range() step", step);
+        if (stride === 0n) throw new RangeError("range() step must not be 0.");
+        if (numPartitions !== undefined && (!Number.isSafeInteger(numPartitions) || numPartitions < 1)) {
+            throw new RangeError("range() numPartitions must be a positive integer.");
+        }
+        const prog: DFProgram<R, E, G> = DF => DF.range(bounds.start, bounds.end, stride, numPartitions);
+        return new ReadChainedDataFrame<RangeRow, R, E, G>(prog, this, false, RANGE_SCHEMA.def);
+    }
+
+    /**
+     * A new, independent session against the same server with the same
+     * connection settings and user. Nothing is sent: the server creates its
+     * state on first use. Unlike `cloneSession()`, no temporary views or
+     * runtime configuration are copied. Session tags are not copied either.
+     */
+    newSession(): SparkSession {
+        this.assertOpen();
+        return new SparkSession(undefined, {
+            userContext: this.userContext,
+            connectionConfig: this.connectionConfig,
+        });
     }
 
     static builder(): SparkSessionBuilder {
