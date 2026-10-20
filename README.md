@@ -728,9 +728,15 @@ Not exposed as stable public API yet:
 
 ## Package contract
 
-The package is CommonJS-first. Both `require()` and Node ESM named imports are
-smoke-tested from the packed tarball, together with NodeNext declarations and
-all `docs/examples`. Only the root import (`ts-spark-connector`) is a supported
+The library is compiled once, to CommonJS, and published behind two entry
+points. `require("ts-spark-connector")` loads that build directly, and `import`
+loads `dist/index.mjs`, an ES module that re-exports the very same objects: an
+application that mixes both formats still has one set of classes, so
+`instanceof` checks on the error types keep working, and gRPC and Arrow stay
+lazily loaded either way. Both entries and their declarations (`.d.ts` and
+`.d.mts`) are smoke-tested from the packed tarball together with all
+`docs/examples`, and every Spark E2E job runs the examples against the server
+in both formats. Only the root import (`ts-spark-connector`) is a supported
 export; deep imports are intentionally blocked by `package.json#exports`.
 
 `npm run api:check` compares the `@public` declarations with the committed API
