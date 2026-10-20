@@ -1,6 +1,7 @@
+import { EventEmitter } from "node:events";
 import * as grpc from "@grpc/grpc-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SparkConnectError } from "../src/client/errors";
+import { asSparkConnectError, SparkConnectError } from "../src/client/errors";
 import type { RpcMessage } from "../src/client/reattachableExecution";
 import {
     assertRpcResponseSessionIntegrity,
@@ -11,8 +12,10 @@ import {
     CLEANUP_RPC_TIMEOUT_MS,
     cleanupConnectionConfig,
     enrichSparkConnectError,
+    reportExpiredDeadline,
     resolveExecuteDeadline,
     type UnaryMethod,
+    withDeadlineStatus,
 } from "../src/client/rpcLifecycle";
 import type { SparkConnectionConfig } from "../src/client/session";
 
@@ -412,5 +415,92 @@ describe("cleanup and execution deadlines", () => {
             .toBeGreaterThanOrEqual(now + 1_000);
         expect(buildStreamCallOptions({ rpcTimeoutMs: 1_000 }, 42)).toEqual({ deadline: 42 });
         expect(buildStreamCallOptions({ rpcTimeoutMs: 1_000 }, Number.POSITIVE_INFINITY)).toEqual({});
+    });
+});
+
+describe("expired client deadlines", () => {
+    const cancelled = (details?: string) => Object.assign(
+        new Error(`1 CANCELLED: ${details ?? ""}`),
+        { code: grpc.status.CANCELLED, ...(details === undefined ? {} : { details }) },
+    );
+
+    it("leaves failures alone without an expired deadline of this client", () => {
+        const aborted = new AbortController();
+        aborted.abort();
+        const error = cancelled("Call cancelled");
+        expect(reportExpiredDeadline(error, undefined, undefined, 2_000)).toBe(error);
+        expect(reportExpiredDeadline(error, Number.POSITIVE_INFINITY, undefined, 2_000)).toBe(error);
+        expect(reportExpiredDeadline(error, 3_000, undefined, 2_000)).toBe(error);
+        expect(reportExpiredDeadline(error, 1_000, aborted.signal, 2_000)).toBe(error);
+        expect(error).toMatchObject({ code: grpc.status.CANCELLED, details: "Call cancelled" });
+    });
+
+    it("leaves non-objects and other status codes alone", () => {
+        const unavailable = Object.assign(new Error("14 UNAVAILABLE"), { code: grpc.status.UNAVAILABLE });
+        expect(reportExpiredDeadline("offline", 1_000, undefined, 2_000)).toBe("offline");
+        expect(reportExpiredDeadline(null, 1_000, undefined, 2_000)).toBeNull();
+        expect(reportExpiredDeadline(unavailable, 1_000, undefined, 2_000).code).toBe(grpc.status.UNAVAILABLE);
+    });
+
+    it("reports a CANCELLED failure after the deadline as DEADLINE_EXCEEDED", () => {
+        const error = cancelled("Call cancelled");
+        expect(reportExpiredDeadline(error, 1_000, undefined, 1_000)).toBe(error);
+        expect(error).toMatchObject({
+            code: grpc.status.DEADLINE_EXCEEDED,
+            details: "Deadline exceeded (the transport reported: Call cancelled)",
+            message: "4 DEADLINE_EXCEEDED: Deadline exceeded (the transport reported: Call cancelled)",
+        });
+        expect(asSparkConnectError(error, "ExecutePlan").message)
+            .toBe("ExecutePlan failed: Deadline exceeded (the transport reported: Call cancelled)");
+
+        const withoutDetails = cancelled();
+        reportExpiredDeadline(withoutDetails, new Date(1_000), new AbortController().signal, 5_000);
+        expect(withoutDetails).toMatchObject({
+            code: grpc.status.DEADLINE_EXCEEDED,
+            details: "Deadline exceeded (the transport reported: Call cancelled)",
+        });
+        const emptyDetails = cancelled("");
+        reportExpiredDeadline(emptyDetails, 1_000, undefined, 5_000);
+        expect(emptyDetails.details).toBe("Deadline exceeded (the transport reported: Call cancelled)");
+    });
+
+    it("corrects stream errors before later listeners see them", () => {
+        const call = new EventEmitter();
+        expect(withDeadlineStatus(call, { deadline: Date.now() - 1 }, undefined)).toBe(call);
+        const seen: number[] = [];
+        call.on("error", (error: { code: number }) => seen.push(error.code));
+        call.emit("error", cancelled("Call cancelled"));
+        expect(seen).toEqual([grpc.status.DEADLINE_EXCEEDED]);
+
+        const withoutDeadline = new EventEmitter();
+        withDeadlineStatus(withoutDeadline, {}, undefined);
+        expect(withoutDeadline.listenerCount("error")).toBe(0);
+
+        const aborted = new AbortController();
+        aborted.abort();
+        const abortedCall = new EventEmitter();
+        withDeadlineStatus(abortedCall, { deadline: Date.now() - 1 }, aborted.signal);
+        const abortedCodes: number[] = [];
+        abortedCall.on("error", (error: { code: number }) => abortedCodes.push(error.code));
+        abortedCall.emit("error", cancelled("Call cancelled"));
+        expect(abortedCodes).toEqual([grpc.status.CANCELLED]);
+    });
+
+    it("rejects a unary call cancelled after its rpcTimeoutMs deadline as DEADLINE_EXCEEDED", async () => {
+        const logger = vi.fn();
+        const late: UnaryMethod<RpcMessage> = (_request, _metadata, options, callback) => {
+            const deadline = options.deadline as number;
+            setTimeout(() => callback(cancelled("Call cancelled"), {}), Math.max(0, deadline - Date.now()) + 5);
+            return clientCall();
+        };
+        await expect(callUnary(late, request, metadata, { rpcTimeoutMs: 1, logger }, "Config")).rejects.toMatchObject({
+            name: "SparkConnectError",
+            operation: "Config",
+            code: grpc.status.DEADLINE_EXCEEDED,
+        });
+        expect(logger).toHaveBeenCalledWith(expect.objectContaining({
+            name: "spark.rpc.error",
+            attributes: expect.objectContaining({ code: grpc.status.DEADLINE_EXCEEDED }),
+        }));
     });
 });

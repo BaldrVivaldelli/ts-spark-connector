@@ -20,7 +20,9 @@ import {
     cleanupConnectionConfig,
     emitExecuteCleanupTelemetry,
     enrichSparkConnectError,
+    reportExpiredDeadline,
     resolveExecuteDeadline,
+    withDeadlineStatus,
 } from "./rpcLifecycle";
 export {
     assertRpcResponseSessionIntegrity,
@@ -599,11 +601,14 @@ export const sparkGrpcClient = {
         });
         try {
             for await (const response of executeReattachable(request, {
-                execute: executeRequest => client.executePlan(
-                    executeRequest,
-                    metadata,
-                    buildStreamCallOptions(config, executeDeadline)
-                ),
+                execute: executeRequest => {
+                    const options = buildStreamCallOptions(config, executeDeadline);
+                    return withDeadlineStatus(
+                        client.executePlan(executeRequest, metadata, options),
+                        options,
+                        config?.signal,
+                    );
+                },
                 // Continuations of a long query can outlive the credentials the
                 // initial stream used, so provider headers are resolved again
                 // (the provider cache makes this free while they are fresh).
@@ -612,10 +617,12 @@ export const sparkGrpcClient = {
                         operationId: reattachRequest.operation_id,
                         lastResponseId: reattachRequest.last_response_id,
                     });
-                    return client.reattachExecute(
-                        reattachRequest,
-                        await buildMetadata(config),
-                        buildStreamCallOptions(config, executeDeadline)
+                    const reattachMetadata = await buildMetadata(config);
+                    const options = buildStreamCallOptions(config, executeDeadline);
+                    return withDeadlineStatus(
+                        client.reattachExecute(reattachRequest, reattachMetadata, options),
+                        options,
+                        config?.signal,
                     );
                 },
                 release: releaseRequest => withRetry(
@@ -789,11 +796,12 @@ export const sparkGrpcClient = {
         // A failure while writing cancels the call, whose callback then rejects
         // `completed` after nobody awaits it any more; keep that handled.
         completed.catch(() => undefined);
+        const options = buildStreamCallOptions(config, resolveExecuteDeadline(config, startedAt));
         const call = client.addArtifacts(
             metadata,
-            buildStreamCallOptions(config, resolveExecuteDeadline(config, startedAt)),
+            options,
             (error, response) => {
-                if (error) settle.reject(error);
+                if (error) settle.reject(reportExpiredDeadline(error, options.deadline, signal));
                 else settle.resolve(response);
             },
         );

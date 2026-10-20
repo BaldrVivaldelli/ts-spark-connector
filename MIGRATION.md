@@ -90,12 +90,13 @@ installations are required.
 
 ## Runtime requirements
 
-- Node.js 22 or 24 is required.
-- Spark Connect 4.0.4 is the default and protocol baseline.
+- Node.js 22 or 24, or Bun 1.4. CI runs the E2E suite and an
+  installed-package example inside Bun against Spark 4.0.4.
+- Spark Connect 4.0.4 is the default server of the bundled Docker setup.
 - Spark Connect 4.0.0 remains behaviorally tested for backwards compatibility.
-- Spark Connect 4.1.3 and 4.2.0 are covered by the E2E matrix; the protocol
-  descriptors stay pinned to 4.0.4 and the newer servers are verified
-  behaviorally.
+- Spark Connect 4.1.3 and 4.2.0 are covered by the E2E matrix. The vendored
+  protocol descriptors come from 4.2.0, and features newer than a server are
+  gated on the version it reports.
 - TLS remains the default for the repository-provided Spark server.
 
 Application code using the public package entry point does not need to change

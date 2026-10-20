@@ -64,6 +64,67 @@ export function buildStreamCallOptions(
     return Number.isFinite(executeDeadline) ? { deadline: executeDeadline } : {};
 }
 
+const STATUS_CANCELLED = 1;
+const STATUS_DEADLINE_EXCEEDED = 4;
+
+/**
+ * Reports a call that outlived the deadline this client set as
+ * DEADLINE_EXCEEDED, whatever status the transport surfaced.
+ *
+ * The deadline travels to Spark as `grpc-timeout`, so the server cancels the
+ * call at the moment the client's own timer fires. When the server's stream
+ * reset is processed first, grpc-js reports CANCELLED ("Call cancelled")
+ * instead. The race shows up under load and much more often on Bun, whose
+ * event loop orders the two events differently, and it changes more than the
+ * code: DEADLINE_EXCEEDED is retried through ReattachExecute, CANCELLED is not.
+ * A CANCELLED failure after the deadline, without an abort from the caller,
+ * can only be the deadline. The error is updated in place because grpc-js
+ * hands the same object to every listener of the call.
+ */
+export function reportExpiredDeadline<E>(
+    error: E,
+    deadline: Grpc.Deadline | undefined,
+    signal: AbortSignal | undefined,
+    now: number = Date.now(),
+): E {
+    const deadlineMs = deadline instanceof Date ? deadline.getTime() : deadline;
+    if (deadlineMs === undefined || !Number.isFinite(deadlineMs) || now < deadlineMs || signal?.aborted) {
+        return error;
+    }
+    if (error === null || typeof error !== "object") return error;
+    const status = error as { code?: unknown; details?: unknown; message?: unknown };
+    if (status.code !== STATUS_CANCELLED) return error;
+    const reported = typeof status.details === "string" && status.details !== ""
+        ? status.details
+        : "Call cancelled";
+    const details = `Deadline exceeded (the transport reported: ${reported})`;
+    status.code = STATUS_DEADLINE_EXCEEDED;
+    status.details = details;
+    status.message = `${STATUS_DEADLINE_EXCEEDED} DEADLINE_EXCEEDED: ${details}`;
+    return error;
+}
+
+/** A streaming call that reports failures through `error` events. */
+type ErrorEmitter = { on(event: "error", listener: (error: unknown) => void): unknown };
+
+/**
+ * Applies {@link reportExpiredDeadline} to every error a streaming call emits.
+ * Call it right after opening the call: listeners run in registration order,
+ * so consumers that subscribe later already see the corrected status.
+ */
+export function withDeadlineStatus<C extends ErrorEmitter>(
+    call: C,
+    options: Grpc.CallOptions,
+    signal: AbortSignal | undefined,
+): C {
+    if (options.deadline !== undefined) {
+        call.on("error", error => {
+            reportExpiredDeadline(error, options.deadline, signal);
+        });
+    }
+    return call;
+}
+
 function createAbortError(reason?: unknown): Error {
     const error = new Error(
         reason === undefined
@@ -177,11 +238,13 @@ export function callUnary<TResponse>(
         };
 
         signal?.addEventListener("abort", onAbort, { once: true });
-        call = method(request, metadata, buildCallOptions(config), (error, response) => {
+        const options = buildCallOptions(config);
+        call = method(request, metadata, options, (error, response) => {
             if (settled) return;
             settled = true;
             cleanup();
             if (error) {
+                reportExpiredDeadline(error, options.deadline, signal);
                 emitTelemetry(config, "spark.rpc.error", "error", {
                     rpc: operation,
                     durationMs: Date.now() - startedAt,
