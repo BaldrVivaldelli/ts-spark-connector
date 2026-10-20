@@ -678,6 +678,10 @@ The currently verified compatibility targets are:
   matrix
 - Scala 2.13 artifacts on the server image
 - Node.js 22 and 24
+- Bun 1.4: CI runs the full E2E suite and an installed-package example inside
+  Bun against Spark 4.0.4. Results arrive faster than on Node.js, but large
+  `createDataFrame` uploads are several times slower because of Bun's HTTP/2
+  client
 - TypeScript 7 for compilation; TypeScript 6 API compatibility only for
   tooling that has not migrated to the new compiler API
 
