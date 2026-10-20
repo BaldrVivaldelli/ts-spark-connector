@@ -1,5 +1,15 @@
 # Migration guide
 
+## After 3.3.0: an ES module entry point
+
+`import` now resolves to `dist/index.mjs`, a real ES module, instead of
+reaching the CommonJS build through Node's interop. It re-exports the CommonJS
+build rather than shipping a second copy, so named imports, the default import
+(the whole module, as before) and `require()` keep returning the same objects.
+TypeScript files compiled as ES modules with `node16`, `nodenext` or `bundler`
+resolution now read `dist/index.d.mts`, which re-exports the same declarations.
+Nothing needs to change in consumer code.
+
 ## After 3.2.0: protocol descriptors from Spark 4.2.0
 
 The vendored `.proto` files now come from Apache Spark 4.2.0 instead of 4.0.4.

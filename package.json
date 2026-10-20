@@ -1,14 +1,20 @@
 {
   "name": "ts-spark-connector",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "A TypeScript client for Apache Spark Connect. Build Spark logical plans entirely in TypeScript.",
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "require": "./dist/index.js",
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
       "default": "./dist/index.js"
     }
   },
@@ -25,7 +31,7 @@
   "scripts": {
     "start": "npm run examples:run -- join",
     "clean": "rimraf dist",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-esm-entry.mjs",
     "check:typescript": "node scripts/verify-typescript-toolchain.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",

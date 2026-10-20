@@ -123,4 +123,3 @@ Legend: ✅ available · ⬜ open · ➖ not applicable to a TypeScript client.
 
 - MLlib over Connect (`ml_command`, `MlRelation`): large surface; needs a design first.
 - Spark Declarative Pipelines (`pipelines.proto`, Spark 4.1+).
-- Dual ESM/CJS build: tracked in issue #71.
