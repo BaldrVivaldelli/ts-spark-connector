@@ -81,7 +81,7 @@
   "homepage": "https://github.com/BaldrVivaldelli/ts-spark-connector#readme",
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org",
+    "registry": "https://registry.npmjs.org/",
     "provenance": true
   },
   "engines": {

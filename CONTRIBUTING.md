@@ -109,7 +109,8 @@ compatibility layer required by the current `typescript-eslint` release.
 Releases are published from `main` only. Once a PR with a Conventional Commit
 title is merged and the unit (Node.js 22 and 24), publishable-tarball and
 Spark E2E jobs are green, semantic-release publishes the package to npm with
-provenance and tags the release; the workflow then installs that exact version
+provenance (through npm trusted publishing, so there is no npm token to manage)
+and tags the release; the workflow then installs that exact version
 from the registry and verifies it. A red job blocks the publish until a fix
 lands on `main`; see the release flow in [MIGRATION.md](./MIGRATION.md).
 

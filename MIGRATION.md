@@ -155,6 +155,9 @@ Every release is cut from `main`:
    `join` example and publishes JUnit, JSON and Markdown evidence.
 3. When every job is green, semantic-release computes the version from the
    commits, publishes the package to npm with provenance and tags the release.
+   Publishing uses npm trusted publishing: npmjs.com accepts the release job's
+   GitHub OIDC identity for this repository's `workflow.yml`, so no npm token
+   is stored in GitHub.
 4. The workflow then installs the exact published version from the registry
    and re-checks the registry metadata, the CommonJS and ESM entry points, the
    TypeScript 7 declarations and the production audit against it.
