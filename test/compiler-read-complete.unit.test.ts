@@ -62,10 +62,10 @@ describe("complete protobuf read compiler", () => {
             "unresolved_function.function_name",
             "posexplode",
         );
-        expect(ProtoExprAlg.getField(column, "nested")).toHaveProperty(
-            "unresolved_function.function_name",
-            "getfield",
-        );
+        // Spark registers no `getfield`; a struct field is an extract value.
+        expect(ProtoExprAlg.getField(column, "nested")).toEqual({
+            unresolved_extract_value: { child: column, extraction: { literal: { string: "nested" } } },
+        });
         expect(ProtoExprAlg.map_keys(column)).toHaveProperty(
             "unresolved_function.function_name",
             "map_keys",
@@ -87,15 +87,15 @@ describe("complete protobuf read compiler", () => {
             "key",
         );
         expect(ProtoExprAlg.getItem(column, column)).toHaveProperty(
-            "unresolved_function.arguments.1",
+            "unresolved_extract_value.extraction",
             column,
         );
         expect(ProtoExprAlg.getItem(column, 2)).toHaveProperty(
-            "unresolved_function.arguments.1.literal.integer",
+            "unresolved_extract_value.extraction.literal.integer",
             2,
         );
         expect(ProtoExprAlg.getItem(column, "key")).toHaveProperty(
-            "unresolved_function.arguments.1.literal.string",
+            "unresolved_extract_value.extraction.literal.string",
             "key",
         );
         expect(ProtoExprAlg.split(column, column)).toHaveProperty(
@@ -272,7 +272,7 @@ describe("complete protobuf read compiler", () => {
             .resolves.toBe("explain text");
         await expect(ProtoExec.explain!(root, session, "extended"))
             .resolves.toBe("explain text");
-        expect(execute).toHaveBeenCalledWith(root);
+        expect(execute).toHaveBeenCalledWith(root, undefined);
         expect(explain).toHaveBeenCalledWith(root, "simple");
         expect(explain).toHaveBeenCalledWith(root, "extended");
         expect(programToProtobufRoot(root)).toEqual({ plan: { root } });

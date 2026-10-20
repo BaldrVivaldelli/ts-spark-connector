@@ -22,6 +22,25 @@ export const SparkExprAlg: ExprAlg<Expression> = {
     logical: (op, left, right) => ({ type: "Logical", op, left, right }),
     alias: (input, alias) => ({ type: "Alias", input, alias }),
     call: (name, args) => ({ type: "UnresolvedFunction", name, args }),
+    callDistinct: (name, args) => ({ type: "UnresolvedFunction", name, args, isDistinct: true }),
+    exprString: expression => ({ type: "ExpressionString", expression }),
+    cast: (input, dataType, evalMode) => ({
+        type: "Cast",
+        input,
+        dataType,
+        ...(evalMode === undefined ? {} : { evalMode }),
+    }),
+    lambda: (params, body) => ({ type: "LambdaFunction", params: [...params], body }),
+    lambdaVar: name => ({ type: "LambdaVariable", name }),
+    updateFields: (struct, field, value) => ({
+        type: "UpdateFields",
+        struct,
+        field,
+        ...(value === undefined ? {} : { value }),
+    }),
+    extractValue: (child, extraction) => ({ type: "ExtractValue", child, extraction }),
+    colRegex: (regex, planId) => ({ type: "ColumnRegex", regex, ...(planId === undefined ? {} : { planId }) }),
+    metadataCol: (name, planId) => ({ type: "MetadataColumn", name, ...(planId === undefined ? {} : { planId }) }),
     sortKey: (input, direction, nulls) => ({ type: "SortKey", input, direction, nulls }),
     star: () => ({ type: "UnresolvedStar" }),
     caseWhen: (branches, elze) => ({ type: "CaseWhen", branches, else: elze }),
@@ -65,12 +84,9 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         args: [input],
     }),
     getField: (input, field) => ({
-        type: "UnresolvedFunction",
-        name: "getfield",
-        args: [
-            input,
-            { type: "Literal", value: field },
-        ],
+        type: "ExtractValue",
+        child: input,
+        extraction: { type: "Literal", value: field },
     }),
     map_keys: (input) => ({
         type: "UnresolvedFunction",
@@ -88,16 +104,13 @@ export const SparkExprAlg: ExprAlg<Expression> = {
         args: [map, key],
     }),
     getItem: (collectionExpr, key) => ({
-        type: "UnresolvedFunction",
-        name: "element_at",
-        args: [
-            collectionExpr,
-            typeof key === "object"
-                ? key
-                : typeof key === "number"
-                    ? { type: "Literal", value: key }
-                    : { type: "Literal", value: String(key) },
-        ],
+        type: "ExtractValue",
+        child: collectionExpr,
+        extraction: typeof key === "object"
+            ? key
+            : typeof key === "number"
+                ? { type: "Literal", value: key }
+                : { type: "Literal", value: String(key) },
     }),
     split: (input, delimiter) => ({
         type: "UnresolvedFunction",
@@ -122,8 +135,22 @@ export const SparkExprAlg: ExprAlg<Expression> = {
 };
 
 export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<LogicalPlan, Expression>> = {
-    relation: (format, path, options, schema) => ({ type: "Relation", format, path, options, schema }),
+    relation: (format, path, options, schema, predicates) => ({
+        type: "Relation",
+        format,
+        path,
+        options,
+        schema,
+        ...(predicates && predicates.length > 0 ? { predicates: [...predicates] } : {}),
+    }),
     catalog: op => ({ type: "Catalog", operation: op }),
+    range: (start, end, step, numPartitions) => ({
+        type: "Range",
+        ...(start !== undefined ? { start } : {}),
+        end,
+        step,
+        ...(numPartitions !== undefined ? { numPartitions } : {}),
+    }),
     localRelation: (ddl, _data, rowCount) => ({ type: "LocalRelation", schema: ddl, rowCount }),
     withPlanId: plan => plan,
     select: (plan, columns) => ({ type: "Project", input: plan, columns }),
@@ -140,12 +167,21 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<L
         on,
         joinType: joinType.toUpperCase() as JoinTypeInput,
     }),
-    groupBy: (plan, cols) => ({ type: "GroupBy", input: plan, expressions: cols }),
+    groupBy: (plan, cols, spec) => ({
+        type: "GroupBy",
+        input: plan,
+        expressions: cols,
+        ...(spec === undefined ? {} : {
+            groupType: spec.groupType,
+            ...(spec.pivot === undefined ? {} : { pivot: spec.pivot }),
+            ...(spec.groupingSets === undefined ? {} : { groupingSets: spec.groupingSets }),
+        }),
+    }),
     agg: (group, aggregations, groupType?: GroupTypeInput) => ({
         type: "Aggregate",
         input: group,
         aggregations,
-        groupType,
+        groupType: groupType ?? group.groupType,
     }),
     orderBy: (plan, orders: SortOrder<Expression>[]) => ({
         type: "Sort",
@@ -244,6 +280,97 @@ export const SparkDFAlg: DFAlg<LogicalPlan, Expression, GroupBy, StreamingCaps<L
         input: plan,
         columnNames,
     }),
+    fillNa: (plan, columns, values) => ({ type: "FillNa", input: plan, columns, values }),
+    dropNa: (plan, columns, minNonNulls) => ({
+        type: "DropNa",
+        input: plan,
+        columns,
+        ...(minNonNulls !== undefined ? { minNonNulls } : {}),
+    }),
+    replaceNa: (plan, columns, replacements) => ({ type: "ReplaceNa", input: plan, columns, replacements }),
+    crosstab: (plan, col1, col2) => ({ type: "Crosstab", input: plan, col1, col2 }),
+    cov: (plan, col1, col2) => ({ type: "Cov", input: plan, col1, col2 }),
+    corr: (plan, col1, col2, method) => ({
+        type: "Corr",
+        input: plan,
+        col1,
+        col2,
+        ...(method !== undefined ? { method } : {}),
+    }),
+    approxQuantile: (plan, columns, probabilities, relativeError) => ({
+        type: "ApproxQuantile",
+        input: plan,
+        columns,
+        probabilities,
+        relativeError,
+    }),
+    freqItems: (plan, columns, support) => ({
+        type: "FreqItems",
+        input: plan,
+        columns,
+        ...(support !== undefined ? { support } : {}),
+    }),
+    sampleBy: (plan, column, fractions, seed) => ({ type: "SampleBy", input: plan, column, fractions, seed }),
+    unpivot: (plan, ids, values, variableColumnName, valueColumnName) => ({
+        type: "Unpivot",
+        input: plan,
+        ids,
+        ...(values !== undefined ? { values } : {}),
+        variableColumnName,
+        valueColumnName,
+    }),
+    toDF: (plan, columnNames) => ({ type: "ToDF", input: plan, columnNames }),
+    transpose: (plan, indexColumns) => ({ type: "Transpose", input: plan, indexColumns }),
+    withColumns: (plan, columns) => ({
+        type: "Project",
+        input: plan,
+        columns: [
+            { type: "UnresolvedStar" },
+            ...columns.map(({ name, column }): Expression => ({ type: "Alias", input: column, alias: name })),
+        ],
+    }),
+    subqueryAlias: (plan, alias) => ({ type: "SubqueryAlias", input: plan, alias }),
+    crossJoin: (left, right) => ({ type: "CrossJoin", left, right }),
+    offset: (plan, offset) => ({ type: "Offset", input: plan, offset }),
+    tail: (plan, limit) => ({ type: "Tail", input: plan, limit }),
+    repartitionByExpression: (plan, partitionExprs, numPartitions, range) => ({
+        type: "RepartitionByExpression",
+        input: plan,
+        partitionExprs,
+        ...(numPartitions !== undefined ? { numPartitions } : {}),
+        range,
+    }),
+    sortWithinPartitions: (plan, orders) => ({
+        type: "Sort",
+        input: plan,
+        orders: orders.map(o => o.expr.type === "SortKey"
+            ? { expr: o.expr.input, direction: o.expr.direction, nulls: o.expr.nulls }
+            : { expr: o.expr, direction: "asc" as const }
+        ),
+        isGlobal: false,
+    }),
+    dropDuplicatesWithinWatermark: (plan, cols) => {
+        if (!cols || cols.length === 0) {
+            return { type: "Deduplicate", input: plan, withinWatermark: true };
+        }
+        const columnNames = exprsToColumnNames(cols);
+        if (!columnNames) {
+            throw new Error("dropDuplicatesWithinWatermark(...) currently only supports plain column references.");
+        }
+        return { type: "Deduplicate", input: plan, columnNames, withinWatermark: true };
+    },
+    lateralJoin: (left, right, on, joinType) => ({
+        type: "LateralJoin",
+        left,
+        right,
+        ...(on === undefined ? {} : { on }),
+        joinType: joinType.toUpperCase() as JoinTypeInput,
+    }),
+    asOfJoin: (left, right, spec) => ({ type: "AsOfJoin", left, right, spec }),
+    observe: (plan, name, metrics) => ({ type: "CollectMetrics", input: plan, name, metrics }),
+    cachedRemoteRelation: relationId => ({ type: "CachedRemoteRelation", relationId }),
+    toSchema: (plan, schema) => ({ type: "ToSchema", input: plan, schema }),
+    withMetadata: (plan, name, column, metadata) => ({ type: "WithMetadata", input: plan, name, column, metadata }),
     readStream: (format, options) => ({
         type: "Read",
         data_source: {

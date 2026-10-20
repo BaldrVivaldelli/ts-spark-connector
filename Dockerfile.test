@@ -10,6 +10,10 @@ WORKDIR /app
 # Copy package files and config files first (for better Docker layer caching)
 COPY package*.json tsconfig*.json ./
 
+# node:22 ships npm 10, which rejects the npm 11 lockfile with "Missing:
+# conventional-commits-filter". Pin the same npm major as CI.
+RUN npm install -g npm@^11.5.1
+
 # Install dependencies (skip prepare script that requires source files)
 RUN npm ci --ignore-scripts
 

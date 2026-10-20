@@ -10,6 +10,24 @@ import type * as grpc from '@grpc/grpc-js';
 export function abs<T extends NumericValue | null, E>(col: TypedColumn<T, E>): NumericColumn<T, E>;
 
 // @public
+function abs_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function acos(col: ColumnOrName): EBuilder;
+
+// @public
+export function acosh(col: ColumnOrName): EBuilder;
+
+// @public
+export function add_months(start: ColumnOrName, months: number | EBuilder): EBuilder;
+
+// @public
+export function aes_decrypt(input: ColumnOrName, key: ColumnOrName, mode?: ColumnOrName, padding?: ColumnOrName, aad?: ColumnOrName): EBuilder;
+
+// @public
+export function aes_encrypt(input: ColumnOrName, key: ColumnOrName, mode?: ColumnOrName, padding?: ColumnOrName, iv?: ColumnOrName, aad?: ColumnOrName): EBuilder;
+
+// @public
 export type AggFactory<S extends SchemaShape, E> = {
     count(): PendingAggregation<bigint, E>;
     countDistinct(ref: ColRef<S, E>): PendingAggregation<bigint, E>;
@@ -17,12 +35,95 @@ export type AggFactory<S extends SchemaShape, E> = {
     avg(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
     min<K extends NumericColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<NumericResult<S, K> | null, E>;
     max<K extends NumericColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<NumericResult<S, K> | null, E>;
+    first<K extends UsableColumnKey<S>>(ref: ColRef<S, E, K>, ignoreNulls?: boolean): PendingAggregation<NonNull<UsableColumnType<S, K>> | null, E>;
+    last<K extends UsableColumnKey<S>>(ref: ColRef<S, E, K>, ignoreNulls?: boolean): PendingAggregation<NonNull<UsableColumnType<S, K>> | null, E>;
+    collectList<K extends UsableColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<Array<NonNull<UsableColumnType<S, K>>>, E>;
+    collectSet<K extends UsableColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<Array<NonNull<UsableColumnType<S, K>>>, E>;
+    stddev(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
+    variance(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
+    approxCountDistinct(ref: ColRef<S, E>, rsd?: number): PendingAggregation<bigint, E>;
+    countIf(predicate: (columns: Columns<S, E>) => Condition<E>): PendingAggregation<bigint, E>;
 };
+
+// @public
+export function aggregate(col: ColumnOrName, initialValue: LiteralValue | EBuilder, merge: (acc: EBuilder, x: EBuilder) => EBuilder, finish?: (acc: EBuilder) => EBuilder): EBuilder;
 
 // @public
 export type AmbiguousColumn<Name extends string = string> = {
     readonly __ambiguous: Name;
 };
+
+// @public
+export function any_value(col: ColumnOrName, ignoreNulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function approx_count_distinct(col: ColumnOrName, rsd?: number | EBuilder): EBuilder;
+
+// @public
+export function approx_percentile(col: ColumnOrName, percentage: LiteralValue | EBuilder, accuracy?: number | EBuilder): EBuilder;
+
+// @public
+export function array(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function array_agg(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_append(col: ColumnOrName, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_compact(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_contains(col: ColumnOrName, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_distinct(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_except(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function array_insert(arr: ColumnOrName, pos: number | EBuilder, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_intersect(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function array_join(col: ColumnOrName, delimiter: string | EBuilder, nullReplacement?: string | EBuilder): EBuilder;
+
+// @public
+export function array_max(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_min(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_position(col: ColumnOrName, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_prepend(col: ColumnOrName, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_remove(col: ColumnOrName, element: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function array_repeat(col: ColumnOrName, count: number | EBuilder): EBuilder;
+
+// @public
+export function array_size(col: ColumnOrName): EBuilder;
+
+// @public
+export function array_sort(col: ColumnOrName, comparator?: (left: EBuilder, right: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function array_union(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function arrays_overlap(a1: ColumnOrName, a2: ColumnOrName): EBuilder;
+
+// @public
+export function arrays_zip(...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
 export interface ArraySpec<Element extends FieldSpec = FieldSpec> {
@@ -36,6 +137,65 @@ export interface ArraySpec<Element extends FieldSpec = FieldSpec> {
 
 // @public (undocumented)
 export function arrayType<const Element extends FieldSpec, const N extends boolean = false>(element: Element, nullable?: N): ArraySpec<Element> & NullableFlag<N>;
+
+// @public
+export type ArtifactKind = "jar" | "file" | "archive";
+
+// @public
+export type ArtifactUpload = {
+    path: string;
+    kind?: ArtifactKind;
+    name?: string;
+};
+
+// @public
+export class ArtifactUploadError extends Error {
+    constructor(uploaded: readonly string[], failed: readonly string[]);
+    // (undocumented)
+    readonly failed: readonly string[];
+    // (undocumented)
+    readonly uploaded: readonly string[];
+}
+
+// @public
+export const asc: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export const asc_nulls_first: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export const asc_nulls_last: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export function ascii(col: ColumnOrName): EBuilder;
+
+// @public
+export function asin(col: ColumnOrName): EBuilder;
+
+// @public
+export function asinh(col: ColumnOrName): EBuilder;
+
+// @public
+export type AsOfDirection = "backward" | "forward" | "nearest";
+
+// @public
+export type AsOfJoinOptions = {
+    tolerance?: EBuilder | number | bigint;
+    allowExactMatches?: boolean;
+    direction?: AsOfDirection;
+};
+
+// @public
+export function assert_true(col: ColumnOrName, errMsg?: string | EBuilder): EBuilder;
+
+// @public
+export function atan(col: ColumnOrName): EBuilder;
+
+// @public
+export function atan2(col1: ColumnOrNumber, col2: ColumnOrNumber): EBuilder;
+
+// @public
+export function atanh(col: ColumnOrName): EBuilder;
 
 // @public (undocumented)
 export type AuthConfig = {
@@ -51,11 +211,80 @@ export type AuthConfig = {
     refreshSkewMs?: number;
 };
 
+// @public
+export function avg(col: ColumnOrName): EBuilder;
+
+// @public
+export function base64(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export type BatchWriterFormat = "parquet" | "csv" | "json" | "orc" | "avro";
 
+// @public
+export function bin(col: ColumnOrName): EBuilder;
+
+// @public
+export function bit_and(col: ColumnOrName): EBuilder;
+
+// @public
+export function bit_count(col: ColumnOrName): EBuilder;
+
+// @public
+export function bit_get(col: ColumnOrName, pos: number | EBuilder): EBuilder;
+
+// @public
+export function bit_length(col: ColumnOrName): EBuilder;
+
+// @public
+export function bit_or(col: ColumnOrName): EBuilder;
+
+// @public
+export function bit_xor(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitmap_bit_position(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitmap_bucket_number(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitmap_construct_agg(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitmap_count(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitmap_or_agg(col: ColumnOrName): EBuilder;
+
+// @public
+export function bitwise_not(col: ColumnOrName): EBuilder;
+
+// @public
+export function bool_and(col: ColumnOrName): EBuilder;
+
+// @public
+export function bool_or(col: ColumnOrName): EBuilder;
+
+// @public
+export function bround(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
+
+// @public
+export function btrim(str: ColumnOrName, trim?: string | EBuilder): EBuilder;
+
+// @public
+export function bucket(numBuckets: number, col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export function call(name: string, args: (EBuilder | string | number | boolean)[]): EBuilder;
+
+// @public
+export function call_function(name: string, ...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function cardinality(col: ColumnOrName): EBuilder;
+
+// @public
+export type CastEvalMode = "legacy" | "ansi" | "try";
 
 // @public (undocumented)
 export type CatalogColumn = InferSchema<typeof CatalogColumnRow.def>;
@@ -89,6 +318,21 @@ export type CatalogEntry = InferSchema<typeof CatalogEntryRow.def>;
 export const CatalogEntryRow: DeclaredSchema<{
     name: "string";
     description: "string?";
+}>;
+
+// @public (undocumented)
+export type CatalogFunction = InferSchema<typeof CatalogFunctionRow.def>;
+
+// @public
+export const CatalogFunctionRow: DeclaredSchema<{
+    name: "string";
+    catalog: "string?";
+    namespace: ArraySpec<"string?"> & {
+        readonly nullable: true;
+    };
+    description: "string?";
+    className: "string";
+    isTemporary: "boolean";
 }>;
 
 // @public
@@ -136,6 +380,57 @@ export type CatalogOperation = {
 } | {
     readonly method: "dropGlobalTempView";
     readonly viewName: string;
+} | {
+    readonly method: "listFunctions";
+    readonly dbName?: string;
+    readonly pattern?: string;
+} | {
+    readonly method: "getDatabase";
+    readonly dbName: string;
+} | {
+    readonly method: "getTable";
+    readonly tableName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "getFunction";
+    readonly functionName: string;
+    readonly dbName?: string;
+} | {
+    readonly method: "createTable";
+    readonly tableName: string;
+    readonly path?: string;
+    readonly source?: string;
+    readonly description?: string;
+    readonly schema?: string;
+    readonly options?: Readonly<Record<string, string>>;
+} | {
+    readonly method: "createExternalTable";
+    readonly tableName: string;
+    readonly path?: string;
+    readonly source?: string;
+    readonly schema?: string;
+    readonly options?: Readonly<Record<string, string>>;
+} | {
+    readonly method: "cacheTable";
+    readonly tableName: string;
+    readonly storageLevel?: string;
+} | {
+    readonly method: "uncacheTable";
+    readonly tableName: string;
+} | {
+    readonly method: "isCached";
+    readonly tableName: string;
+} | {
+    readonly method: "clearCache";
+} | {
+    readonly method: "refreshTable";
+    readonly tableName: string;
+} | {
+    readonly method: "refreshByPath";
+    readonly path: string;
+} | {
+    readonly method: "recoverPartitions";
+    readonly tableName: string;
 };
 
 // @public (undocumented)
@@ -153,14 +448,59 @@ export const CatalogTableRow: DeclaredSchema<{
     isTemporary: "boolean";
 }>;
 
+// @public
+export function cbrt(col: ColumnOrName): EBuilder;
+
+// @public
+export function ceil(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
+
+// @public
+export function ceiling(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
+
+// @public
+export function char(col: ColumnOrName): EBuilder;
+
+// @public
+export function char_length(col: ColumnOrName): EBuilder;
+
+// @public
+export function character_length(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export function coalesce(...xs: Array<EBuilder | string | number | boolean>): EBuilder;
+
+// @public
+function coalesce_2(...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
 export const col: (name: string) => EBuilder;
 
+// @public
+export function collate(col: ColumnOrName, collation: string | EBuilder): EBuilder;
+
+// @public
+export function collation(col: ColumnOrName): EBuilder;
+
+// @public
+export function collect_list(col: ColumnOrName): EBuilder;
+
+// @public
+export function collect_set(col: ColumnOrName): EBuilder;
+
+// @public
+export const column: (name: string) => EBuilder;
+
 // @public (undocumented)
 export type ColumnName<S> = [S] extends [UnknownSchema] ? string : S extends SchemaShape ? UsableColumnKey<S> : string;
+
+// @public
+export type ColumnOperand = EBuilder | LiteralValue;
+
+// @public
+export type ColumnOrName = EBuilder | string;
+
+// @public
+export type ColumnOrNumber = ColumnOrName | number;
 
 // @public
 export type Columns<S extends SchemaShape, E> = {
@@ -184,19 +524,118 @@ export type ComplexType = readonly ColumnType[] | ReadonlyMap<ScalarType, Column
 export function concat<E>(...parts: Array<TypedColumn<string | null, E> | string>): TypedColumn<string | null, E>;
 
 // @public
+function concat_2(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function concat_ws(sep: string | EBuilder, ...cols: ColumnOrName[]): EBuilder;
+
+// @public
 export class Condition<E> {
     and(other: Condition<E>): Condition<E>;
     build(EX: ExprAlg<E>): E;
     or(other: Condition<E>): Condition<E>;
 }
 
+// @public
+export function contains(left: ColumnOrName, right: string | EBuilder): EBuilder;
+
+// @public
+export function conv(col: ColumnOrName, fromBase: number | EBuilder, toBase: number | EBuilder): EBuilder;
+
+// @public
+export function convert_timezone(sourceTz: string | EBuilder, targetTz: string | EBuilder, sourceTs: ColumnOrName): EBuilder;
+
+// @public
+export function corr(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function cos(col: ColumnOrName): EBuilder;
+
+// @public
+export function cosh(col: ColumnOrName): EBuilder;
+
+// @public
+export function cot(col: ColumnOrName): EBuilder;
+
+// @public
+export function count(col: ColumnOrName): EBuilder;
+
+// @public
+export function count_distinct(col: ColumnOrName, ...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function count_if(col: ColumnOrName): EBuilder;
+
+// @public
+export function count_min_sketch(col: ColumnOrName, eps: number | EBuilder, confidence: number | EBuilder, seed: number | EBuilder): EBuilder;
+
+// @public
+export function covar_pop(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function covar_samp(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function crc32(col: ColumnOrName): EBuilder;
+
+// @public
+export function create_map(...cols: ColumnOrName[]): EBuilder;
+
 // @public (undocumented)
 export function createSparkSession(sessionId?: string): SparkSession;
+
+// @public
+export type CreateTableOptions = {
+    path?: string;
+    source?: string;
+    schema?: DeclaredSchema<SchemaDef> | string;
+    description?: string;
+    options?: Readonly<Record<string, string>>;
+};
+
+// @public
+export function csc(col: ColumnOrName): EBuilder;
+
+// @public
+export function cume_dist(): EBuilder;
+
+// @public
+export function curdate(): EBuilder;
+
+// @public
+export function current_catalog(): EBuilder;
+
+// @public
+export function current_database(): EBuilder;
+
+// @public
+export function current_date(): EBuilder;
+
+// @public
+export function current_schema(): EBuilder;
+
+// @public
+export function current_timestamp(): EBuilder;
+
+// @public
+export function current_timezone(): EBuilder;
+
+// @public
+export function current_user(): EBuilder;
 
 // @public @deprecated
 export type DataFrameExpressionBuilder = {
     build<E>(EX: ExprAlg<E>): E;
 };
+
+// @public
+export class DataFrameNaFunctions<S, R, E, G, CDF, CEX> {
+    drop(how?: NAHow, thresh?: number, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    fill(value: NAFillValue | Readonly<Record<string, NAFillValue>>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    replace(toReplace: NAReplaceValue | readonly NAReplaceValue[], value: NAReplaceValue | readonly NAReplaceValue[], subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    replace(mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+}
 
 // @public (undocumented)
 export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
@@ -207,6 +646,7 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
     csv(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
     format(fmt: string): DataFrameReaderTF<R, E, G>;
+    jdbc(url: string, table: string, options?: JdbcReadOptions): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
     json(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
     // (undocumented)
@@ -228,6 +668,18 @@ export class DataFrameReaderTF<R = unknown, E = unknown, G = unknown> {
     text(...paths: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G>;
 }
 
+// @public
+export class DataFrameStatFunctions<S, R, E, G, CDF, CEX> {
+    approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
+    // (undocumented)
+    approxQuantile(cols: readonly ColumnName<S>[], probabilities: readonly number[], relativeError: number): Promise<number[][]>;
+    corr(col1: ColumnName<S>, col2: ColumnName<S>, method?: "pearson"): Promise<number>;
+    cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number>;
+    crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    freqItems(cols: readonly ColumnName<S>[], support?: number): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    sampleBy(col: ColumnName<S> | DataFrameExpressionBuilder, fractions: Readonly<Record<string, number>> | ReadonlyMap<LiteralValue, number>, seed?: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+}
+
 // @public (undocumented)
 export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, G = unknown, W = unknown, CDF = unknown, CEX = unknown, WRALG = unknown> {
     // (undocumented)
@@ -240,6 +692,12 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
     checkpoint(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, path: string): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
     // (undocumented)
     console(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
+    createGlobalTempView(viewName: string): Promise<void>;
+    // (undocumented)
+    createGlobalTempView(viewName: string, impl: WriterBackendImplementation<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
+    createOrReplaceGlobalTempView(viewName: string): Promise<void>;
+    // (undocumented)
+    createOrReplaceGlobalTempView(viewName: string, impl: WriterBackendImplementation<R, E, G, W, CDF, CEX, WRALG>): Promise<void>;
     // (undocumented)
     createOrReplaceTempView(viewName: string): Promise<void>;
     // (undocumented)
@@ -263,11 +721,16 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
         EXE?: DFWritingExec<W>;
         DF?: DFAlg<R, E, G, CDF>;
         EX?: ExprAlg<E> & CEX;
+        observations?: readonly Observation[];
     }): DataFrameWriterTF<R, E, G, W, CDF, CEX, WRALG>;
     // (undocumented)
     static fromStreamProgram<R, E, G, CDF, CEX>(df: ReadDFAny<R, E, G, CDF, CEX>, prog: StreamWProgram<R, E, G, CDF, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF, CEX, StreamWriterAlg<R>>;
     // (undocumented)
     fromTempView(this: DataFrameWriterTF<R, E, G, WStream, CDF, CEX, WRALG>, name: string): DataFrameWriterTF<R, E, G, WStreamBrand, CDF, CEX, WRALG>;
+    insertInto(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, table: string, overwrite?: boolean): Promise<void>;
+    // (undocumented)
+    insertInto(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, table: string, overwrite: boolean | undefined, impl: WriterBackendImplementation<R, E, G, WBatch, CDF, CEX, WRALG>): Promise<void>;
+    jdbc(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>, url: string, table: string, mode?: SaveMode, properties?: Record<string, WriterOptionValue>): Promise<void>;
     // (undocumented)
     json(this: DataFrameWriterTF<R, E, G, WBatch, CDF, CEX, WRALG>): DataFrameWriterTF<R, E, G, WBatchBrand, CDF, CEX, WRALG>;
     // (undocumented)
@@ -323,6 +786,71 @@ export class DataFrameWriterTF<R = DefaultDataFrameRepresentation, E = unknown, 
 }
 
 // @public
+export class DataFrameWriterV2 {
+    append(): Promise<void>;
+    clusterBy(...cols: string[]): DataFrameWriterV2;
+    create(): Promise<void>;
+    createOrReplace(): Promise<void>;
+    option(key: string, value: WriterOptionValue): DataFrameWriterV2;
+    options(options: Readonly<Record<string, WriterOptionValue>>): DataFrameWriterV2;
+    overwrite(condition: EBuilder): Promise<void>;
+    overwritePartitions(): Promise<void>;
+    partitionedBy(...cols: Array<string | EBuilder>): DataFrameWriterV2;
+    replace(): Promise<void>;
+    tableProperty(property: string, value: string): DataFrameWriterV2;
+    using(provider: string): DataFrameWriterV2;
+    withSchemaEvolution(): DataFrameWriterV2;
+}
+
+// @public
+export function date_add(start: ColumnOrName, days: number | EBuilder): EBuilder;
+
+// @public
+export function date_diff(end: ColumnOrName, start: ColumnOrName): EBuilder;
+
+// @public
+export function date_format(date: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function date_from_unix_date(days: ColumnOrName): EBuilder;
+
+// @public
+export function date_part(field: string | EBuilder, source: ColumnOrName): EBuilder;
+
+// @public
+export function date_sub(start: ColumnOrName, days: number | EBuilder): EBuilder;
+
+// @public
+export function date_trunc(format: string | EBuilder, timestamp: ColumnOrName): EBuilder;
+
+// @public
+export function dateadd(start: ColumnOrName, days: number | EBuilder): EBuilder;
+
+// @public
+export function datediff(end: ColumnOrName, start: ColumnOrName): EBuilder;
+
+// @public
+export function datepart(field: string | EBuilder, source: ColumnOrName): EBuilder;
+
+// @public
+export function day(col: ColumnOrName): EBuilder;
+
+// @public
+export function dayname(col: ColumnOrName): EBuilder;
+
+// @public
+export function dayofmonth(col: ColumnOrName): EBuilder;
+
+// @public
+export function dayofweek(col: ColumnOrName): EBuilder;
+
+// @public
+export function dayofyear(col: ColumnOrName): EBuilder;
+
+// @public
+export function days(col: ColumnOrName): EBuilder;
+
+// @public
 export interface DecimalSpec {
     // (undocumented)
     readonly kind: "decimal";
@@ -347,17 +875,66 @@ export class DeclaredSchema<D extends SchemaDef> {
     toDDL(): string;
 }
 
+// @public
+export function decode(col: ColumnOrName, charset: string | EBuilder): EBuilder;
+
+// @public
+export function degrees(col: ColumnOrName): EBuilder;
+
+// @public
+export function dense_rank(): EBuilder;
+
+// @public
+export const desc: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export const desc_nulls_first: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export const desc_nulls_last: (col: ColumnOrName) => SortKeyBuilder;
+
+// @public
+export function e(): EBuilder;
+
 // @public (undocumented)
 export type EBuilder = {
     build<E>(EX: ExprAlg<E>): E;
     alias(name: string): EBuilder;
+    name(alias: string): EBuilder;
     eq(x: EBuilder | string | number | boolean): EBuilder;
+    neq(x: ColumnOperand): EBuilder;
+    eqNullSafe(x: ColumnOperand): EBuilder;
     gt(x: EBuilder | number): EBuilder;
     gte(x: EBuilder | number): EBuilder;
     lt(x: EBuilder | number): EBuilder;
     lte(x: EBuilder | number): EBuilder;
     and(x: EBuilder): EBuilder;
     or(x: EBuilder): EBuilder;
+    not(): EBuilder;
+    plus(x: ColumnOperand): EBuilder;
+    minus(x: ColumnOperand): EBuilder;
+    multiply(x: ColumnOperand): EBuilder;
+    divide(x: ColumnOperand): EBuilder;
+    mod(x: ColumnOperand): EBuilder;
+    bitwiseAND(x: ColumnOperand): EBuilder;
+    bitwiseOR(x: ColumnOperand): EBuilder;
+    bitwiseXOR(x: ColumnOperand): EBuilder;
+    isin(...values: Array<ColumnOperand | readonly ColumnOperand[]>): EBuilder;
+    between(lower: ColumnOperand, upper: ColumnOperand): EBuilder;
+    like(pattern: string | EBuilder): EBuilder;
+    ilike(pattern: string | EBuilder): EBuilder;
+    rlike(pattern: string | EBuilder): EBuilder;
+    startsWith(prefix: string | EBuilder): EBuilder;
+    endsWith(suffix: string | EBuilder): EBuilder;
+    contains(other: string | EBuilder): EBuilder;
+    substr(start: number | EBuilder, length: number | EBuilder): EBuilder;
+    isNaN(): EBuilder;
+    cast(type: string): EBuilder;
+    tryCast(type: string): EBuilder;
+    getItem(key: string | number | EBuilder): EBuilder;
+    getField(name: string): EBuilder;
+    withField(name: string, value: EBuilder): EBuilder;
+    dropFields(...names: string[]): EBuilder;
     asc(nulls?: NullsOrder): SortKeyBuilder;
     desc(nulls?: NullsOrder): SortKeyBuilder;
     ascNullsFirst(): SortKeyBuilder;
@@ -366,13 +943,44 @@ export type EBuilder = {
     descNullsLast(): SortKeyBuilder;
     isNull(): EBuilder;
     isNotNull(): EBuilder;
-    over(spec: (EX: ExprAlg<any>) => WindowSpec<any>): EBuilder;
+    over(spec?: (EX: ExprAlg<any>) => WindowSpec<any>): EBuilder;
     from_json(schema: string): EBuilder;
     to_json(): EBuilder;
 };
 
+// @public
+export function element_at(col: ColumnOrName, extraction: LiteralValue | EBuilder): EBuilder;
+
 // @public (undocumented)
 export const elementAt: (mapCol: EBuilder, key: EBuilder | string | number) => EBuilder;
+
+// @public
+export function elt(...inputs: ColumnOrName[]): EBuilder;
+
+// @public
+export function encode(col: ColumnOrName, charset: string | EBuilder): EBuilder;
+
+// @public
+export function endswith(str: ColumnOrName, suffix: string | EBuilder): EBuilder;
+
+// @public
+export function equal_null(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function every(col: ColumnOrName): EBuilder;
+
+// @public
+export type ExecutionOptions = {
+    signal?: AbortSignal;
+    tags?: readonly string[];
+    operationId?: string;
+};
+
+// @public
+export function exists(col: ColumnOrName, fn: (x: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function exp(col: ColumnOrName): EBuilder;
 
 // @public (undocumented)
 export type ExplainModeInput = "simple" | "extended" | "codegen" | "cost" | "formatted";
@@ -381,16 +989,61 @@ export type ExplainModeInput = "simple" | "extended" | "codegen" | "cost" | "for
 export function explode(col: EBuilder | string): EBuilder;
 
 // @public
+function explode_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function explode_outer(col: ColumnOrName): EBuilder;
+
+// @public
+export function expm1(col: ColumnOrName): EBuilder;
+
+// @public
+export function expr(sql: string): EBuilder;
+
+// @public
 export type ExpressionCaseChain = {
     when(cond: EBuilder, val: EBuilder | string | number | boolean): ExpressionCaseChain;
     otherwise(val: EBuilder | string | number | boolean): EBuilder;
 };
 
 // @public
+export function extract(field: string | EBuilder, source: ColumnOrName): EBuilder;
+
+// @public
+export function factorial(col: ColumnOrName): EBuilder;
+
+// @public
 export type FieldSpec = TypeToken | NullableToken | ComplexSpec;
 
 // @public
 export type FieldToken = TypeToken | NullableToken;
+
+// @public
+export function filter(col: ColumnOrName, fn: (x: EBuilder, i: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function find_in_set(str: ColumnOrName, strArray: ColumnOrName): EBuilder;
+
+// @public
+export function first(col: ColumnOrName, ignorenulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function first_value(col: ColumnOrName, ignoreNulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function flatten(col: ColumnOrName): EBuilder;
+
+// @public
+export function floor(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
+
+// @public
+export function forall(col: ColumnOrName, fn: (x: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function format_number(col: ColumnOrName, d: number | EBuilder): EBuilder;
+
+// @public
+export function format_string(format: string | EBuilder, ...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
 export type FrameBoundary = {
@@ -407,11 +1060,490 @@ export type FrameBoundary = {
     value: number;
 };
 
+// @public
+export type FrameBoundaryInput = FrameBoundary | number;
+
 // @public (undocumented)
 export type FrameType = "rows" | "range";
 
+// @public
+export function from_csv(col: ColumnOrName, schema: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
 // @public (undocumented)
 export function from_json(jsonExpr: EBuilder, schema: string): EBuilder;
+
+// @public
+function from_json_2(col: ColumnOrName, schema: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function from_unixtime(timestamp: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function from_utc_timestamp(timestamp: ColumnOrName, tz: string | EBuilder): EBuilder;
+
+// @public
+export function from_xml(col: ColumnOrName, schema: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
+declare namespace functions {
+    export {
+        ColumnOrName,
+        ColumnOrNumber,
+        coalesce_2 as coalesce,
+        isnan,
+        isnull,
+        isnotnull,
+        nanvl,
+        nullif,
+        nullifzero,
+        zeroifnull,
+        ifnull,
+        nvl,
+        nvl2,
+        equal_null,
+        greatest,
+        least,
+        monotonically_increasing_id,
+        spark_partition_id,
+        input_file_name,
+        input_file_block_start,
+        input_file_block_length,
+        rand,
+        randn,
+        random,
+        uniform,
+        randstr,
+        uuid,
+        named_struct,
+        struct_2 as struct,
+        current_catalog,
+        current_database,
+        current_schema,
+        current_user,
+        session_user,
+        user,
+        version,
+        assert_true,
+        raise_error,
+        java_method,
+        reflect,
+        try_reflect,
+        luhn_check,
+        collate,
+        collation,
+        abs_2 as abs,
+        acos,
+        acosh,
+        asin,
+        asinh,
+        atan,
+        atan2,
+        atanh,
+        bin,
+        bround,
+        cbrt,
+        ceil,
+        ceiling,
+        conv,
+        cos,
+        cosh,
+        cot,
+        csc,
+        degrees,
+        e,
+        exp,
+        expm1,
+        factorial,
+        floor,
+        hex,
+        hypot,
+        ln,
+        log10,
+        log1p,
+        log2,
+        negative,
+        pi,
+        pmod,
+        positive,
+        pow,
+        power,
+        radians,
+        rint,
+        round_2 as round,
+        sec,
+        sign,
+        signum,
+        sin,
+        sinh,
+        sqrt,
+        tan,
+        tanh,
+        try_add,
+        try_subtract,
+        try_multiply,
+        try_divide,
+        try_mod,
+        unhex,
+        width_bucket,
+        bitwise_not,
+        bit_count,
+        bit_get,
+        getbit,
+        shiftleft,
+        shiftright,
+        shiftrightunsigned,
+        crc32,
+        hash,
+        md5,
+        sha,
+        sha1,
+        sha2,
+        xxhash64,
+        aes_encrypt,
+        aes_decrypt,
+        try_aes_decrypt,
+        add_months,
+        convert_timezone,
+        curdate,
+        current_date,
+        current_timestamp,
+        current_timezone,
+        localtimestamp,
+        now,
+        date_add,
+        dateadd,
+        date_sub,
+        date_diff,
+        datediff,
+        date_format,
+        date_from_unix_date,
+        date_part,
+        datepart,
+        extract,
+        date_trunc,
+        trunc,
+        day,
+        dayname,
+        dayofmonth,
+        dayofweek,
+        dayofyear,
+        from_unixtime,
+        from_utc_timestamp,
+        to_utc_timestamp,
+        hour,
+        minute,
+        second,
+        last_day,
+        make_date,
+        make_dt_interval,
+        make_interval,
+        try_make_interval,
+        make_ym_interval,
+        make_timestamp,
+        make_timestamp_ltz,
+        make_timestamp_ntz,
+        try_make_timestamp,
+        try_make_timestamp_ltz,
+        try_make_timestamp_ntz,
+        month,
+        monthname,
+        months_between,
+        next_day,
+        quarter,
+        timestamp_micros,
+        timestamp_millis,
+        timestamp_seconds,
+        to_date,
+        to_timestamp,
+        to_timestamp_ltz,
+        to_timestamp_ntz,
+        try_to_timestamp,
+        to_unix_timestamp,
+        unix_timestamp,
+        unix_date,
+        unix_micros,
+        unix_millis,
+        unix_seconds,
+        weekday,
+        weekofyear,
+        year,
+        window_time,
+        session_window,
+        ascii,
+        base64,
+        bit_length,
+        btrim,
+        char,
+        char_length,
+        character_length,
+        concat_2 as concat,
+        concat_ws,
+        contains,
+        decode,
+        elt,
+        encode,
+        endswith,
+        find_in_set,
+        format_number,
+        format_string,
+        ilike,
+        initcap,
+        instr,
+        is_valid_utf8,
+        lcase,
+        left,
+        length_3 as length,
+        levenshtein,
+        like,
+        locate,
+        lower_2 as lower,
+        lpad,
+        make_valid_utf8,
+        mask,
+        octet_length,
+        overlay,
+        position,
+        printf,
+        regexp,
+        regexp_like,
+        regexp_count,
+        regexp_extract,
+        regexp_extract_all,
+        regexp_instr,
+        regexp_replace,
+        regexp_substr,
+        repeat,
+        replace,
+        right,
+        rlike,
+        rpad,
+        sentences,
+        soundex,
+        split_2 as split,
+        split_part,
+        startswith,
+        substr,
+        substring,
+        substring_index,
+        to_binary,
+        to_char,
+        to_varchar,
+        to_number,
+        translate,
+        try_to_binary,
+        try_to_number,
+        try_validate_utf8,
+        ucase,
+        unbase64,
+        upper_2 as upper,
+        validate_utf8,
+        array,
+        array_append,
+        array_compact,
+        array_contains,
+        array_distinct,
+        array_except,
+        array_insert,
+        array_intersect,
+        array_join,
+        array_max,
+        array_min,
+        array_position,
+        array_prepend,
+        array_remove,
+        array_repeat,
+        array_size,
+        array_union,
+        arrays_overlap,
+        arrays_zip,
+        cardinality,
+        element_at,
+        try_element_at,
+        explode_2 as explode,
+        explode_outer,
+        flatten,
+        get,
+        inline,
+        inline_outer,
+        posexplode_2 as posexplode,
+        posexplode_outer,
+        reverse,
+        sequence,
+        shuffle,
+        size,
+        slice,
+        sort_array,
+        stack,
+        create_map,
+        map_concat,
+        map_contains_key,
+        map_entries,
+        map_from_arrays,
+        map_from_entries,
+        map_keys_2 as map_keys,
+        map_values_2 as map_values,
+        str_to_map,
+        from_json_2 as from_json,
+        to_json_2 as to_json,
+        get_json_object,
+        json_array_length,
+        json_object_keys,
+        json_tuple,
+        schema_of_json,
+        from_csv,
+        to_csv,
+        schema_of_csv,
+        from_xml,
+        to_xml,
+        schema_of_xml,
+        xpath,
+        xpath_boolean,
+        xpath_double,
+        xpath_float,
+        xpath_int,
+        xpath_long,
+        xpath_number,
+        xpath_short,
+        xpath_string,
+        parse_json,
+        try_parse_json,
+        is_variant_null,
+        variant_get,
+        try_variant_get,
+        schema_of_variant,
+        schema_of_variant_agg,
+        to_variant_object,
+        parse_url,
+        try_parse_url,
+        url_decode,
+        try_url_decode,
+        url_encode,
+        any_value,
+        approx_count_distinct,
+        approx_percentile,
+        array_agg,
+        avg,
+        bit_and,
+        bit_or,
+        bit_xor,
+        bitmap_bit_position,
+        bitmap_bucket_number,
+        bitmap_construct_agg,
+        bitmap_count,
+        bitmap_or_agg,
+        bool_and,
+        bool_or,
+        collect_list,
+        collect_set,
+        corr,
+        count_if,
+        count_min_sketch,
+        covar_pop,
+        covar_samp,
+        every,
+        first,
+        first_value,
+        grouping,
+        grouping_id,
+        histogram_numeric,
+        hll_sketch_agg,
+        hll_union_agg,
+        hll_sketch_estimate,
+        hll_union,
+        kurtosis,
+        last,
+        last_value,
+        listagg,
+        string_agg,
+        max,
+        max_by,
+        mean,
+        median,
+        min,
+        min_by,
+        mode,
+        percentile,
+        percentile_approx,
+        product,
+        regr_avgx,
+        regr_avgy,
+        regr_count,
+        regr_intercept,
+        regr_r2,
+        regr_slope,
+        regr_sxx,
+        regr_sxy,
+        regr_syy,
+        skewness,
+        some,
+        std,
+        stddev,
+        stddev_pop,
+        stddev_samp,
+        sum,
+        try_avg,
+        try_sum,
+        var_pop,
+        var_samp,
+        variance,
+        cume_dist,
+        dense_rank,
+        lag,
+        lead,
+        nth_value,
+        ntile,
+        percent_rank,
+        rank,
+        row_number,
+        typeof,
+        count,
+        count_distinct,
+        sum_distinct,
+        window_2 as window,
+        transform,
+        filter,
+        exists,
+        forall,
+        aggregate,
+        reduce,
+        zip_with,
+        array_sort,
+        map_filter,
+        transform_keys,
+        transform_values,
+        map_zip_with,
+        years,
+        months,
+        days,
+        hours,
+        bucket,
+        call_function,
+        col,
+        expr,
+        lit,
+        when,
+        column,
+        LogFunction,
+        log,
+        trim,
+        ltrim,
+        rtrim,
+        asc,
+        asc_nulls_first,
+        asc_nulls_last,
+        desc,
+        desc_nulls_first,
+        desc_nulls_last
+    }
+}
+
+// @public
+export function get(col: ColumnOrName, index: number | EBuilder): EBuilder;
+
+// @public
+export function get_json_object(col: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function getbit(col: ColumnOrName, pos: number | EBuilder): EBuilder;
 
 // @public (undocumented)
 export function getField(structCol: EBuilder, field: string): EBuilder;
@@ -420,16 +1552,62 @@ export function getField(structCol: EBuilder, field: string): EBuilder;
 export function getItem(collection: EBuilder, key: EBuilder | string | number): EBuilder;
 
 // @public
+export function greatest(...cols: ColumnOrName[]): EBuilder;
+
+// @public
 export class GroupedDataFrameTF<S, K extends PropertyKey, R, E, G, CDF, CEX> {
-    constructor(source: ReadChainedDataFrame<S, R, E, G, CDF, CEX>, grouping: ReadonlyArray<string | DataFrameExpressionBuilder>);
+    constructor(source: ReadChainedDataFrame<S, R, E, G, CDF, CEX>, grouping: ReadonlyArray<string | DataFrameExpressionBuilder>, spec?: GroupingInput | undefined);
     // (undocumented)
     agg<const A extends readonly TypedAggregation<string, ColumnType, E>[]>(build: TypedAggBuilder<S, E, A>): ReadChainedDataFrame<AggregatedSchema<S, K, A>, R, E, G, CDF, CEX>;
     // (undocumented)
     agg(aggregations: Record<string, DataFrameExpressionBuilder | string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    pivot(column: string | DataFrameExpressionBuilder, values?: readonly LiteralValue[]): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
 }
 
+// @public
+export function grouping(col: ColumnOrName): EBuilder;
+
+// @public
+export function grouping_id(...cols: ColumnOrName[]): EBuilder;
+
 // @public (undocumented)
-export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot";
+export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot" | "grouping_sets";
+
+// @public
+export function hash(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function hex(col: ColumnOrName): EBuilder;
+
+// @public
+export function histogram_numeric(col: ColumnOrName, nBins: number | EBuilder): EBuilder;
+
+// @public
+export function hll_sketch_agg(col: ColumnOrName, lgConfigK?: number | EBuilder): EBuilder;
+
+// @public
+export function hll_sketch_estimate(col: ColumnOrName): EBuilder;
+
+// @public
+export function hll_union(col1: ColumnOrName, col2: ColumnOrName, allowDifferentLgConfigK?: boolean | EBuilder): EBuilder;
+
+// @public
+export function hll_union_agg(col: ColumnOrName, allowDifferentLgConfigK?: boolean | EBuilder): EBuilder;
+
+// @public
+export function hour(col: ColumnOrName): EBuilder;
+
+// @public
+export function hours(col: ColumnOrName): EBuilder;
+
+// @public
+export function hypot(col1: ColumnOrNumber, col2: ColumnOrNumber): EBuilder;
+
+// @public
+export function ifnull(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function ilike(str: ColumnOrName, pattern: string | EBuilder, escapeChar?: string | EBuilder): EBuilder;
 
 // @public (undocumented)
 export type InferField<F extends FieldSpec> = F extends `${TypeToken}?` ? InferNonNullable<F> | null : F extends {
@@ -441,11 +1619,60 @@ export type InferSchema<D extends SchemaDef> = {
     [K in keyof D]: InferField<D[K]>;
 };
 
+// @public
+export function initcap(col: ColumnOrName): EBuilder;
+
+// @public
+export function inline(col: ColumnOrName): EBuilder;
+
+// @public
+export function inline_outer(col: ColumnOrName): EBuilder;
+
+// @public
+export function input_file_block_length(): EBuilder;
+
+// @public
+export function input_file_block_start(): EBuilder;
+
+// @public
+export function input_file_name(): EBuilder;
+
+// @public
+export function instr(str: ColumnOrName, substr: string | EBuilder): EBuilder;
+
+// @public
+export function is_valid_utf8(str: ColumnOrName): EBuilder;
+
+// @public
+export function is_variant_null(v: ColumnOrName): EBuilder;
+
+// @public
+export function isnan(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export function isNotNull(x: EBuilder | string): EBuilder;
 
+// @public
+export function isnotnull(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export function isNull(x: EBuilder | string): EBuilder;
+
+// @public
+export function isnull(col: ColumnOrName): EBuilder;
+
+// @public
+export function java_method(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export type JdbcReadOptions = {
+    column?: string;
+    lowerBound?: number | bigint | string;
+    upperBound?: number | bigint | string;
+    numPartitions?: number;
+    predicates?: readonly string[];
+    properties?: Record<string, ReaderOptionValue>;
+};
 
 // @public (undocumented)
 export type JoinHintName = "broadcast" | "merge" | "shuffle_hash" | "shuffle_replicate_nl";
@@ -457,20 +1684,158 @@ export type JoinTypeInput = JoinTypeName | Lowercase<JoinTypeName>;
 export type JoinTypeName = "INNER" | "LEFT" | "RIGHT" | "OUTER" | "FULL" | "LEFT_OUTER" | "RIGHT_OUTER" | "FULL_OUTER" | "LEFT_SEMI" | "LEFT_ANTI" | "CROSS";
 
 // @public
+export function json_array_length(col: ColumnOrName): EBuilder;
+
+// @public
+export function json_object_keys(col: ColumnOrName): EBuilder;
+
+// @public
+export function json_tuple(col: ColumnOrName, ...fields: Array<string | EBuilder>): EBuilder;
+
+// @public
+export function kurtosis(col: ColumnOrName): EBuilder;
+
+// @public
+export function lag(col: ColumnOrName, offset?: number | EBuilder, defaultValue?: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function last(col: ColumnOrName, ignorenulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function last_day(date: ColumnOrName): EBuilder;
+
+// @public
+export function last_value(col: ColumnOrName, ignoreNulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function lcase(col: ColumnOrName): EBuilder;
+
+// @public
+export function lead(col: ColumnOrName, offset?: number | EBuilder, defaultValue?: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function least(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function left(str: ColumnOrName, len: number | EBuilder): EBuilder;
+
+// @public
 function length_2<E>(col: TypedColumn<string | null, E>): NumericColumn<number | null, E>;
 export { length_2 as length }
+
+// @public
+function length_3(col: ColumnOrName): EBuilder;
+
+// @public
+export function levenshtein(left: ColumnOrName, right: ColumnOrName, threshold?: number | EBuilder): EBuilder;
+
+// @public
+export function like(str: ColumnOrName, pattern: string | EBuilder, escapeChar?: string | EBuilder): EBuilder;
+
+// @public
+export function listagg(col: ColumnOrName, delimiter?: string | EBuilder): EBuilder;
 
 // @public (undocumented)
 export const lit: (v: LiteralValue) => EBuilder;
 
 // @public
+export function ln(col: ColumnOrName): EBuilder;
+
+// @public
+export function localtimestamp(): EBuilder;
+
+// @public
+export function locate(substr: string | EBuilder, str: ColumnOrName, pos?: number | EBuilder): EBuilder;
+
+// @public
+export const log: LogFunction;
+
+// @public
+export function log10(col: ColumnOrName): EBuilder;
+
+// @public
+export function log1p(col: ColumnOrName): EBuilder;
+
+// @public
+export function log2(col: ColumnOrName): EBuilder;
+
+// @public
+export type LogFunction = {
+    (col: ColumnOrName): EBuilder;
+    (base: ColumnOrNumber, col: ColumnOrName): EBuilder;
+};
+
+// @public
 export function lower<T extends string | null, E>(col: TypedColumn<T, E>): TypedColumn<T, E>;
+
+// @public
+function lower_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function lpad(col: ColumnOrName, len: number | EBuilder, pad: string | EBuilder): EBuilder;
+
+// @public
+export const ltrim: (col: ColumnOrName, trim?: string | EBuilder) => EBuilder;
+
+// @public
+export function luhn_check(col: ColumnOrName): EBuilder;
+
+// @public
+export function make_date(year: ColumnOrName, month: ColumnOrName, day: ColumnOrName): EBuilder;
+
+// @public
+export function make_dt_interval(days?: ColumnOrNumber, hours?: ColumnOrNumber, mins?: ColumnOrNumber, secs?: ColumnOrNumber): EBuilder;
+
+// @public
+export function make_interval(years?: ColumnOrNumber, months?: ColumnOrNumber, weeks?: ColumnOrNumber, days?: ColumnOrNumber, hours?: ColumnOrNumber, mins?: ColumnOrNumber, secs?: ColumnOrNumber): EBuilder;
+
+// @public
+export function make_timestamp(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName, timezone?: ColumnOrName): EBuilder;
+
+// @public
+export function make_timestamp_ltz(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName, timezone?: ColumnOrName): EBuilder;
+
+// @public
+export function make_timestamp_ntz(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName): EBuilder;
+
+// @public
+export function make_valid_utf8(str: ColumnOrName): EBuilder;
+
+// @public
+export function make_ym_interval(years?: ColumnOrNumber, months?: ColumnOrNumber): EBuilder;
+
+// @public
+export function map_concat(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function map_contains_key(col: ColumnOrName, value: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function map_entries(col: ColumnOrName): EBuilder;
+
+// @public
+export function map_filter(col: ColumnOrName, fn: (key: EBuilder, value: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function map_from_arrays(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function map_from_entries(col: ColumnOrName): EBuilder;
 
 // @public (undocumented)
 export const map_keys: (mapCol: EBuilder) => EBuilder;
 
+// @public
+function map_keys_2(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export const map_values: (mapCol: EBuilder) => EBuilder;
+
+// @public
+function map_values_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function map_zip_with(col1: ColumnOrName, col2: ColumnOrName, fn: (key: EBuilder, value1: EBuilder, value2: EBuilder) => EBuilder): EBuilder;
 
 // @public (undocumented)
 export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldSpec = FieldSpec> {
@@ -488,7 +1853,91 @@ export interface MapSpec<Key extends FieldSpec = FieldSpec, Value extends FieldS
 export function mapType<const Key extends FieldSpec, const Value extends FieldSpec, const N extends boolean = false>(key: Key, value: Value, nullable?: N): MapSpec<Key, Value> & NullableFlag<N>;
 
 // @public
+export function mask(col: ColumnOrName, upperChar?: string | EBuilder, lowerChar?: string | EBuilder, digitChar?: string | EBuilder, otherChar?: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function max(col: ColumnOrName): EBuilder;
+
+// @public
+export function max_by(col: ColumnOrName, ord: ColumnOrName): EBuilder;
+
+// @public
+export function md5(col: ColumnOrName): EBuilder;
+
+// @public
+export function mean(col: ColumnOrName): EBuilder;
+
+// @public
+export function median(col: ColumnOrName): EBuilder;
+
+// @public
+export class MergeIntoWriter {
+    merge(): Promise<void>;
+    whenMatched(condition?: EBuilder): WhenMatched;
+    whenNotMatched(condition?: EBuilder): WhenNotMatched;
+    whenNotMatchedBySource(condition?: EBuilder): WhenNotMatchedBySource;
+    withSchemaEvolution(): MergeIntoWriter;
+}
+
+// @public
+export function min(col: ColumnOrName): EBuilder;
+
+// @public
+export function min_by(col: ColumnOrName, ord: ColumnOrName): EBuilder;
+
+// @public
+export function minute(col: ColumnOrName): EBuilder;
+
+// @public
+export function mode(col: ColumnOrName, deterministic?: boolean | EBuilder): EBuilder;
+
+// @public
+export function monotonically_increasing_id(): EBuilder;
+
+// @public
+export function month(col: ColumnOrName): EBuilder;
+
+// @public
+export function monthname(col: ColumnOrName): EBuilder;
+
+// @public
+export function months(col: ColumnOrName): EBuilder;
+
+// @public
+export function months_between(date1: ColumnOrName, date2: ColumnOrName, roundOff?: boolean | EBuilder): EBuilder;
+
+// @public
+export type NAFillValue = string | number | boolean | bigint;
+
+// @public
+export type NAHow = "any" | "all";
+
+// @public
+export function named_struct(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function nanvl(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export type NAReplaceValue = string | number | boolean | bigint | null;
+
+// @public
+export function negative(col: ColumnOrName): EBuilder;
+
+// @public
+export function next_day(date: ColumnOrName, dayOfWeek: string | EBuilder): EBuilder;
+
+// @public
 export type NonNull<T> = T extends null ? never : T;
+
+// @public
+export function now(): EBuilder;
+
+// @public
+export function nth_value(col: ColumnOrName, offset: number | EBuilder, ignoreNulls?: boolean | EBuilder): EBuilder;
+
+// @public
+export function ntile(n: number | EBuilder): EBuilder;
 
 // @public
 export type NullableFlag<N extends boolean> = N extends true ? {
@@ -497,6 +1946,12 @@ export type NullableFlag<N extends boolean> = N extends true ? {
 
 // @public
 export type NullableToken = `${TypeToken}?`;
+
+// @public
+export function nullif(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function nullifzero(col: ColumnOrName): EBuilder;
 
 // @public (undocumented)
 export type NullsOrder = "nullsFirst" | "nullsLast";
@@ -512,29 +1967,180 @@ export class NumericColumn<T extends NumericValue | null, E> extends TypedColumn
 // @public (undocumented)
 export type NumericValue = number | bigint;
 
+// @public
+export function nvl(col1: ColumnOrName, col2: ColumnOrName): EBuilder;
+
+// @public
+export function nvl2(col1: ColumnOrName, col2: ColumnOrName, col3: ColumnOrName): EBuilder;
+
+// @public
+export class Observation {
+    constructor(name?: string);
+    get(): Promise<Record<string, unknown>>;
+    // (undocumented)
+    readonly name: string;
+    get values(): Record<string, unknown> | undefined;
+}
+
+// @public
+export function octet_length(col: ColumnOrName): EBuilder;
+
+// @public
+export type OperationState = "UNSPECIFIED" | "UNKNOWN" | "RUNNING" | "TERMINATING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+// @public (undocumented)
+export type OperationStatus = {
+    operationId: string;
+    state: OperationState;
+};
+
 // @public (undocumented)
 export type OutputMode = "append" | "update" | "complete";
+
+// @public
+export function overlay(src: ColumnOrName, replace: ColumnOrName, pos: number | EBuilder, len?: number | EBuilder): EBuilder;
+
+// @public
+export function parse_json(col: ColumnOrName): EBuilder;
+
+// @public
+export function parse_url(url: ColumnOrName, partToExtract: string | EBuilder, key?: string | EBuilder): EBuilder;
+
+// @public
+export function percent_rank(): EBuilder;
+
+// @public
+export function percentile(col: ColumnOrName, percentage: LiteralValue | EBuilder, frequency?: number | EBuilder): EBuilder;
+
+// @public
+export function percentile_approx(col: ColumnOrName, percentage: LiteralValue | EBuilder, accuracy?: number | EBuilder): EBuilder;
+
+// @public
+export function pi(): EBuilder;
+
+// @public
+export function pmod(dividend: ColumnOrNumber, divisor: ColumnOrNumber): EBuilder;
 
 // @public (undocumented)
 export function posexplode(col: EBuilder | string): EBuilder;
 
 // @public
+function posexplode_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function posexplode_outer(col: ColumnOrName): EBuilder;
+
+// @public
+export function position(substr: string | EBuilder, str: ColumnOrName, start?: number | EBuilder): EBuilder;
+
+// @public
+export function positive(col: ColumnOrName): EBuilder;
+
+// @public
+export function pow(col1: ColumnOrNumber, col2: ColumnOrNumber): EBuilder;
+
+// @public
+export function power(col1: ColumnOrNumber, col2: ColumnOrNumber): EBuilder;
+
+// @public
+export function printf(format: string | EBuilder, ...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function product(col: ColumnOrName): EBuilder;
+
+// @public
+export function quarter(col: ColumnOrName): EBuilder;
+
+// @public
+export type QueryIdleEvent = {
+    id: string;
+    runId: string;
+    timestamp: string;
+} & Record<string, unknown>;
+
+// @public
+export type QueryProgressEvent = {
+    progress: StreamingQueryProgress;
+};
+
+// @public
+export type QueryStartedEvent = {
+    id: string;
+    runId: string;
+    name: string | null;
+    timestamp: string;
+} & Record<string, unknown>;
+
+// @public
+export type QueryTerminatedEvent = {
+    id: string;
+    runId: string;
+    exception?: string | null;
+    errorClassName?: string | null;
+} & Record<string, unknown>;
+
+// @public
+export function radians(col: ColumnOrName): EBuilder;
+
+// @public
+export function raise_error(errMsg: string | EBuilder): EBuilder;
+
+// @public
+export function rand(seed?: number | EBuilder): EBuilder;
+
+// @public
+export function randn(seed?: number | EBuilder): EBuilder;
+
+// @public
+export function random(seed?: number | EBuilder): EBuilder;
+
+// @public
+export function randstr(length: number | EBuilder, seed?: number | EBuilder): EBuilder;
+
+// @public
+export type RangeRow = {
+    id: bigint;
+};
+
+// @public
+export function rank(): EBuilder;
+
+// @public
 export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G = unknown, CDF = {}, CEX = {}> {
-    constructor(p: DFProgram<R, E, G, CDF, CEX>, session: SparkSession, streaming?: boolean, runtimeSchema?: SchemaDef | undefined);
+    constructor(p: DFProgram<R, E, G, CDF, CEX>, session: SparkSession, streaming?: boolean, runtimeSchema?: SchemaDef | undefined,
+    observations?: readonly Observation[],
+    checkpointRelationId?: string | undefined);
+    alias(name: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    approxQuantile(col: ColumnName<S>, probabilities: readonly number[], relativeError: number): Promise<number[]>;
+    // (undocumented)
+    approxQuantile(cols: readonly ColumnName<S>[], probabilities: readonly number[], relativeError: number): Promise<number[][]>;
     as<T extends Schema>(): ReadChainedDataFrame<T, R, E, G, CDF, CEX>;
+    asOfJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, leftAsOfColumn: string | DataFrameExpressionBuilder, rightAsOfColumn: string | DataFrameExpressionBuilder, on?: string | readonly string[] | DataFrameExpressionBuilder, how?: string, options?: AsOfJoinOptions): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     broadcast(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
     // (undocumented)
     cache(): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    checkpoint(eager?: boolean): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>>;
     // (undocumented)
     coalesce(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     // (undocumented)
     coalesce(name: string, ...exprs: Array<string | DataFrameExpressionBuilder | number | boolean>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     coalescePartitions(numPartitions: number): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
-    collect(): Promise<Array<RowOf<S>>>;
-    // (undocumented)
-    collectRaw(): Promise<unknown[]>;
+    collect(options?: ExecutionOptions): Promise<Array<RowOf<S>>>;
+    collectRaw(options?: ExecutionOptions): Promise<unknown[]>;
+    colRegex(regex: string): DataFrameExpressionBuilder;
+    columns(): Promise<string[]>;
+    corr(col1: ColumnName<S>, col2: ColumnName<S>, method?: "pearson"): Promise<number>;
+    count(): Promise<bigint>;
+    cov(col1: ColumnName<S>, col2: ColumnName<S>): Promise<number>;
+    createGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createOrReplaceGlobalTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createOrReplaceTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    createTempView(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, name: string): Promise<void>;
+    crossJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<CrossJoinSchema<S, RS>, R, E, G, CDF & RCDF, CEX & RCEX>;
+    crosstab(col1: ColumnName<S>, col2: ColumnName<S>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    cube(...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
     // (undocumented)
     describe<K extends ColumnName<S>>(colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -545,16 +2151,25 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     dropDuplicates<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     dropDuplicates(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropDuplicatesWithinWatermark<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    dropDuplicatesWithinWatermark(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dropna(how?: NAHow, thresh?: number, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    dtypes(): Promise<Array<[string, string]>>;
     // (undocumented)
     except<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     exceptAll<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     explain(mode?: ExplainModeInput): Promise<string>;
+    fillna(value: NAFillValue | Readonly<Record<string, NAFillValue>>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     filter(predicate: TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     filter(cond: DataFrameExpressionBuilder): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    filter(condition: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    first(): Promise<RowOf<S> | undefined>;
+    freqItems(cols: readonly ColumnName<S>[], support?: number): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     static fromCSV<R, E, G, CDF = {}, CEX = {}>(path: string | string[], session: SparkSession, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
@@ -565,40 +2180,73 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     groupBy<K extends ColumnName<S>>(...by: K[]): GroupedDataFrameTF<S, K, R, E, G, CDF, CEX>;
     // (undocumented)
     groupBy(...by: DataFrameExpressionBuilder[]): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
+    groupingSets(sets: ReadonlyArray<ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>>, ...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
+    head(): Promise<RowOf<S> | undefined>;
+    // (undocumented)
+    head(n: number): Promise<Array<RowOf<S>>>;
     // (undocumented)
     hint(name: JoinHintName | string, ...params: any[]): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
+    inputFiles(): Promise<string[]>;
     // (undocumented)
     intersect<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     intersectAll<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
+    isEmpty(): Promise<boolean>;
+    isLocal(): Promise<boolean>;
+    isStreaming(): Promise<boolean>;
     // (undocumented)
     join<RS extends SchemaShape, JT extends JoinTypeInput = "INNER", RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: TypedJoinPredicate<S, RS, E>, jt?: JT): ReadChainedDataFrame<JoinSchema<S, RS, JT>, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     join<RS = unknown, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on: DataFrameExpressionBuilder, jt?: JoinTypeInput): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
+    lateralJoin<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, on?: DataFrameExpressionBuilder, how?: JoinTypeInput): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     limit(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    localCheckpoint(eager?: boolean, storageLevel?: string): Promise<ReadChainedDataFrame<S, R, E, G, CDF, CEX>>;
+    melt(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     mergeHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
+    mergeInto(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, table: string, condition: EBuilder): MergeIntoWriter;
+    metadataColumn(name: string): DataFrameExpressionBuilder;
+    get na(): DataFrameNaFunctions<S, R, E, G, CDF, CEX>;
+    observe(observation: Observation | string, ...metrics: DataFrameExpressionBuilder[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    offset(n: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     orderBy(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E>>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     orderBy(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     persist(level?: string): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    printSchema(level?: number): Promise<void>;
     // (undocumented)
     randomSplit(weights: number[], seed?: number): ReadChainedDataFrame<S, R, E, G, CDF & SamplingCap<R>, CEX>[];
     // (undocumented)
     static readStream<R, E, G, CDF = unknown, CEX = unknown>(format: string, session: SparkSession, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingReadCap<R> & StreamingMark<R>, CEX>;
-    // (undocumented)
+    releaseCheckpoint(): Promise<void>;
     repartition(numPartitions: number, shuffle?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionCap<R>, CEX>;
     // (undocumented)
+    repartition(numPartitions: number, ...cols: [ColumnName<S> | DataFrameExpressionBuilder, ...Array<ColumnName<S> | DataFrameExpressionBuilder>]): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    // (undocumented)
+    repartition(...cols: [ColumnName<S> | DataFrameExpressionBuilder, ...Array<ColumnName<S> | DataFrameExpressionBuilder>]): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    repartitionByRange(numPartitions: number, ...cols: Array<ColumnName<S> | DataFrameExpressionBuilder | SortKeyBuilder>): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    // (undocumented)
+    repartitionByRange(...cols: Array<ColumnName<S> | DataFrameExpressionBuilder | SortKeyBuilder>): ReadChainedDataFrame<S, R, E, G, CDF & RepartitionByExpressionCap<R, E>, CEX>;
+    replace(toReplace: NAReplaceValue | readonly NAReplaceValue[], value: NAReplaceValue | readonly NAReplaceValue[], subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    replace(mapping: Readonly<Record<string, NAReplaceValue>> | ReadonlyMap<NAReplaceValue, NAReplaceValue>, subset?: ColumnName<S> | readonly ColumnName<S>[]): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    rollup(...by: Array<ColumnName<S> | DataFrameExpressionBuilder>): GroupedDataFrameTF<UnknownSchema, string, R, E, G, CDF, CEX>;
+    // (undocumented)
     runWith(DF: DFAlg<R, E, G, CDF>, EX: ExprAlg<E> & CEX): R;
+    sameSemantics<RS, RCDF, RCEX>(other: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>): Promise<boolean>;
     // (undocumented)
     sample(fraction: number, withReplacement?: boolean, seed?: number, deterministicOrder?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & SamplingCap<R>, CEX>;
+    sampleBy(col: ColumnName<S> | DataFrameExpressionBuilder, fractions: Readonly<Record<string, number>> | ReadonlyMap<LiteralValue, number>, seed?: number): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    schema(): Promise<SparkStructType>;
     // (undocumented)
     select<K extends ColumnName<S>>(...cols: K[]): ReadChainedDataFrame<SelectedSchema<S, K>, R, E, G, CDF, CEX>;
     // (undocumented)
     select(...cols: DataFrameExpressionBuilder[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    selectExpr(...exprs: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    semanticHash(): Promise<number>;
     show(n?: number, truncate?: number): Promise<void>;
     // (undocumented)
     shuffleHashHint(): ReadChainedDataFrame<S, R, E, G, CDF & HintCap<R>, CEX>;
@@ -608,21 +2256,36 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E>>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     sort(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    sortWithinPartitions(...colsOrKeys: Array<ColumnName<S> | DataFrameExpressionBuilder | TypedOrderFactory<S, E> | ((EX: ExprAlg<any>) => SortOrder<any>)>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // @deprecated (undocumented)
     sql(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & SqlCap<R>, CEX>;
-    streamRaw(): AsyncGenerator<Record<string, unknown>, void, void>;
+    get stat(): DataFrameStatFunctions<S, R, E, G, CDF, CEX>;
+    storageLevel(): Promise<StorageLevel>;
+    streamRaw(options?: ExecutionOptions): AsyncGenerator<Record<string, unknown>, void, void>;
     // (undocumented)
     summary<K extends ColumnName<S>>(metrics: readonly string[] | undefined, colNames: readonly K[]): ReadChainedDataFrame<StatisticsSchema<S, K>, R, E, G, CDF, CEX>;
-    toArrowBatches(): AsyncGenerator<Buffer, void, void>;
+    tail(n: number): Promise<Array<RowOf<S>>>;
+    take(n: number): Promise<Array<RowOf<S>>>;
+    to<D extends SchemaDef>(declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G, CDF, CEX>;
+    // (undocumented)
+    to(ddl: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    toArrowBatches(options?: ExecutionOptions): AsyncGenerator<Buffer, void, void>;
     // (undocumented)
     toClientASTJSON(): string;
     // (undocumented)
     toClientASTMermaid(): string;
+    toDF(...names: string[]): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    toJSON(): ReadChainedDataFrame<{
+        value: string;
+    }, R, E, G, CDF, CEX>;
     // (undocumented)
     toProtoJSON(): string;
-    toRows(): AsyncGenerator<RowOf<S>, void, void>;
+    toRows(options?: ExecutionOptions): AsyncGenerator<RowOf<S>, void, void>;
     // (undocumented)
     toSparkLogicalPlanJSON(): string;
+    transform<Out>(func: (df: this) => Out): Out;
+    transpose(indexColumn?: ColumnName<S> | DataFrameExpressionBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    treeString(level?: number): Promise<string>;
     // (undocumented)
     union<RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<S, R, E, G, RCDF, RCEX>): ReadChainedDataFrame<S, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
@@ -631,20 +2294,31 @@ export class ReadChainedDataFrame<S = UnknownSchema, R = unknown, E = unknown, G
     unionByName<RS, RCDF = unknown, RCEX = unknown>(right: ReadChainedDataFrame<RS, R, E, G, RCDF, RCEX>, allowMissingColumns: true): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & RCDF, CEX & RCEX>;
     // (undocumented)
     unpersist(blocking?: boolean): ReadChainedDataFrame<S, R, E, G, CDF & CacheCap<R>, CEX>;
+    unpivot(ids: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder>, values: ColumnName<S> | DataFrameExpressionBuilder | ReadonlyArray<ColumnName<S> | DataFrameExpressionBuilder> | undefined, variableColumnName: string, valueColumnName: string): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
+    where(predicate: TypedPredicate<S, E>): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    where(cond: DataFrameExpressionBuilder): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
+    // (undocumented)
+    where(condition: string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumn<Name extends string, T extends ColumnType>(name: Name, build: TypedColumnFactory<S, T, E>): ReadChainedDataFrame<AddedColumnSchema<S, Name, T>, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumn(name: string, e: DataFrameExpressionBuilder): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumnRenamed<From extends ColumnName<S>, const To extends string>(oldName: From, newName: ValidRenameTarget<S, From, To>): ReadChainedDataFrame<RenamedSchema<S, From, To>, R, E, G, CDF, CEX>;
+    withColumns<const M extends Readonly<Record<string, TypedColumn<ColumnType, E>>>>(build: TypedColumnsFactory<S, M, E>): ReadChainedDataFrame<AddedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
+    // (undocumented)
+    withColumns(columns: Readonly<Record<string, DataFrameExpressionBuilder>>): ReadChainedDataFrame<UnknownSchema, R, E, G, CDF, CEX>;
     // (undocumented)
     withColumnsRenamed<const M extends Record<string, string>>(mapping: ValidRenameMap<S, M>): ReadChainedDataFrame<RenamedColumnsSchema<S, M>, R, E, G, CDF, CEX>;
+    withMetadata(column: ColumnName<S>, metadata: Readonly<Record<string, unknown>> | string): ReadChainedDataFrame<S, R, E, G, CDF, CEX>;
     // (undocumented)
     withWatermark(eventTimeCol: DataFrameExpressionBuilder, delay: string): ReadChainedDataFrame<S, R, E, G, CDF & EventTimeWatermarkCap<R, E>, CEX>;
     // (undocumented)
     write(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>): DataFrameWriterTF<R, E, G, WBatch, Exclude<CDF, StreamingMark<R>>, CEX, BatchWriterAlg<R>>;
     // (undocumented)
     writeStream(this: ReadChainedDataFrame<S, R, E, G, CDF & StreamingMark<R>, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>>;
+    writeTo(this: ReadChainedDataFrame<S, R, E, G, Exclude<CDF, StreamingMark<R>>, CEX>, table: string): DataFrameWriterV2;
 }
 
 // @public (undocumented)
@@ -652,6 +2326,69 @@ export type ReaderOptions = Record<string, string>;
 
 // @public (undocumented)
 export type ReaderOptionValue = string | number | boolean | bigint;
+
+// @public
+export function reduce(col: ColumnOrName, initialValue: LiteralValue | EBuilder, merge: (acc: EBuilder, x: EBuilder) => EBuilder, finish?: (acc: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function reflect(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function regexp(str: ColumnOrName, regexp: string | EBuilder): EBuilder;
+
+// @public
+export function regexp_count(str: ColumnOrName, regexp: string | EBuilder): EBuilder;
+
+// @public
+export function regexp_extract(str: ColumnOrName, pattern: string | EBuilder, idx: number | EBuilder): EBuilder;
+
+// @public
+export function regexp_extract_all(str: ColumnOrName, regexp: string | EBuilder, idx?: number | EBuilder): EBuilder;
+
+// @public
+export function regexp_instr(str: ColumnOrName, regexp: string | EBuilder, idx?: number | EBuilder): EBuilder;
+
+// @public
+export function regexp_like(str: ColumnOrName, regexp: string | EBuilder): EBuilder;
+
+// @public
+export function regexp_replace(string: ColumnOrName, pattern: string | EBuilder, replacement: string | EBuilder): EBuilder;
+
+// @public
+export function regexp_substr(str: ColumnOrName, regexp: string | EBuilder): EBuilder;
+
+// @public
+export function regr_avgx(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_avgy(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_count(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_intercept(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_r2(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_slope(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_sxx(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_sxy(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function regr_syy(y: ColumnOrName, x: ColumnOrName): EBuilder;
+
+// @public
+export function repeat(col: ColumnOrName, n: number | EBuilder): EBuilder;
+
+// @public
+export function replace(src: ColumnOrName, search: string | EBuilder, replacement?: string | EBuilder): EBuilder;
 
 // @public (undocumented)
 export type RetryConfig = {
@@ -670,12 +2407,36 @@ export type RetryEvent = {
 };
 
 // @public
+export function reverse(col: ColumnOrName): EBuilder;
+
+// @public
+export function right(str: ColumnOrName, len: number | EBuilder): EBuilder;
+
+// @public
+export function rint(col: ColumnOrName): EBuilder;
+
+// @public
+export function rlike(str: ColumnOrName, regexp: string | EBuilder): EBuilder;
+
+// @public
 export function round<T extends NumericValue | null, E>(col: TypedColumn<T, E>, scale?: number): NumericColumn<T, E>;
+
+// @public
+function round_2(col: ColumnOrName, scale?: number | EBuilder): EBuilder;
+
+// @public
+export function row_number(): EBuilder;
 
 // @public
 export type RowOf<S> = [S] extends [UnknownSchema] ? Record<string, unknown> : S extends SchemaShape ? {
     [K in keyof S]: S[K] extends ColumnType ? S[K] : unknown;
 } : Record<string, unknown>;
+
+// @public
+export function rpad(col: ColumnOrName, len: number | EBuilder, pad: string | EBuilder): EBuilder;
+
+// @public
+export const rtrim: (col: ColumnOrName, trim?: string | EBuilder) => EBuilder;
 
 // @public
 export type S3Credentials = {
@@ -697,6 +2458,21 @@ export type Schema = Record<string, ColumnType>;
 export function schema<D extends SchemaDef>(def: D): DeclaredSchema<D>;
 
 // @public
+export function schema_of_csv(csv: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function schema_of_json(json: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function schema_of_variant(v: ColumnOrName): EBuilder;
+
+// @public
+export function schema_of_variant_agg(v: ColumnOrName): EBuilder;
+
+// @public
+export function schema_of_xml(xml: string | EBuilder, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
 export interface SchemaDef {
     // (undocumented)
     readonly [name: string]: FieldSpec;
@@ -705,11 +2481,77 @@ export interface SchemaDef {
 // @public
 export type SchemaShape = Record<string, ColumnType | AmbiguousColumn>;
 
+// @public
+export function sec(col: ColumnOrName): EBuilder;
+
+// @public
+export function second(col: ColumnOrName): EBuilder;
+
+// @public
+export function sentences(string: ColumnOrName, language?: string | EBuilder, country?: string | EBuilder): EBuilder;
+
+// @public
+export function sequence(start: ColumnOrName, stop: ColumnOrName, step?: ColumnOrName): EBuilder;
+
+// @public
+export function session_user(): EBuilder;
+
+// @public
+export function session_window(timeColumn: ColumnOrName, gapDuration: string | EBuilder): EBuilder;
+
 // @public (undocumented)
 export type SessionConfigMap = Record<string, SessionConfigValue>;
 
 // @public (undocumented)
 export type SessionConfigValue = string | number | boolean;
+
+// @public
+export function sha(col: ColumnOrName): EBuilder;
+
+// @public
+export function sha1(col: ColumnOrName): EBuilder;
+
+// @public
+export function sha2(col: ColumnOrName, numBits: number | EBuilder): EBuilder;
+
+// @public
+export function shiftleft(col: ColumnOrName, numBits: number | EBuilder): EBuilder;
+
+// @public
+export function shiftright(col: ColumnOrName, numBits: number | EBuilder): EBuilder;
+
+// @public
+export function shiftrightunsigned(col: ColumnOrName, numBits: number | EBuilder): EBuilder;
+
+// @public
+export function shuffle(col: ColumnOrName): EBuilder;
+
+// @public
+export function sign(col: ColumnOrName): EBuilder;
+
+// @public
+export function signum(col: ColumnOrName): EBuilder;
+
+// @public
+export function sin(col: ColumnOrName): EBuilder;
+
+// @public
+export function sinh(col: ColumnOrName): EBuilder;
+
+// @public
+export function size(col: ColumnOrName): EBuilder;
+
+// @public
+export function skewness(col: ColumnOrName): EBuilder;
+
+// @public
+export function slice(x: ColumnOrName, start: number | EBuilder, length: number | EBuilder): EBuilder;
+
+// @public
+export function some(col: ColumnOrName): EBuilder;
+
+// @public
+export function sort_array(col: ColumnOrName, asc?: boolean | EBuilder): EBuilder;
 
 // @public (undocumented)
 export type SortDirection = "asc" | "desc";
@@ -738,26 +2580,45 @@ export type SortOrder<E> = {
     nulls?: NullsOrder;
 };
 
+// @public
+export function soundex(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export const spark: SparkSession;
 
 // @public
+export function spark_partition_id(): EBuilder;
+
+// @public
 export class SparkCatalog<R = unknown, E = unknown, G = unknown> {
     constructor(session: SparkSession);
+    cacheTable(tableName: string, storageLevel?: string): Promise<void>;
+    clearCache(): Promise<void>;
+    createExternalTable(tableName: string, options?: CreateTableOptions): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>>;
+    createTable(tableName: string, options?: CreateTableOptions): Promise<ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>>;
     currentCatalog(): Promise<string>;
     currentDatabase(): Promise<string>;
     databaseExists(dbName: string): Promise<boolean>;
     dropGlobalTempView(viewName: string): Promise<boolean>;
     dropTempView(viewName: string): Promise<boolean>;
     functionExists(functionName: string, dbName?: string): Promise<boolean>;
+    getDatabase(dbName: string): Promise<CatalogDatabase>;
+    getFunction(functionName: string, dbName?: string): Promise<CatalogFunction>;
+    getTable(tableName: string, dbName?: string): Promise<CatalogTable>;
+    isCached(tableName: string): Promise<boolean>;
     listCatalogs(pattern?: string): ReadChainedDataFrame<CatalogEntry, R, E, G>;
     listColumns(tableName: string, dbName?: string): ReadChainedDataFrame<CatalogColumn, R, E, G>;
     listDatabases(pattern?: string): ReadChainedDataFrame<CatalogDatabase, R, E, G>;
+    listFunctions(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogFunction, R, E, G>;
     listTables(dbName?: string, pattern?: string): ReadChainedDataFrame<CatalogTable, R, E, G>;
     plan(op: CatalogOperation): ReadChainedDataFrame<UnknownSchema, R, E, G>;
+    recoverPartitions(tableName: string): Promise<void>;
+    refreshByPath(path: string): Promise<void>;
+    refreshTable(tableName: string): Promise<void>;
     setCurrentCatalog(catalogName: string): Promise<void>;
     setCurrentDatabase(dbName: string): Promise<void>;
     tableExists(tableName: string, dbName?: string): Promise<boolean>;
+    uncacheTable(tableName: string): Promise<void>;
 }
 
 // @public
@@ -802,6 +2663,7 @@ export type SparkConnectionConfig = {
     auth?: AuthConfig;
     allowInsecureAuth?: boolean;
     rpcTimeoutMs?: number;
+    executeTimeoutMs?: number;
     signal?: AbortSignal;
     grpcMaxReceiveMessageBytes?: number;
     grpcMaxSendMessageBytes?: number;
@@ -869,9 +2731,16 @@ export class SparkSession implements SessionAlgebra {
         userContext?: Partial<SparkUserContext>;
         connectionConfig?: SparkConnectionConfig;
     });
+    addArtifact(localPath: string, kind?: ArtifactKind): Promise<string>;
+    addArtifacts(...uploads: Array<string | ArtifactUpload>): Promise<string[]>;
+    addTag(tag: string): void;
+    artifactStatus(...names: string[]): Promise<Record<string, boolean>>;
     // (undocumented)
     static builder(): SparkSessionBuilder;
+    cacheArtifact(data: Uint8Array | string): Promise<string>;
     get catalog(): SparkCatalog;
+    clearTags(): void;
+    cloneSession(): Promise<SparkSession>;
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(rows: ReadonlyArray<InferSchema<D>>, declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G>;
@@ -881,12 +2750,23 @@ export class SparkSession implements SessionAlgebra {
     getSessionConfig(): SessionConfigMap;
     // (undocumented)
     getSessionId(): string;
+    getStatus(operationIds?: readonly string[]): Promise<OperationStatus[]>;
+    getTags(): string[];
     // (undocumented)
     getUserContext(): SparkUserContext;
+    interruptAll(): Promise<string[]>;
+    interruptOperation(operationId: string): Promise<string[]>;
+    interruptTag(tag: string): Promise<string[]>;
+    isArtifactCached(hash: string): Promise<boolean>;
+    newSession(): SparkSession;
+    range<R = unknown, E = unknown, G = unknown>(end: number | bigint): ReadChainedDataFrame<RangeRow, R, E, G>;
+    // (undocumented)
+    range<R = unknown, E = unknown, G = unknown>(start: number | bigint, end: number | bigint, step?: number | bigint, numPartitions?: number): ReadChainedDataFrame<RangeRow, R, E, G>;
     // (undocumented)
     get read(): DataFrameReaderTF;
     // (undocumented)
     readStream<R, E, G>(format: string, options?: Record<string, string>): ReadChainedDataFrame<UnknownSchema, R, E, G, StreamingReadCap<R> & StreamingMark<R>, unknown>;
+    removeTag(tag: string): void;
     // (undocumented)
     setConnectionConfig(config: SparkConnectionConfig): void;
     // (undocumented)
@@ -894,8 +2774,11 @@ export class SparkSession implements SessionAlgebra {
     // (undocumented)
     sql<R = unknown, E = unknown, G = unknown>(query: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
     stop(): Promise<void>;
+    get streams(): StreamingQueryManager;
     // (undocumented)
     table<R = unknown, E = unknown, G = unknown>(name: string): ReadChainedDataFrame<UnknownSchema, R, E, G, SqlCap<R>, unknown>;
+    get udf(): SparkUdfRegistration;
+    version(): Promise<string>;
     // (undocumented)
     writeStream<R = unknown, E = unknown, G = unknown, CDF = unknown, CEX = unknown>(df: ReadChainedDataFrame<UnknownSchema, R, E, G, CDF & StreamingMark<R>, CEX>): DataFrameWriterTF<R, E, G, WStream, CDF & StreamingMark<R>, CEX, StreamWriterAlg<R>>;
 }
@@ -917,12 +2800,26 @@ export class SparkSessionBuilder {
     withAuth(auth: AuthConfig): this;
     // (undocumented)
     withAuthAndTLS(auth: AuthConfig, tls: TLSConfig): this;
+    withExecuteTimeout(timeoutMs: number): this;
     withLogger(logger: SparkLogger): this;
     withMetrics(observer: SparkMetricObserver): this;
     // (undocumented)
     withRetry(retry: RetryConfig): this;
     withRpcTimeout(timeoutMs: number): this;
     withS3Credentials(credentials: S3Credentials): this;
+}
+
+// @public
+export interface SparkStructField {
+    readonly dataType: string;
+    readonly metadata?: string;
+    readonly name: string;
+    readonly nullable: boolean;
+}
+
+// @public
+export interface SparkStructType {
+    readonly fields: readonly SparkStructField[];
 }
 
 // @public (undocumented)
@@ -933,6 +2830,12 @@ export type SparkTelemetryEvent = {
     attributes: Record<string, unknown>;
 };
 
+// @public
+export class SparkUdfRegistration {
+    registerJavaFunction(name: string, className: string, returnType?: FieldSpec | string): Promise<void>;
+    registerJavaUDAF(name: string, className: string): Promise<void>;
+}
+
 // @public (undocumented)
 export type SparkUserContext = {
     user_id: string;
@@ -942,17 +2845,128 @@ export type SparkUserContext = {
 // @public (undocumented)
 export function split(input: EBuilder, delimiter: string | EBuilder): EBuilder;
 
-// @public (undocumented)
+// @public
+function split_2(str: ColumnOrName, pattern: string | EBuilder, limit?: number | EBuilder): EBuilder;
+
+// @public
+export function split_part(src: ColumnOrName, delimiter: string | EBuilder, partNum: number | EBuilder): EBuilder;
+
+// @public
+export function sqrt(col: ColumnOrName): EBuilder;
+
+// @public
+export function stack(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function startswith(str: ColumnOrName, prefix: string | EBuilder): EBuilder;
+
+// @public
+export function std(col: ColumnOrName): EBuilder;
+
+// @public
+export function stddev(col: ColumnOrName): EBuilder;
+
+// @public
+export function stddev_pop(col: ColumnOrName): EBuilder;
+
+// @public
+export function stddev_samp(col: ColumnOrName): EBuilder;
+
+// @public
+export type StorageLevel = {
+    useDisk: boolean;
+    useMemory: boolean;
+    useOffHeap: boolean;
+    deserialized: boolean;
+    replication: number;
+    name?: string;
+};
+
+// @public
+export function str_to_map(text: ColumnOrName, pairDelim?: string | EBuilder, keyValueDelim?: string | EBuilder): EBuilder;
+
+// @public
+export class StreamingQueryError extends Error {
+    constructor(message: string, options?: {
+        errorClass?: string;
+        remoteStack?: string;
+    });
+    // (undocumented)
+    readonly errorClass?: string;
+    // (undocumented)
+    readonly remoteStack?: string;
+}
+
+// @public
 export interface StreamingQueryHandle {
     // (undocumented)
     awaitTermination(): Promise<void>;
     // (undocumented)
     awaitTermination(timeoutMs: number): Promise<boolean>;
+    exception(): Promise<StreamingQueryError | undefined>;
+    explain(extended?: boolean): Promise<string>;
+    readonly id: string;
+    isActive(): Promise<boolean>;
+    lastProgress(): Promise<StreamingQueryProgress | undefined>;
     // (undocumented)
     name: string;
+    processAllAvailable(): Promise<void>;
+    recentProgress(): Promise<StreamingQueryProgress[]>;
+    readonly runId: string;
+    status(): Promise<StreamingQueryStatus>;
     // (undocumented)
     stop(): Promise<unknown>;
 }
+
+// @public
+export interface StreamingQueryListener {
+    // (undocumented)
+    onQueryIdle?(event: QueryIdleEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryProgress?(event: QueryProgressEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryStarted?(event: QueryStartedEvent): void | Promise<void>;
+    // (undocumented)
+    onQueryTerminated?(event: QueryTerminatedEvent): void | Promise<void>;
+}
+
+// @public
+export class StreamingQueryManager {
+    active(): Promise<StreamingQueryHandle[]>;
+    addListener(listener: StreamingQueryListener): Promise<void>;
+    awaitAnyTermination(): Promise<void>;
+    // (undocumented)
+    awaitAnyTermination(timeoutMs: number): Promise<boolean>;
+    get(id: string): Promise<StreamingQueryHandle | undefined>;
+    getListeners(): readonly StreamingQueryListener[];
+    removeListener(listener: StreamingQueryListener): Promise<void>;
+    resetTerminated(): Promise<void>;
+}
+
+// @public
+export type StreamingQueryProgress = {
+    id: string;
+    runId: string;
+    name: string | null;
+    timestamp: string;
+    batchId: number;
+    numInputRows?: number;
+    inputRowsPerSecond?: number;
+    processedRowsPerSecond?: number;
+    durationMs?: Record<string, number>;
+    sources?: Array<Record<string, unknown>>;
+    sink?: Record<string, unknown>;
+    stateOperators?: Array<Record<string, unknown>>;
+    observedMetrics?: Record<string, unknown>;
+} & Record<string, unknown>;
+
+// @public
+export type StreamingQueryStatus = {
+    message: string;
+    isDataAvailable: boolean;
+    isTriggerActive: boolean;
+    isActive: boolean;
+};
 
 // @public (undocumented)
 export type StreamTriggerInput = {
@@ -976,8 +2990,14 @@ export type StreamTriggerInput = {
 // @public (undocumented)
 export type StreamWriterFormat = "console" | "kafka" | "memory";
 
+// @public
+export function string_agg(col: ColumnOrName, delimiter?: string | EBuilder): EBuilder;
+
 // @public (undocumented)
 export function struct(...fields: EBuilder[]): EBuilder;
+
+// @public
+function struct_2(...cols: ColumnOrName[]): EBuilder;
 
 // @public (undocumented)
 export interface StructSpec<Fields extends SchemaDef = SchemaDef> {
@@ -992,6 +3012,36 @@ export interface StructSpec<Fields extends SchemaDef = SchemaDef> {
 // @public (undocumented)
 export function structType<const Fields extends SchemaDef, const N extends boolean = false>(fields: Fields, nullable?: N): StructSpec<Fields> & NullableFlag<N>;
 
+// @public
+export function substr(str: ColumnOrName, pos: number | EBuilder, len?: number | EBuilder): EBuilder;
+
+// @public
+export function substring(str: ColumnOrName, pos: number | EBuilder, len: number | EBuilder): EBuilder;
+
+// @public
+export function substring_index(str: ColumnOrName, delim: string | EBuilder, count: number | EBuilder): EBuilder;
+
+// @public
+export function sum(col: ColumnOrName): EBuilder;
+
+// @public
+export function sum_distinct(col: ColumnOrName): EBuilder;
+
+// @public
+export function tan(col: ColumnOrName): EBuilder;
+
+// @public
+export function tanh(col: ColumnOrName): EBuilder;
+
+// @public
+export function timestamp_micros(col: ColumnOrName): EBuilder;
+
+// @public
+export function timestamp_millis(col: ColumnOrName): EBuilder;
+
+// @public
+export function timestamp_seconds(col: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 export type TLSConfig = {
     keyStorePath?: string;
@@ -1003,8 +3053,62 @@ export type TLSConfig = {
     serverNameOverride?: string;
 };
 
+// @public
+export function to_binary(col: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function to_char(col: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function to_csv(col: ColumnOrName, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function to_date(col: ColumnOrName, format?: string | EBuilder): EBuilder;
+
 // @public (undocumented)
 export function to_json(expr: EBuilder): EBuilder;
+
+// @public
+function to_json_2(col: ColumnOrName, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function to_number(col: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function to_timestamp(col: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function to_timestamp_ltz(timestamp: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function to_timestamp_ntz(timestamp: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function to_unix_timestamp(timestamp: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function to_utc_timestamp(timestamp: ColumnOrName, tz: string | EBuilder): EBuilder;
+
+// @public
+export function to_varchar(col: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function to_variant_object(col: ColumnOrName): EBuilder;
+
+// @public
+export function to_xml(col: ColumnOrName, options?: Readonly<Record<string, string>>): EBuilder;
+
+// @public
+export function transform(col: ColumnOrName, fn: (x: EBuilder, i: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function transform_keys(col: ColumnOrName, fn: (key: EBuilder, value: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function transform_values(col: ColumnOrName, fn: (key: EBuilder, value: EBuilder) => EBuilder): EBuilder;
+
+// @public
+export function translate(srcCol: ColumnOrName, matching: string | EBuilder, replace: string | EBuilder): EBuilder;
 
 // @public (undocumented)
 export type Trigger = {
@@ -1016,6 +3120,78 @@ export type Trigger = {
     kind: "Continuous";
     checkpointIntervalMs: number;
 };
+
+// @public
+export const trim: (col: ColumnOrName, trim?: string | EBuilder) => EBuilder;
+
+// @public
+export function trunc(date: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function try_add(left: ColumnOrName, right: ColumnOrName): EBuilder;
+
+// @public
+export function try_aes_decrypt(input: ColumnOrName, key: ColumnOrName, mode?: ColumnOrName, padding?: ColumnOrName, aad?: ColumnOrName): EBuilder;
+
+// @public
+export function try_avg(col: ColumnOrName): EBuilder;
+
+// @public
+export function try_divide(left: ColumnOrName, right: ColumnOrName): EBuilder;
+
+// @public
+export function try_element_at(col: ColumnOrName, extraction: LiteralValue | EBuilder): EBuilder;
+
+// @public
+export function try_make_interval(years?: ColumnOrNumber, months?: ColumnOrNumber, weeks?: ColumnOrNumber, days?: ColumnOrNumber, hours?: ColumnOrNumber, mins?: ColumnOrNumber, secs?: ColumnOrNumber): EBuilder;
+
+// @public
+export function try_make_timestamp(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName, timezone?: ColumnOrName): EBuilder;
+
+// @public
+export function try_make_timestamp_ltz(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName, timezone?: ColumnOrName): EBuilder;
+
+// @public
+export function try_make_timestamp_ntz(years: ColumnOrName, months: ColumnOrName, days: ColumnOrName, hours: ColumnOrName, mins: ColumnOrName, secs: ColumnOrName): EBuilder;
+
+// @public
+export function try_mod(left: ColumnOrName, right: ColumnOrName): EBuilder;
+
+// @public
+export function try_multiply(left: ColumnOrName, right: ColumnOrName): EBuilder;
+
+// @public
+export function try_parse_json(col: ColumnOrName): EBuilder;
+
+// @public
+export function try_parse_url(url: ColumnOrName, partToExtract: string | EBuilder, key?: string | EBuilder): EBuilder;
+
+// @public
+export function try_reflect(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function try_subtract(left: ColumnOrName, right: ColumnOrName): EBuilder;
+
+// @public
+export function try_sum(col: ColumnOrName): EBuilder;
+
+// @public
+export function try_to_binary(col: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function try_to_number(col: ColumnOrName, format: string | EBuilder): EBuilder;
+
+// @public
+export function try_to_timestamp(col: ColumnOrName, format?: string | EBuilder): EBuilder;
+
+// @public
+export function try_url_decode(str: ColumnOrName): EBuilder;
+
+// @public
+export function try_validate_utf8(str: ColumnOrName): EBuilder;
+
+// @public
+export function try_variant_get(v: ColumnOrName, path: string | EBuilder, targetType: string | EBuilder): EBuilder;
 
 // @public (undocumented)
 export type TypedAggBuilder<S, E, A extends readonly TypedAggregation<string, ColumnType, E>[]> = S extends SchemaShape ? (factory: AggFactory<S, E>) => readonly [...A] & UniqueAggregationTuple<A> : never;
@@ -1056,6 +3232,9 @@ export class TypedColumn<T extends ColumnType, E> {
 // @public (undocumented)
 export type TypedColumnFactory<S, T extends ColumnType, E> = S extends SchemaShape ? (columns: Columns<S, E>) => TypedColumn<T, E> : never;
 
+// @public
+export type TypedColumnsFactory<S, M, E> = S extends SchemaShape ? (columns: Columns<S, E>) => M : never;
+
 // @public (undocumented)
 export type TypedJoinPredicate<S, RS extends SchemaShape, E> = S extends SchemaShape ? (left: Columns<S, E>, right: Columns<RS, E>) => Condition<E> : never;
 
@@ -1069,7 +3248,37 @@ export type TypedPredicate<S, E> = S extends SchemaShape ? (columns: Columns<S, 
 export function typedWhen<V extends ScalarType, E>(cond: Condition<E>, value: V | TypedColumn<Widen<V>, E>): TypedCaseChain<Widen<V>, E>;
 
 // @public
+export function typeof(col: ColumnOrName): EBuilder;
+
+// @public
 export type TypeToken = "int" | "long" | "double" | "float" | "string" | "boolean" | "date" | "timestamp";
+
+// @public
+export function ucase(col: ColumnOrName): EBuilder;
+
+// @public
+export function unbase64(col: ColumnOrName): EBuilder;
+
+// @public
+export function unhex(col: ColumnOrName): EBuilder;
+
+// @public
+export function uniform(min: LiteralValue | EBuilder, max: LiteralValue | EBuilder, seed?: number | EBuilder): EBuilder;
+
+// @public
+export function unix_date(col: ColumnOrName): EBuilder;
+
+// @public
+export function unix_micros(col: ColumnOrName): EBuilder;
+
+// @public
+export function unix_millis(col: ColumnOrName): EBuilder;
+
+// @public
+export function unix_seconds(col: ColumnOrName): EBuilder;
+
+// @public
+export function unix_timestamp(timestamp?: ColumnOrName, format?: string | EBuilder): EBuilder;
 
 // @public
 export type UnknownSchema = {
@@ -1077,23 +3286,110 @@ export type UnknownSchema = {
 };
 
 // @public
+export class UnsupportedServerVersionError extends Error {
+    constructor(feature: string, requiredVersion: string, serverVersion: string);
+    // (undocumented)
+    readonly feature: string;
+    // (undocumented)
+    readonly requiredVersion: string;
+    // (undocumented)
+    readonly serverVersion: string;
+}
+
+// @public
 export function upper<T extends string | null, E>(col: TypedColumn<T, E>): TypedColumn<T, E>;
+
+// @public
+function upper_2(col: ColumnOrName): EBuilder;
+
+// @public
+export function url_decode(str: ColumnOrName): EBuilder;
+
+// @public
+export function url_encode(str: ColumnOrName): EBuilder;
+
+// @public
+export function user(): EBuilder;
+
+// @public
+export function uuid(): EBuilder;
+
+// @public
+export function validate_utf8(str: ColumnOrName): EBuilder;
+
+// @public
+export function var_pop(col: ColumnOrName): EBuilder;
+
+// @public
+export function var_samp(col: ColumnOrName): EBuilder;
+
+// @public
+export function variance(col: ColumnOrName): EBuilder;
+
+// @public
+export function variant_get(v: ColumnOrName, path: string | EBuilder, targetType: string | EBuilder): EBuilder;
+
+// @public
+export function version(): EBuilder;
+
+// @public
+export function weekday(col: ColumnOrName): EBuilder;
+
+// @public
+export function weekofyear(col: ColumnOrName): EBuilder;
 
 // @public (undocumented)
 export function when(cond: EBuilder, val: EBuilder | string | number | boolean): ExpressionCaseChain;
 
+// @public
+export class WhenMatched {
+    delete(): MergeIntoWriter;
+    update(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+    updateAll(): MergeIntoWriter;
+}
+
+// @public
+export class WhenNotMatched {
+    insert(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+    insertAll(): MergeIntoWriter;
+}
+
+// @public
+export class WhenNotMatchedBySource {
+    delete(): MergeIntoWriter;
+    update(assignments: Readonly<Record<string, EBuilder>>): MergeIntoWriter;
+}
+
+// @public
+export function width_bucket(v: ColumnOrName, min: ColumnOrName, max: ColumnOrName, numBucket: ColumnOrName): EBuilder;
+
 // @public (undocumented)
 const Window_2: {
-    partitionBy: (...keys: (string | EBuilder)[]) => {
-        orderBy: (...ords: Array<string | EBuilder | SortKeyBuilder>) => {
-            rowsBetween: (start: FrameBoundary, end: FrameBoundary) => <E>(EX: ExprAlg<E>) => WindowSpec<E>;
-        };
-    };
+    partitionBy: (...keys: WindowPartitionInput[]) => WindowSpecBuilder;
+    orderBy: (...ords: WindowOrderInput[]) => WindowSpecBuilder;
+    rowsBetween: (start: FrameBoundaryInput, end: FrameBoundaryInput) => WindowSpecBuilder;
+    rangeBetween: (start: FrameBoundaryInput, end: FrameBoundaryInput) => WindowSpecBuilder;
+    unboundedPreceding: FrameBoundary;
+    unboundedFollowing: FrameBoundary;
+    currentRow: FrameBoundary;
 };
 export { Window_2 as Window }
 
+// @public
+function window_2(timeColumn: ColumnOrName, windowDuration: string, slideDuration?: string, startTime?: string): EBuilder;
+export { window_2 as window }
+
+// @public
+export function window_time(windowColumn: ColumnOrName): EBuilder;
+
 // @public @deprecated
 export type WindowFrameBoundary = FrameBoundary;
+
+// @public
+export type WindowOrderInput = string | EBuilder | SortKeyBuilder;
+
+// @public
+export type WindowPartitionInput = string | EBuilder;
 
 // @public (undocumented)
 export type WindowSpec<E> = {
@@ -1110,8 +3406,61 @@ export type WindowSpec<E> = {
     };
 };
 
+// @public
+export type WindowSpecBuilder = (<E>(EX: ExprAlg<E>) => WindowSpec<E>) & {
+    partitionBy(...keys: WindowPartitionInput[]): WindowSpecBuilder;
+    orderBy(...ords: WindowOrderInput[]): WindowSpecBuilder;
+    rowsBetween(start: FrameBoundaryInput, end: FrameBoundaryInput): WindowSpecBuilder;
+    rangeBetween(start: FrameBoundaryInput, end: FrameBoundaryInput): WindowSpecBuilder;
+};
+
 // @public (undocumented)
 export type WriterOptionValue = string | number | boolean | bigint;
+
+// @public
+export type WriterV2Mode = "create" | "replace" | "createOrReplace" | "append" | "overwrite" | "overwritePartitions";
+
+// @public
+export function xpath(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_boolean(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_double(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_float(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_int(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_long(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_number(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_short(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xpath_string(xml: ColumnOrName, path: string | EBuilder): EBuilder;
+
+// @public
+export function xxhash64(...cols: ColumnOrName[]): EBuilder;
+
+// @public
+export function year(col: ColumnOrName): EBuilder;
+
+// @public
+export function years(col: ColumnOrName): EBuilder;
+
+// @public
+export function zeroifnull(col: ColumnOrName): EBuilder;
+
+// @public
+export function zip_with(left: ColumnOrName, right: ColumnOrName, fn: (x: EBuilder, y: EBuilder) => EBuilder): EBuilder;
 
 // (No @packageDocumentation comment for this package)
 

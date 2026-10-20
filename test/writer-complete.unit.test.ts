@@ -26,11 +26,20 @@ import { ProtoWritingExec } from "../src/write/protoWriterExec";
 
 const session = SparkSession.builder().getOrCreate();
 const handle: StreamingQueryHandle = {
+    id: "query-1",
+    runId: "run-1",
     name: "query",
     stop: vi.fn(async () => undefined),
     awaitTermination: vi.fn(async (timeoutMs?: number) =>
         timeoutMs === undefined ? undefined : true
     ) as StreamingQueryHandle["awaitTermination"],
+    isActive: vi.fn(async () => true),
+    status: vi.fn(async () => ({ message: "ok", isDataAvailable: true, isTriggerActive: false, isActive: true })),
+    lastProgress: vi.fn(async () => undefined),
+    recentProgress: vi.fn(async () => []),
+    explain: vi.fn(async () => "plan"),
+    exception: vi.fn(async () => undefined),
+    processAllAvailable: vi.fn(async () => undefined),
 };
 
 function executor() {
@@ -158,6 +167,47 @@ describe("DataFrameWriterTF complete behavior", () => {
         await writer.createOrReplaceTempView("replace_view", impl);
 
         expect(EXE.run).toHaveBeenCalledTimes(7);
+    });
+
+    it("inserts into an existing table and writes through jdbc", async () => {
+        const EXE = executor();
+        const impl = batchImpl(EXE);
+        const writer = concreteBatch().withBackend(impl).mode("ignore");
+
+        await writer.insertInto("catalog.events", true, impl);
+        await writer.insertInto("catalog.events", false, impl);
+        await writer.insertInto("catalog.events", undefined, impl);
+        await writer.insertInto("catalog.events");
+        const executed = () => (vi.mocked(EXE.run).mock.calls as unknown as Array<[ProtoWriteRoot]>).map(call => call[0]);
+        expect(executed().map(root => [root.spec.mode, root.spec.target])).toEqual([
+            ["overwrite", { table: "catalog.events", insertInto: true }],
+            ["append", { table: "catalog.events", insertInto: true }],
+            ["ignore", { table: "catalog.events", insertInto: true }],
+            ["ignore", { table: "catalog.events", insertInto: true }],
+        ]);
+        await expect(writer.insertInto(" ")).rejects.toThrow(TypeError);
+        await expect(writer.insertInto("t", "yes" as never)).rejects.toThrow(/overwrite must be a boolean/);
+        const { insertInto: _dropped, ...withoutInsert } = ProtoWritingAlg as unknown as Record<string, unknown>;
+        await expect(
+            concreteBatch().withBackend(batchImpl(executor(), withoutInsert as unknown as BatchWriterAlg<ProtoRel>)).insertInto("t"),
+        ).rejects.toThrow(/does not implement insertInto/);
+
+        await writer.jdbc("jdbc:derby:memory:db", "people", "append", { driver: "org.apache.derby.jdbc.EmbeddedDriver" });
+        await writer.jdbc("jdbc:derby:memory:db", "people");
+        const [withMode, bare] = executed().slice(4);
+        expect(withMode!.spec).toMatchObject({
+            format: "jdbc",
+            mode: "append",
+            options: { url: "jdbc:derby:memory:db", dbtable: "people", driver: "org.apache.derby.jdbc.EmbeddedDriver" },
+        });
+        expect(withMode!.spec.target).toBeUndefined();
+        expect(bare!.spec).toMatchObject({ format: "jdbc", mode: "ignore", options: { url: "jdbc:derby:memory:db", dbtable: "people" } });
+        await expect(writer.jdbc("", "people")).rejects.toThrow(TypeError);
+        await expect(writer.jdbc("jdbc:x", " ")).rejects.toThrow(TypeError);
+
+        // Like PySpark, the url and table arguments win over conflicting properties.
+        await writer.jdbc("jdbc:derby:memory:real", "real", undefined, { url: "jdbc:wrong", dbtable: "wrong", driver: "d" });
+        expect(executed()[6]!.spec.options).toEqual({ url: "jdbc:derby:memory:real", dbtable: "real", driver: "d" });
     });
 
     it("executes all stream transformations, shortcuts and actions", async () => {

@@ -1,10 +1,11 @@
 import type * as Grpc from "@grpc/grpc-js";
 import crypto from "node:crypto";
+import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import tls from "node:tls";
 import type { AuthConfig, SessionConfigMap, SparkConnectionConfig, TLSConfig } from "./session";
-import { resolveRetryConfig, withRetry } from "./retry";
+import { abortError, resolveRetryConfig, throwIfAborted, withRetry } from "./retry";
 import { resolveProviderCredentials } from "./credentialProvider";
 import {
     executeReattachable,
@@ -13,11 +14,13 @@ import {
 } from "./reattachableExecution";
 import { emitTelemetry } from "./telemetry";
 import {
-    buildCallOptions,
+    buildStreamCallOptions,
     callUnary,
     callUnaryWithRetry,
+    cleanupConnectionConfig,
     emitExecuteCleanupTelemetry,
     enrichSparkConnectError,
+    resolveExecuteDeadline,
 } from "./rpcLifecycle";
 export {
     assertRpcResponseSessionIntegrity,
@@ -25,26 +28,71 @@ export {
 } from "./rpcLifecycle";
 import {
     ExecutePlanResponse,
+    NormalizedStreamingQueryInstanceId,
     StreamStartResult,
     StreamingQueryCommandResult,
+    StreamingQueryError,
+    StreamingQueryProgress,
+    StreamingQueryStatus,
     buildStreamingQueryCommandRequest,
     extractAwaitTerminationResult,
+    extractRecentProgress,
     extractStreamStart,
     extractStreamingException,
     extractStreamingQueryCommandResult,
     extractStreamingQueryId,
+    extractStreamingStatus,
+    streamingExceptionToError,
     validateTerminationTimeout,
 } from "./streamingProtocol";
 
-/** @public */
+/**
+ * Control and introspection of one streaming query run, mirroring Spark's
+ * `StreamingQuery`. Handles come from `writeStream().start()` / `toTable()`
+ * and from `session.streams`.
+ * @public
+ */
 export interface StreamingQueryHandle {
+    /** Query id; stays the same across restarts from one checkpoint. */
+    readonly id: string;
+    /** Id of this run of the query. */
+    readonly runId: string;
+    name: string;
     awaitTermination(): Promise<void>;
     awaitTermination(timeoutMs: number): Promise<boolean>;
     stop(): Promise<unknown>;
-    name: string;
+    /** Whether the query is still running. */
+    isActive(): Promise<boolean>;
+    /** What the query is doing right now: Spark's `StreamingQuery.status()`. */
+    status(): Promise<StreamingQueryStatus>;
+    /** The most recent progress report, or `undefined` before the first batch completed. */
+    lastProgress(): Promise<StreamingQueryProgress | undefined>;
+    /** The last few progress reports, oldest first. */
+    recentProgress(): Promise<StreamingQueryProgress[]>;
+    /** Logical and physical plans of the query; `extended` adds the analysed and optimised plans. */
+    explain(extended?: boolean): Promise<string>;
+    /** The failure that terminated the query, or `undefined` when it did not fail. */
+    exception(): Promise<StreamingQueryError | undefined>;
+    /** Waits until every batch of data available at call time has been processed. */
+    processAllAvailable(): Promise<void>;
     /** @internal Latest server identity observed while controlling the query. */
     readonly serverSideSessionId?: string;
+    /**
+     * @internal `QueryStartedEvent` JSON from the start result; Spark sends it
+     * only while a listener bus is registered for the session.
+     */
+    readonly startedEventJson?: string;
 }
+
+/** @internal Everything a handle needs to address its query on the server. */
+export type StreamingQueryHandleSource = {
+    request: RpcMessage;
+    config?: SparkConnectionConfig;
+    queryId: NormalizedStreamingQueryInstanceId;
+    name: string;
+    serverSideSessionId?: string;
+    startedEventJson?: string;
+};
 
 type AnalyzePlanResponse = RpcMessage & {
     explain?: {
@@ -66,6 +114,12 @@ interface SparkConnectServiceClient {
     interrupt(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     releaseSession(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     fetchErrorDetails(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    /** Spark Connect 4.1+. */
+    cloneSession(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    addArtifacts(metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientWritableStream<RpcMessage>;
+    artifactStatus(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
+    /** Spark Connect 4.2+. */
+    getStatus(request: RpcMessage, metadata: Grpc.Metadata, options: Grpc.CallOptions, callback: UnaryCallback<RpcMessage>): Grpc.ClientUnaryCall;
     close(): void;
 }
 
@@ -536,8 +590,9 @@ export const sparkGrpcClient = {
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
         const { client, metadata } = await getClientContext(config);
         let latestObservedServerSessionId = request.client_observed_server_side_session_id;
-        const cleanupConfig = config ? { ...config, signal: undefined } : undefined;
+        const cleanupConfig = cleanupConnectionConfig(config);
         const startedAt = Date.now();
+        const executeDeadline = resolveExecuteDeadline(config, startedAt);
         let responseCount = 0;
         emitTelemetry(config, "spark.execute.start", "debug", {
             operationId: request.operation_id,
@@ -547,24 +602,27 @@ export const sparkGrpcClient = {
                 execute: executeRequest => client.executePlan(
                     executeRequest,
                     metadata,
-                    buildCallOptions(config)
+                    buildStreamCallOptions(config, executeDeadline)
                 ),
-                reattach: reattachRequest => {
+                // Continuations of a long query can outlive the credentials the
+                // initial stream used, so provider headers are resolved again
+                // (the provider cache makes this free while they are fresh).
+                reattach: async reattachRequest => {
                     emitTelemetry(config, "spark.execute.reattach", "info", {
                         operationId: reattachRequest.operation_id,
                         lastResponseId: reattachRequest.last_response_id,
                     });
                     return client.reattachExecute(
                         reattachRequest,
-                        metadata,
-                        buildCallOptions(config)
+                        await buildMetadata(config),
+                        buildStreamCallOptions(config, executeDeadline)
                     );
                 },
                 release: releaseRequest => withRetry(
-                    () => callUnary(
+                    async () => callUnary(
                         client.releaseExecute.bind(client),
                         releaseRequest,
-                        metadata,
+                        await buildMetadata(cleanupConfig),
                         cleanupConfig,
                         "ReleaseExecute"
                     ),
@@ -573,6 +631,9 @@ export const sparkGrpcClient = {
             }, {
                 retry: resolveRetryConfig(config),
                 signal: config?.signal,
+                ...(executeDeadline !== undefined && Number.isFinite(executeDeadline)
+                    ? { deadline: executeDeadline }
+                    : {}),
                 onCleanupError: cleanupError =>
                     emitExecuteCleanupTelemetry(config, request.operation_id, cleanupError),
             })) {
@@ -697,6 +758,81 @@ export const sparkGrpcClient = {
         );
     },
 
+    /**
+     * Copies a server-side session (Spark Connect 4.1+). Not retried: a lost
+     * response would make the retry collide with the clone it created.
+     */
+    async cloneSession(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        try {
+            return await callUnary(client.cloneSession.bind(client), request, metadata, config, "CloneSession");
+        } catch (error) {
+            throw await enrichSparkConnectError(error, "CloneSession", request, client, metadata, config);
+        }
+    },
+
+    /**
+     * Streams `AddArtifactsRequest` messages to the server and resolves with
+     * its summary. Not retried: a partially uploaded chunked artifact cannot
+     * be resumed, and the caller can simply upload again. The stream is
+     * bounded like an execution (`executeTimeoutMs`, else the per-stream
+     * `rpcTimeoutMs`) and cancelled by the session signal.
+     */
+    async addArtifacts(requests: Iterable<RpcMessage>, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const signal = config?.signal;
+        throwIfAborted(signal);
+        const { client, metadata } = await getClientContext(config);
+        const startedAt = Date.now();
+        emitTelemetry(config, "spark.rpc.start", "debug", { rpc: "AddArtifacts" });
+        let settle!: { resolve: (response: RpcMessage) => void; reject: (error: unknown) => void };
+        const completed = new Promise<RpcMessage>((resolve, reject) => { settle = { resolve, reject }; });
+        // A failure while writing cancels the call, whose callback then rejects
+        // `completed` after nobody awaits it any more; keep that handled.
+        completed.catch(() => undefined);
+        const call = client.addArtifacts(
+            metadata,
+            buildStreamCallOptions(config, resolveExecuteDeadline(config, startedAt)),
+            (error, response) => {
+                if (error) settle.reject(error);
+                else settle.resolve(response);
+            },
+        );
+        const onAbort = () => call.cancel();
+        signal?.addEventListener("abort", onAbort, { once: true });
+        try {
+            for (const request of requests) {
+                if (!call.write(request)) await Promise.race([once(call, "drain"), completed]);
+            }
+            call.end();
+            const response = await completed;
+            emitTelemetry(config, "spark.rpc.end", "debug", { rpc: "AddArtifacts", durationMs: Date.now() - startedAt });
+            return response;
+        } catch (error) {
+            call.cancel();
+            emitTelemetry(config, "spark.rpc.error", "error", {
+                rpc: "AddArtifacts",
+                durationMs: Date.now() - startedAt,
+                code: (error as { code?: unknown } | null)?.code,
+            });
+            if (signal?.aborted) throw abortError(signal.reason);
+            throw await enrichSparkConnectError(error, "AddArtifacts", {}, client, metadata, config);
+        } finally {
+            signal?.removeEventListener("abort", onAbort);
+        }
+    },
+
+    /** Whether the named artifacts exist on the server for this session. */
+    async artifactStatus(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        return callUnaryWithRetry(client, client.artifactStatus.bind(client), request, metadata, config, "ArtifactStatus");
+    },
+
+    /** Operation states of this session (Spark Connect 4.2+). */
+    async getStatus(request: RpcMessage, config?: SparkConnectionConfig): Promise<RpcMessage> {
+        const { client, metadata } = await getClientContext(config);
+        return callUnaryWithRetry(client, client.getStatus.bind(client), request, metadata, config, "GetStatus");
+    },
+
     /** Retains shared ownership of the channel identity without opening it eagerly. */
     retain(config?: SparkConnectionConfig): string {
         return retainClient(config);
@@ -709,7 +845,7 @@ export const sparkGrpcClient = {
 
     async executePlanStreaming(request: RpcMessage, config?: SparkConnectionConfig): Promise<StreamingQueryHandle> {
         const responses = await sparkGrpcClient.executePlan(request, config);
-        let observedServerSideSessionId = responses.reduce<string | undefined>(
+        const serverSideSessionId = responses.reduce<string | undefined>(
             (latest, response) => response.server_side_session_id
                 ?? response.serverSideSessionId
                 ?? latest,
@@ -727,10 +863,25 @@ export const sparkGrpcClient = {
         if (!queryId) {
             throw new Error("Invalid WriteStreamOperationStartResult: missing query_id.");
         }
-        const queryName = startResult.name
+        const name = startResult.name
             ?? startResult.query_name
             ?? startResult.queryName
             ?? "";
+        const startedEventJson = startResult.query_started_event_json ?? startResult.queryStartedEventJson;
+        return sparkGrpcClient.streamingQueryHandle({
+            request,
+            config,
+            queryId,
+            name,
+            serverSideSessionId,
+            ...(startedEventJson ? { startedEventJson } : {}),
+        });
+    },
+
+    /** Builds the control handle of a query the server already knows. */
+    streamingQueryHandle(source: StreamingQueryHandleSource): StreamingQueryHandle {
+        const { request, config, queryId, name, startedEventJson } = source;
+        let observedServerSideSessionId = source.serverSideSessionId;
 
         const executeQueryCommand = async (command: RpcMessage): Promise<ExecutePlanResponse[]> => {
             const commandRequest = buildStreamingQueryCommandRequest({
@@ -748,30 +899,30 @@ export const sparkGrpcClient = {
             return commandResponses;
         };
 
-        const fetchQueryException = async (): Promise<void> => {
-            const exceptionResponses = await executeQueryCommand({ exception: true });
-            const exceptionCommandResult = exceptionResponses
+        /** Runs a query command and returns its result message, which every command but stop reports. */
+        const queryCommandResult = async (command: RpcMessage, label: string): Promise<StreamingQueryCommandResult> => {
+            const result = (await executeQueryCommand(command))
                 .map(extractStreamingQueryCommandResult)
-                .find((value): value is StreamingQueryCommandResult =>
-                    value !== undefined
-                );
-            if (!exceptionCommandResult) {
-                throw new Error(
-                    "Invalid streaming exception response: missing query command result.",
-                );
+                .find((value): value is StreamingQueryCommandResult => value !== undefined);
+            if (!result) {
+                throw new Error(`Invalid streaming ${label} response: missing query command result.`);
             }
-            const exceptionResult = extractStreamingException(exceptionCommandResult);
-            if (!exceptionResult) return;
-            const message = exceptionResult?.exception_message ?? exceptionResult?.exceptionMessage;
-            if (!message) return;
-            const error = new Error(message) as Error & {
-                errorClass?: string;
-                remoteStack?: string;
-            };
-            error.name = "StreamingQueryError";
-            error.errorClass = exceptionResult?.error_class ?? exceptionResult?.errorClass;
-            error.remoteStack = exceptionResult?.stack_trace ?? exceptionResult?.stackTrace;
-            throw error;
+            return result;
+        };
+
+        const exception = async (): Promise<StreamingQueryError | undefined> =>
+            streamingExceptionToError(extractStreamingException(await queryCommandResult({ exception: true }, "exception")));
+
+        const status = async (): Promise<StreamingQueryStatus> => {
+            const result = extractStreamingStatus(await queryCommandResult({ status: true }, "status"));
+            if (!result) throw new Error("Invalid streaming status response: missing status result.");
+            return result;
+        };
+
+        const recentProgress = async (command: RpcMessage, label: string): Promise<StreamingQueryProgress[]> => {
+            const reports = extractRecentProgress(await queryCommandResult(command, label));
+            if (!reports) throw new Error(`Invalid streaming ${label} response: missing progress result.`);
+            return reports;
         };
 
         const awaitTermination = async (timeoutMs?: number): Promise<void | boolean> => {
@@ -779,15 +930,18 @@ export const sparkGrpcClient = {
             const awaitCommand = timeoutMs === undefined
                 ? { await_termination: {} }
                 : { await_termination: { timeout_ms: String(timeoutMs) } };
-            const terminationResponses = await executeQueryCommand(awaitCommand);
-            const result = terminationResponses
-                .map(extractStreamingQueryCommandResult)
-                .find((value): value is StreamingQueryCommandResult => value !== undefined);
-            const terminated = extractAwaitTerminationResult(result);
+            const terminated = extractAwaitTerminationResult(
+                (await executeQueryCommand(awaitCommand))
+                    .map(extractStreamingQueryCommandResult)
+                    .find((value): value is StreamingQueryCommandResult => value !== undefined),
+            );
             if (terminated === undefined) {
                 throw new Error("Invalid awaitTermination response: missing termination result.");
             }
-            if (terminated) await fetchQueryException();
+            if (terminated) {
+                const failure = await exception();
+                if (failure) throw failure;
+            }
             if (timeoutMs !== undefined) return terminated;
             if (!terminated) {
                 throw new Error("Streaming query awaitTermination returned false without a timeout.");
@@ -795,11 +949,33 @@ export const sparkGrpcClient = {
         };
 
         return {
-            name: queryName,
+            id: queryId.id,
+            runId: queryId.run_id,
+            name,
             get serverSideSessionId() { return observedServerSideSessionId; },
+            ...(startedEventJson !== undefined ? { startedEventJson } : {}),
             awaitTermination: awaitTermination as StreamingQueryHandle["awaitTermination"],
             stop: async () => {
                 await executeQueryCommand({ stop: true });
+            },
+            isActive: async () => (await status()).isActive,
+            status,
+            lastProgress: async () => {
+                const reports = await recentProgress({ last_progress: true }, "lastProgress");
+                return reports[reports.length - 1];
+            },
+            recentProgress: () => recentProgress({ recent_progress: true }, "recentProgress"),
+            explain: async (extended = false) => {
+                if (typeof extended !== "boolean") throw new TypeError("explain() extended must be a boolean.");
+                const result = await queryCommandResult({ explain: { extended } }, "explain");
+                if (typeof result.explain?.result !== "string") {
+                    throw new Error("Invalid streaming explain response: missing explain result.");
+                }
+                return result.explain.result;
+            },
+            exception,
+            processAllAvailable: async () => {
+                await executeQueryCommand({ process_all_available: true });
             },
         };
     },

@@ -7,15 +7,26 @@ import {
 import { SparkConnectExecutor } from "../src/client/sparkConnectExecutor";
 import type { ProtoRel } from "../src/engine/compilerRead";
 import type { ProtoWriteRoot } from "../src/write/compilerWrite";
+import { resolveExecution, type ExecutionOptions } from "../src/client/executionOptions";
 
-function handle(serverSideSessionId?: string): StreamingQueryHandle {
+function handle(serverSideSessionId?: string, startedEventJson?: string): StreamingQueryHandle {
     return {
+        id: "query-1",
+        runId: "run-1",
         name: "query",
         serverSideSessionId,
+        ...(startedEventJson === undefined ? {} : { startedEventJson }),
         stop: vi.fn(async () => undefined),
         awaitTermination: vi.fn(async (timeoutMs?: number) =>
             timeoutMs === undefined ? undefined : true
         ) as StreamingQueryHandle["awaitTermination"],
+        isActive: vi.fn(async () => true),
+        status: vi.fn(async () => ({ message: "ok", isDataAvailable: true, isTriggerActive: false, isActive: true })),
+        lastProgress: vi.fn(async () => undefined),
+        recentProgress: vi.fn(async () => []),
+        explain: vi.fn(async () => "plan"),
+        exception: vi.fn(async () => undefined),
+        processAllAvailable: vi.fn(async () => undefined),
     };
 }
 
@@ -32,6 +43,8 @@ function fakeSession(serverId?: string) {
         observeServerSideSessionId: vi.fn(),
         observeRemoteError: vi.fn(),
         getServerSideSessionId: vi.fn(() => serverId),
+        resolveExecution: vi.fn((options?: ExecutionOptions) => resolveExecution([], options)),
+        notifyStreamingQueryStarted: vi.fn(),
     };
     return {
         methods,
@@ -73,6 +86,20 @@ describe("SparkConnectExecutor complete behavior", () => {
             operation_id: expect.any(String),
             plan: { root: plan },
         }), { address: "sc://spark:15002" });
+    });
+
+    it("tags writes and uses the caller's operation id", async () => {
+        const { session } = fakeSession();
+        const execute = vi.spyOn(sparkGrpcClient, "executePlan").mockResolvedValue([]);
+        const execution = resolveExecution(["etl"], {
+            operationId: "00112233-4455-4677-8899-aabbccddeeff",
+        });
+
+        await SparkConnectExecutor.for(session).runWrite(batchRoot, execution);
+        expect(execute.mock.calls[0]?.[0]).toMatchObject({
+            operation_id: "00112233-4455-4677-8899-aabbccddeeff",
+            tags: ["etl"],
+        });
     });
 
     it("streams responses and reports stream iteration failures", async () => {
@@ -269,5 +296,80 @@ describe("SparkConnectExecutor complete behavior", () => {
         const wrapped = await executor.runStream(streamRoot);
         await expect(wrapped.stop()).rejects.toBe(stopFailure);
         expect(methods.observeRemoteError).toHaveBeenCalledWith(stopFailure);
+    });
+});
+
+describe("SparkConnectExecutor streaming commands and handles", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("streams a command, lifting the stream deadline only when asked", async () => {
+        const { session, methods } = fakeSession("server-1");
+        const stream = vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(
+            async function* () {
+                yield { session_id: "session-1", streaming_query_listener_events_result: {} };
+            },
+        );
+        const executor = SparkConnectExecutor.for(session);
+        const command = { streaming_query_listener_bus_command: { add_listener_bus_listener: true } };
+
+        const bounded = [];
+        for await (const response of executor.streamCommand(command)) bounded.push(response);
+        expect(bounded).toHaveLength(1);
+        expect(stream.mock.calls[0]![0]).toMatchObject({
+            plan: { command },
+            client_observed_server_side_session_id: "server-1",
+            operation_id: expect.any(String),
+        });
+        expect(stream.mock.calls[0]![1]).not.toHaveProperty("executeTimeoutMs");
+        expect(methods.observeServerSideSessionId).toHaveBeenCalledOnce();
+
+        const execution = resolveExecution(["bus"]);
+        for await (const response of executor.streamCommand(command, execution, { unboundedStreams: true })) void response;
+        expect(stream.mock.calls[1]![0]).toMatchObject({ operation_id: execution.operationId, tags: ["bus"] });
+        expect(stream.mock.calls[1]![1]).toMatchObject({ executeTimeoutMs: Number.POSITIVE_INFINITY });
+
+        const failure = new Error("bus failed");
+        vi.spyOn(sparkGrpcClient, "executePlanStream").mockImplementation(async function* () {
+            yield { session_id: "session-1" };
+            throw failure;
+        });
+        await expect((async () => {
+            for await (const response of executor.streamCommand(command)) void response;
+        })()).rejects.toBe(failure);
+        expect(methods.observeRemoteError).toHaveBeenCalledWith(failure);
+    });
+
+    it("wraps handles of listed queries and forwards the start event of a new query", async () => {
+        const { session, methods } = fakeSession("server-1");
+        const raw = handle("server-2");
+        const factory = vi.spyOn(sparkGrpcClient, "streamingQueryHandle").mockReturnValue(raw);
+        const executor = SparkConnectExecutor.for(session);
+
+        const wrapped = executor.streamingQueryHandle({ id: "q", run_id: "r" }, "listed");
+        expect(factory).toHaveBeenCalledWith(expect.objectContaining({
+            request: expect.objectContaining({ session_id: "session-1", client_observed_server_side_session_id: "server-1" }),
+            queryId: { id: "q", run_id: "r" },
+            name: "listed",
+            serverSideSessionId: "server-1",
+        }));
+        expect(wrapped).toMatchObject({ id: "query-1", runId: "run-1", name: "query" });
+        await expect(wrapped.status()).resolves.toMatchObject({ isActive: true });
+        await expect(wrapped.isActive()).resolves.toBe(true);
+        await expect(wrapped.lastProgress()).resolves.toBeUndefined();
+        await expect(wrapped.recentProgress()).resolves.toEqual([]);
+        await expect(wrapped.explain(true)).resolves.toBe("plan");
+        expect(raw.explain).toHaveBeenCalledWith(true);
+        await expect(wrapped.exception()).resolves.toBeUndefined();
+        await expect(wrapped.processAllAvailable()).resolves.toBeUndefined();
+        expect(methods.observeServerSideSessionId).toHaveBeenCalledWith({
+            session_id: "session-1",
+            server_side_session_id: "server-2",
+        });
+
+        const started = handle(undefined, '{"id":"q"}');
+        vi.spyOn(sparkGrpcClient, "executePlanStreaming").mockResolvedValue(started);
+        const startedWrapped = await executor.runStream(streamRoot);
+        expect(methods.notifyStreamingQueryStarted).toHaveBeenCalledWith('{"id":"q"}');
+        expect(startedWrapped.startedEventJson).toBe('{"id":"q"}');
     });
 });

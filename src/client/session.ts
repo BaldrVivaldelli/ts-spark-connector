@@ -5,7 +5,7 @@ import { SessionAlgebra } from "./sessionAlgebra";
 import { ReadChainedDataFrame } from "../read/readChainedDataFrame";
 import { DFProgram, StreamingMark } from "../algebra/read";
 import { SqlCap } from "../algebra/read/batch-capabilities";
-import { DeclaredSchema, InferSchema, SchemaDef } from "../schema/schema";
+import { DeclaredSchema, InferSchema, SchemaDef, schema } from "../schema/schema";
 import { encodeLocalRelation } from "../typed/arrow-encode";
 import { StreamingReadCap } from "../algebra/read/streaming-capabilities";
 import { DataFrameWriterTF } from "../write/dataFrameWriterTF";
@@ -14,6 +14,25 @@ import { StreamWriterAlg } from "../algebra/write/dataframe";
 import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
 import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
+import { cleanupConnectionConfig } from "./rpcLifecycle";
+import {
+    CACHE_ARTIFACT_PREFIX,
+    artifactRequests,
+    cachedArtifactRequests,
+    uploadedArtifactNames,
+    type ArtifactKind,
+    type ArtifactUpload,
+} from "./artifacts";
+import { SparkUdfRegistration } from "./udf";
+import { StreamingQueryManager } from "./streamingQueryManager";
+import { compareSparkVersions, UnsupportedServerVersionError } from "./serverVersion";
+import {
+    assertOperationId,
+    assertValidTag,
+    ExecutionOptions,
+    ResolvedExecution,
+    resolveExecution,
+} from "./executionOptions";
 import {
     AuthDraft,
     LEGACY_AUTH_KEYS,
@@ -28,6 +47,7 @@ import {
     normalizeConnectionConfig,
     syncAuthFromDraft,
     syncTlsFromDraft,
+    validateExecuteTimeout,
     validateSessionId,
 } from "./sessionConfig";
 
@@ -170,6 +190,14 @@ export type SparkConnectionConfig = {
     allowInsecureAuth?: boolean;
     /** Per-RPC deadline in milliseconds. */
     rpcTimeoutMs?: number;
+    /**
+     * Wall-clock budget in milliseconds for one query execution: the
+     * ExecutePlan stream plus every ReattachExecute that continues it. When
+     * set, it replaces `rpcTimeoutMs` for execution streams while unary RPCs
+     * keep `rpcTimeoutMs`; `Infinity` lets executions run without a client
+     * deadline. Unset, every execution stream gets its own `rpcTimeoutMs`.
+     */
+    executeTimeoutMs?: number;
     /** Cancels RPCs and retry backoff when aborted. */
     signal?: AbortSignal;
     /** Maximum serialized gRPC response size. Defaults to 128 MiB. */
@@ -182,6 +210,63 @@ export type SparkConnectionConfig = {
     metrics?: SparkMetricObserver;
     sessionConfig?: SessionConfigMap;
 };
+
+/**
+ * State of one operation as reported by `session.getStatus()` (Spark 4.2+).
+ * @public
+ */
+export type OperationState =
+    | "UNSPECIFIED"
+    | "UNKNOWN"
+    | "RUNNING"
+    | "TERMINATING"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "CANCELLED";
+
+/** @public */
+export type OperationStatus = {
+    operationId: string;
+    state: OperationState;
+};
+
+const OPERATION_STATES: readonly OperationState[] = [
+    "UNSPECIFIED", "UNKNOWN", "RUNNING", "TERMINATING", "SUCCEEDED", "FAILED", "CANCELLED",
+];
+
+function operationState(value: unknown): OperationState {
+    // enums arrive as their proto names ("OPERATION_STATE_RUNNING"); the
+    // numeric form only if a loader was configured differently.
+    const name = typeof value === "number"
+        ? OPERATION_STATES[value]
+        : String(value ?? "").replace(/^OPERATION_STATE_/, "");
+    return OPERATION_STATES.includes(name as OperationState) ? name as OperationState : "UNKNOWN";
+}
+
+/** Schema of `session.range()`: Spark names the column `id` and never makes it null. */
+const RANGE_SCHEMA = schema({ id: "long" });
+
+/**
+ * Row shape of `session.range()`.
+ * @public
+ */
+export type RangeRow = { id: bigint };
+
+/** Validates a `range()` bound and promotes it to the int64 the relation carries. */
+function rangeBound(label: string, value: number | bigint): bigint {
+    if (typeof value === "bigint") {
+        if (value < -(2n ** 63n) || value > 2n ** 63n - 1n) {
+            throw new RangeError(`${label} is outside Spark's signed int64 range.`);
+        }
+        return value;
+    }
+    if (!Number.isSafeInteger(value)) {
+        throw new TypeError(`${label} must be a safe integer or a bigint.`);
+    }
+    return BigInt(value);
+}
+/** gRPC status UNAVAILABLE: the server cannot be reached, so further cleanup RPCs are pointless. */
+const GRPC_UNAVAILABLE = 14;
 
 /** @public */
 export class SparkSession implements SessionAlgebra {
@@ -198,6 +283,12 @@ export class SparkSession implements SessionAlgebra {
     private serverSideSessionId?: string;
     private invalidatedError?: Error;
     private readonly runtimeConfig: SparkRuntimeConfig;
+    private readonly tags = new Set<string>();
+    private serverVersion?: Promise<string>;
+    private readonly cachedRelationIds = new Set<string>();
+    private streamingQueryManager?: StreamingQueryManager;
+    /** Connection config as given to the builder, before runtime `conf.set()` mirrors into it. */
+    private builderConnectionConfig: SparkConnectionConfig;
 
     constructor(
         sessionId?: string,
@@ -212,6 +303,7 @@ export class SparkSession implements SessionAlgebra {
             ...(opts?.userContext ?? {}),
         };
         this.connectionConfig = normalizeConnectionConfig(opts?.connectionConfig);
+        this.builderConnectionConfig = this.connectionConfig;
         this.runtimeConfig = new SparkRuntimeConfig(this);
     }
 
@@ -254,8 +346,9 @@ export class SparkSession implements SessionAlgebra {
      * `"YYYY-MM-DD"` for `date`, ISO-8601 strings for `timestamp`), so
      * `createDataFrame(await df.collect(), Schema)` round-trips.
      *
-     * Complex column types (decimal, array, map, struct) are not supported
-     * yet and are rejected with a `TypeError`.
+     * Decimals are strings, arrays are arrays, maps are `Map` instances
+     * (plain objects are accepted for string keys) and structs are objects;
+     * nested values may be null, as in the rows Spark returns.
      */
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(
         rows: ReadonlyArray<InferSchema<D>>,
@@ -275,6 +368,54 @@ export class SparkSession implements SessionAlgebra {
         const rowCount = rows.length;
         const prog: DFProgram<R, E, G> = DF => DF.localRelation(ddl, data, rowCount);
         return new ReadChainedDataFrame<InferSchema<D>, R, E, G>(prog, this, false, declared.def);
+    }
+
+    /**
+     * Spark's `range`: a DataFrame with one `id` column of longs from `start`
+     * (0 when only `end` is given) up to, excluding, `end`, stepping by
+     * `step`. Bounds accept numbers or bigints; `numPartitions` splits the
+     * range server-side.
+     */
+    range<R = unknown, E = unknown, G = unknown>(end: number | bigint): ReadChainedDataFrame<RangeRow, R, E, G>;
+    range<R = unknown, E = unknown, G = unknown>(
+        start: number | bigint,
+        end: number | bigint,
+        step?: number | bigint,
+        numPartitions?: number,
+    ): ReadChainedDataFrame<RangeRow, R, E, G>;
+    range<R = unknown, E = unknown, G = unknown>(
+        startOrEnd: number | bigint,
+        end?: number | bigint,
+        step: number | bigint = 1,
+        numPartitions?: number,
+    ): ReadChainedDataFrame<RangeRow, R, E, G> {
+        this.assertOpen();
+        const bounds = end === undefined
+            ? { start: undefined, end: rangeBound("range() end", startOrEnd) }
+            : { start: rangeBound("range() start", startOrEnd), end: rangeBound("range() end", end) };
+        const stride = rangeBound("range() step", step);
+        if (stride === 0n) throw new RangeError("range() step must not be 0.");
+        if (numPartitions !== undefined && (!Number.isSafeInteger(numPartitions) || numPartitions < 1)) {
+            throw new RangeError("range() numPartitions must be a positive integer.");
+        }
+        const prog: DFProgram<R, E, G> = DF => DF.range(bounds.start, bounds.end, stride, numPartitions);
+        return new ReadChainedDataFrame<RangeRow, R, E, G>(prog, this, false, RANGE_SCHEMA.def);
+    }
+
+    /**
+     * A new, independent session against the same server with the same
+     * connection settings and user. Nothing is sent: the server creates its
+     * state on first use. Unlike `cloneSession()`, no temporary views or
+     * runtime configuration are copied. Session tags are not copied either.
+     */
+    newSession(): SparkSession {
+        this.assertOpen();
+        // Runtime `conf.set()` calls are mirrored into connectionConfig; the
+        // child must start from what the builder configured, not from them.
+        return new SparkSession(undefined, {
+            userContext: this.userContext,
+            connectionConfig: this.builderConnectionConfig,
+        });
     }
 
     static builder(): SparkSessionBuilder {
@@ -298,8 +439,297 @@ export class SparkSession implements SessionAlgebra {
         return this.runtimeConfig;
     }
 
+    /** The streaming queries of this session: Spark's `StreamingQueryManager`. */
+    get streams(): StreamingQueryManager {
+        this.assertOpen();
+        return this.streamingQueryManager ??= new StreamingQueryManager(this);
+    }
+
+    /** @internal Forwards a query-started event to the listeners of `streams`. */
+    notifyStreamingQueryStarted(eventJson: string): void {
+        this.streamingQueryManager?.dispatchQueryStarted(eventJson);
+    }
+
     getSessionId(): string {
         return this.sessionId;
+    }
+
+    /**
+     * Adds a tag to every operation this session starts from now on, so
+     * `interruptTag(tag)` can cancel them as a group. Executions already in
+     * flight keep the tags they started with.
+     */
+    addTag(tag: string): void {
+        assertValidTag(tag);
+        this.tags.add(tag);
+    }
+
+    /** Stops tagging new operations with `tag`. */
+    removeTag(tag: string): void {
+        assertValidTag(tag);
+        this.tags.delete(tag);
+    }
+
+    /** Tags attached to operations started by this session. */
+    getTags(): string[] {
+        return [...this.tags];
+    }
+
+    /** Removes every session tag. */
+    clearTags(): void {
+        this.tags.clear();
+    }
+
+    /** Interrupts every running operation of this session; resolves to their ids. */
+    interruptAll(): Promise<string[]> {
+        return this.runInterrupt({ interrupt_type: "INTERRUPT_TYPE_ALL" });
+    }
+
+    /** Interrupts the running operations tagged with `tag`; resolves to their ids. */
+    interruptTag(tag: string): Promise<string[]> {
+        try {
+            assertValidTag(tag);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.runInterrupt({ interrupt_type: "INTERRUPT_TYPE_TAG", operation_tag: tag });
+    }
+
+    /**
+     * Interrupts one running operation. Pass the `operationId` given to the
+     * action's `ExecutionOptions`; resolves to the ids actually interrupted.
+     */
+    interruptOperation(operationId: string): Promise<string[]> {
+        try {
+            assertOperationId(operationId);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return this.runInterrupt({
+            interrupt_type: "INTERRUPT_TYPE_OPERATION_ID",
+            operation_id: operationId,
+        });
+    }
+
+    /**
+     * Version of the Spark Connect server, e.g. `"4.1.3"`. Fetched once with
+     * AnalyzePlan and cached for the lifetime of the session.
+     */
+    async version(): Promise<string> {
+        this.assertOpen();
+        this.serverVersion ??= this.fetchServerVersion().catch(error => {
+            this.serverVersion = undefined;
+            throw error;
+        });
+        return this.serverVersion;
+    }
+
+    /**
+     * @internal Rejects with `UnsupportedServerVersionError`, before the
+     * feature's own RPC, when the server is older than `minimum`.
+     */
+    async requireServerVersion(minimum: string, feature: string): Promise<string> {
+        const actual = await this.version();
+        if (compareSparkVersions(actual, minimum) < 0) {
+            throw new UnsupportedServerVersionError(feature, minimum, actual);
+        }
+        return actual;
+    }
+
+    /**
+     * Creates an independent copy of this session on the server (Spark
+     * Connect 4.1+): temporary views, runtime configuration and other session
+     * state are copied once, and later changes on either side stay local to
+     * it. The clone uses the same connection settings; session tags are
+     * client-side and are not copied.
+     */
+    async cloneSession(): Promise<SparkSession> {
+        await this.requireServerVersion("4.1.0", "cloneSession()");
+        const newSessionId = crypto.randomUUID();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.cloneSession({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                new_session_id: newSessionId,
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId({
+            session_id: response.session_id,
+            server_side_session_id: response.server_side_session_id,
+        });
+        if (response.new_session_id !== newSessionId) {
+            throw new Error(
+                `CloneSession returned session id ${String(response.new_session_id)}; expected ${newSessionId}.`
+            );
+        }
+        const clone = new SparkSession(newSessionId, {
+            userContext: this.userContext,
+            connectionConfig: this.connectionConfig,
+        });
+        clone.adoptClonedServerSession(response.new_server_side_session_id);
+        return clone;
+    }
+
+    /**
+     * Uploads a local file to the server for this session: a `.jar` joins the
+     * session classpath (then `udf.registerJavaFunction()` can use its
+     * classes); other files need `kind` `"file"` or `"archive"`. Resolves with
+     * the server-side artifact name, e.g. `jars/udfs.jar`.
+     */
+    async addArtifact(localPath: string, kind?: ArtifactKind): Promise<string> {
+        const [name] = await this.addArtifacts({ path: localPath, ...(kind !== undefined ? { kind } : {}) });
+        return name!;
+    }
+
+    /**
+     * Uploads several local files in one `AddArtifacts` stream. Small files
+     * are batched, large ones chunked, and every chunk is CRC-checked by the
+     * server. Resolves with the server-side artifact names, in order; a CRC
+     * failure rejects with `ArtifactUploadError`, which lists the names that
+     * did and did not make it. Uploads are bounded like executions (see
+     * `withExecuteTimeout()`) and cancelled by the session's abort signal.
+     */
+    async addArtifacts(...uploads: Array<string | ArtifactUpload>): Promise<string[]> {
+        this.assertOpen();
+        if (uploads.length === 0) throw new TypeError("addArtifacts() requires at least one file.");
+        const normalized: ArtifactUpload[] = uploads.map(upload => typeof upload === "string" ? { path: upload } : upload);
+        return this.uploadArtifacts(artifactRequests(this.requestBase(), normalized));
+    }
+
+    /**
+     * Stores a blob on the server under its SHA-256 (`cache/<hash>`), like
+     * PySpark's `cache_artifact`, and resolves with the hash; a blob the
+     * server already holds is not sent again. Cached blobs are the one
+     * artifact kind the server reports through `isArtifactCached()`.
+     */
+    async cacheArtifact(data: Uint8Array | string): Promise<string> {
+        this.assertOpen();
+        if (typeof data !== "string" && !(data instanceof Uint8Array)) {
+            throw new TypeError("cacheArtifact() takes a Uint8Array or a string.");
+        }
+        const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+        if (bytes.byteLength === 0) throw new TypeError("cacheArtifact() requires a non-empty blob.");
+        const { hash, requests } = cachedArtifactRequests(this.requestBase(), bytes);
+        // Same blob, same hash: skip the upload when the server still has it.
+        if (await this.isArtifactCached(hash)) return hash;
+        const [name] = await this.uploadArtifacts(requests);
+        if (name !== `${CACHE_ARTIFACT_PREFIX}${hash}`) {
+            throw new Error(`AddArtifacts confirmed ${String(name)}; expected ${CACHE_ARTIFACT_PREFIX}${hash}.`);
+        }
+        return hash;
+    }
+
+    /** Whether a blob stored with `cacheArtifact()` is still cached on the server. */
+    async isArtifactCached(hash: string): Promise<boolean> {
+        if (typeof hash !== "string" || !/^[0-9a-f]{64}$/i.test(hash)) {
+            throw new TypeError("isArtifactCached() takes the SHA-256 hex hash returned by cacheArtifact().");
+        }
+        const name = `${CACHE_ARTIFACT_PREFIX}${hash.toLowerCase()}`;
+        return (await this.artifactStatus(name))[name] === true;
+    }
+
+    /**
+     * Raw `ArtifactStatus` lookup by server-side name. Spark answers only for
+     * blobs stored by hash (`cache/<hash>`, see `cacheArtifact()`); jars and
+     * files always report `false` even after a successful upload.
+     */
+    async artifactStatus(...names: string[]): Promise<Record<string, boolean>> {
+        this.assertOpen();
+        if (names.length === 0) throw new TypeError("artifactStatus() requires at least one artifact name.");
+        for (const name of names) {
+            if (typeof name !== "string" || !name.trim()) throw new TypeError("Artifact names must be non-empty strings.");
+        }
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.artifactStatus({ ...this.requestBase(), names }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const statuses = (response.statuses ?? {}) as Record<string, { exists?: boolean } | undefined>;
+        return Object.fromEntries(names.map(name => [name, statuses[name]?.exists === true]));
+    }
+
+    /** Registration of server-side (Java) user-defined functions. */
+    get udf(): SparkUdfRegistration {
+        this.assertOpen();
+        return new SparkUdfRegistration(this);
+    }
+
+    /**
+     * States of this session's operations (Spark Connect 4.2+), for the given
+     * operation ids or, when none are given, every operation the server still
+     * tracks. Pair it with `ExecutionOptions.operationId` to follow a query.
+     */
+    async getStatus(operationIds: readonly string[] = []): Promise<OperationStatus[]> {
+        for (const id of operationIds) assertOperationId(id);
+        await this.requireServerVersion("4.2.0", "getStatus()");
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.getStatus({
+                ...this.requestBase(),
+                operation_status: { operation_ids: [...operationIds] },
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const statuses = response.operation_statuses ?? response.operationStatuses;
+        return (Array.isArray(statuses) ? statuses : []).map(status => {
+            const entry = status as { operation_id?: unknown; operationId?: unknown; state?: unknown };
+            return { operationId: String(entry.operation_id ?? entry.operationId ?? ""), state: operationState(entry.state) };
+        });
+    }
+
+    private async uploadArtifacts(requests: Iterable<Record<string, unknown>>): Promise<string[]> {
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.addArtifacts(requests, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        return uploadedArtifactNames(response);
+    }
+
+    /** Identity fields every session-scoped request repeats. */
+    private requestBase(): Record<string, unknown> {
+        return {
+            session_id: this.sessionId,
+            user_context: this.getUserContext(),
+            client_type: "ts-spark-connector",
+            ...(this.serverSideSessionId
+                ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                : {}),
+        };
+    }
+
+    /** @internal Remembers a checkpointed relation so `close()` releases it on the server. */
+    trackCachedRelation(relationId: string): void {
+        this.cachedRelationIds.add(relationId);
+    }
+
+    /** @internal Forgets a relation about to be released; false when it was released already. */
+    untrackCachedRelation(relationId: string): boolean {
+        return this.cachedRelationIds.delete(relationId);
+    }
+
+    /** @internal Snapshots per-execution controls when an action starts. */
+    resolveExecution(options?: ExecutionOptions): ResolvedExecution {
+        return resolveExecution(this.tags, options);
     }
 
     getUserContext(): SparkUserContext {
@@ -340,6 +770,7 @@ export class SparkSession implements SessionAlgebra {
             throw new Error("Cannot change the Spark connection after this session has used remote state.");
         }
         this.connectionConfig = normalizeConnectionConfig(config);
+        this.builderConnectionConfig = this.connectionConfig;
         this.initialConfigApplied = false;
         this.initialConfigPromise = undefined;
     }
@@ -418,15 +849,28 @@ export class SparkSession implements SessionAlgebra {
         return this.serverSideSessionId;
     }
 
-    /** Releases remote session state and closes the cached gRPC channel. Idempotent. */
+    /**
+     * Releases remote session state and closes the cached gRPC channel.
+     * Idempotent. Local state is released even when the server cannot be
+     * reached: the session is closed afterwards and the ReleaseSession failure
+     * is rethrown so the caller knows remote state may linger until Spark's
+     * session timeout.
+     */
     async close(): Promise<void> {
         if (this.closed) return;
         if (this.closePromise) return this.closePromise;
         const config = this.getConnectionConfigUnchecked();
-        const cleanupConfig = { ...config, signal: undefined };
+        const cleanupConfig = cleanupConnectionConfig(config);
 
         this.closePromise = (async () => {
+            let releaseFailure: { error: unknown } | undefined;
+            // The listener bus holds a long-running execution; stop following
+            // it before the session that owns it is released.
+            if (this.streamingQueryManager) await this.streamingQueryManager.shutdown();
             if (this.remoteTouched && !this.invalidatedError) {
+                // Only when something was checkpointed: the extra await would
+                // otherwise delay ReleaseSession by a microtask for nothing.
+                if (this.cachedRelationIds.size > 0) await this.releaseCachedRelations(cleanupConfig);
                 try {
                     const response = await sparkGrpcClient.releaseSession({
                         session_id: this.sessionId,
@@ -436,10 +880,9 @@ export class SparkSession implements SessionAlgebra {
                     this.observeServerSideSessionId(response);
                 } catch (error) {
                     this.observeRemoteError(error);
-                    if (!this.invalidatedError) throw error;
-                    // The server has already rejected this stale identity. There
-                    // is no valid remote session left to release, so continue
-                    // with deterministic local channel cleanup.
+                    // A stale identity has no remote session left to release;
+                    // any other failure is reported after local cleanup.
+                    if (!this.invalidatedError) releaseFailure = { error };
                 }
             }
             this.closed = true;
@@ -448,10 +891,37 @@ export class SparkSession implements SessionAlgebra {
                 this.clientRetained = false;
                 this.clientCacheIdentity = undefined;
             }
+            if (releaseFailure) throw releaseFailure.error;
         })().finally(() => {
             this.closePromise = undefined;
         });
         return this.closePromise;
+    }
+
+    /**
+     * Checkpointed relations not released with `releaseCheckpoint()` are
+     * released here, as PySpark does when the DataFrame is garbage collected.
+     * Best effort and bounded: every release runs at once under the cleanup
+     * deadline, the first UNAVAILABLE cancels the rest (ReleaseSession drops
+     * the cache anyway), and no failure blocks closing.
+     */
+    private async releaseCachedRelations(config: SparkConnectionConfig): Promise<void> {
+        const relationIds = [...this.cachedRelationIds];
+        this.cachedRelationIds.clear();
+        const unreachable = new AbortController();
+        const releaseConfig = { ...config, signal: unreachable.signal };
+        await Promise.all(relationIds.map(relationId => sparkGrpcClient.executePlan({
+            plan: { command: { remove_cached_remote_relation_command: { relation: { relation_id: relationId } } } },
+            session_id: this.sessionId,
+            user_context: this.getUserContext(),
+            client_type: "ts-spark-connector",
+            operation_id: crypto.randomUUID(),
+            ...(this.serverSideSessionId
+                ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                : {}),
+        }, releaseConfig).catch(error => {
+            if ((error as { code?: unknown } | null)?.code === GRPC_UNAVAILABLE) unreachable.abort(error);
+        })));
     }
 
     /** Alias matching Spark clients that call session shutdown `stop()`. */
@@ -480,6 +950,66 @@ export class SparkSession implements SessionAlgebra {
         }
         this.observeServerSideSessionId(response);
         return response;
+    }
+
+    private async fetchServerVersion(): Promise<string> {
+        this.markRemoteTouched();
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.analyze({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                spark_version: {},
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const version = (response.spark_version as { version?: unknown } | undefined)?.version;
+        if (typeof version !== "string" || !version) {
+            throw new Error("Invalid AnalyzePlan response: missing spark_version.");
+        }
+        return version;
+    }
+
+    /**
+     * A clone already exists on the server with the source's configuration
+     * applied, so builder-provided configs must not be re-sent over the
+     * values it copied.
+     */
+    private adoptClonedServerSession(serverSideSessionId: unknown): void {
+        this.markRemoteTouched();
+        this.initialConfigApplied = true;
+        this.observeServerSideSessionId({ session_id: this.sessionId, server_side_session_id: serverSideSessionId });
+    }
+
+    private async runInterrupt(fields: Record<string, unknown>): Promise<string[]> {
+        this.assertOpen();
+        // Nothing can be running on a session that never reached the server.
+        if (!this.remoteTouched) return [];
+        let response: Record<string, unknown>;
+        try {
+            response = await sparkGrpcClient.interrupt({
+                session_id: this.sessionId,
+                user_context: this.getUserContext(),
+                client_type: "ts-spark-connector",
+                ...(this.serverSideSessionId
+                    ? { client_observed_server_side_session_id: this.serverSideSessionId }
+                    : {}),
+                ...fields,
+            }, this.getConnectionConfigUnchecked());
+        } catch (error) {
+            this.observeRemoteError(error);
+            throw error;
+        }
+        this.observeServerSideSessionId(response);
+        const ids = response.interrupted_ids ?? response.interruptedIds;
+        return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
     }
 
     /** @internal Marks an execution RPC as having created/used remote state. */
@@ -654,6 +1184,7 @@ export class SparkSessionBuilder {
     private s3CredentialsConfigured = false;
     private insecureAuthAllowed = false;
     private rpcTimeoutMs?: number;
+    private executeTimeoutMs?: number;
     private signal?: AbortSignal;
     private readonly authDraft: AuthDraft = {};
     private tls?: TLSConfig;
@@ -761,6 +1292,18 @@ export class SparkSessionBuilder {
         return this;
     }
 
+    /**
+     * Bounds each query execution as a whole, across ReattachExecute
+     * continuations, instead of per stream. Pass `Infinity` to keep a
+     * `withRpcTimeout()` deadline for unary RPCs without capping how long a
+     * query may run.
+     */
+    withExecuteTimeout(timeoutMs: number): this {
+        validateExecuteTimeout(timeoutMs);
+        this.executeTimeoutMs = timeoutMs;
+        return this;
+    }
+
     /** Associates an AbortSignal with RPCs and retry waits created by this session. */
     withAbortSignal(signal: AbortSignal): this {
         this.signal = signal;
@@ -805,6 +1348,7 @@ export class SparkSessionBuilder {
                 auth: this.auth,
                 allowInsecureAuth: this.insecureAuthAllowed,
                 rpcTimeoutMs: this.rpcTimeoutMs,
+                executeTimeoutMs: this.executeTimeoutMs,
                 signal: this.signal,
                 tls: this.tls,
                 retry: this.retry,

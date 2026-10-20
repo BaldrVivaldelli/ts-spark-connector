@@ -1,6 +1,20 @@
 import { SortOrder } from "../../types";
 import { CatalogOperation } from "../../types/catalog";
 import { GroupTypeInput, JoinTypeInput } from "../../engine/sparkConnectEnums";
+import type { LiteralValue } from "./expressions";
+
+/**
+ * Grouping beyond a plain `groupBy`: `rollup`, `cube`, `pivot` (with or
+ * without explicit values; without them Spark first collects the distinct
+ * values) and `groupingSets`. `agg`'s own `groupType` argument wins over
+ * `groupType` here when both are given.
+ * @internal
+ */
+export type GroupingSpec<E> = {
+    groupType: GroupTypeInput;
+    pivot?: { column: E; values?: LiteralValue[] };
+    groupingSets?: E[][];
+};
 
 /** @internal */
 export interface DFCore<R, E, G = unknown> {
@@ -8,7 +22,9 @@ export interface DFCore<R, E, G = unknown> {
         format: string,
         path: string | string[],
         options?: Record<string, string>,
-        schema?: string
+        schema?: string,
+        /** JDBC only: one partition per WHERE clause (`DataSource.predicates`). */
+        predicates?: readonly string[]
     ): R;
 
     /** Roots the plan at a server-side catalog metadata operation. */
@@ -21,6 +37,13 @@ export interface DFCore<R, E, G = unknown> {
      */
     localRelation(ddl: string, data: Uint8Array | undefined, rowCount: number): R;
 
+    /**
+     * Roots the plan at Spark's `range` relation: a single `id` column of
+     * longs from `start` (0 when omitted) up to, excluding, `end`, in steps
+     * of `step`, optionally split into `numPartitions` partitions.
+     */
+    range(start: bigint | undefined, end: bigint, step: bigint, numPartitions: number | undefined): R;
+
     /** Binds a relation root to the id used by qualified unresolved attributes. */
     withPlanId?(plan: R, planId: number): R;
 
@@ -30,7 +53,7 @@ export interface DFCore<R, E, G = unknown> {
 
     join(left: R, right: R, on: E, joinType?: JoinTypeInput): R;
 
-    groupBy(plan: R, cols: E[]): G;
+    groupBy(plan: R, cols: E[], spec?: GroupingSpec<E>): G;
     agg(group: G, aggregations: Record<string, E>, groupType?: GroupTypeInput): R;
 
     orderBy(plan: R, orders: SortOrder<E>[]): R;

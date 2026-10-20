@@ -1,7 +1,7 @@
 import path from "node:path";
 import { loadSync, type MessageTypeDefinition } from "@grpc/proto-loader";
 import { describe, expect, it } from "vitest";
-import { SparkSession, col, lit } from "../src";
+import { SparkSession, col, functions as F, lit } from "../src";
 import { ProtoDFAlg, ProtoExprAlg } from "../src/engine/compilerRead";
 import { Window, call } from "../src/engine/column";
 import { schema } from "../src/schema/schema";
@@ -24,6 +24,10 @@ const packageDefinition = loadSync(
 const executePlanRequest = packageDefinition[
   "spark.connect.ExecutePlanRequest"
 ] as MessageTypeDefinition<ProtoObject, ProtoObject>;
+
+function messageType(name: string): MessageTypeDefinition<ProtoObject, ProtoObject> {
+  return packageDefinition[`spark.connect.${name}`] as MessageTypeDefinition<ProtoObject, ProtoObject>;
+}
 
 function planOf(df: { toProtoJSON(): string }): ProtoObject {
   return JSON.parse(df.toProtoJSON()) as ProtoObject;
@@ -98,6 +102,8 @@ describe("Spark Connect protobuf wire conformance", () => {
 
     const decoded = wireRoundTrip(root);
     const sort = decoded.plan.root.sort;
+    // An unset is_global decodes as false and would sort each partition on its own.
+    expect(sort.is_global).toBe(true);
     expect(sort.order[0]).toMatchObject({
       direction: "SORT_DIRECTION_DESCENDING",
       null_ordering: "SORT_NULLS_LAST",
@@ -238,6 +244,136 @@ describe("Spark Connect protobuf wire conformance", () => {
     ));
     expect(hinted.plan.root.hint.parameters[0].literal.integer).toBe(8);
     expect(hinted.plan.root.hint.parameters[1].literal.string).toBe("id");
+  });
+
+  it("round-trips SQL strings, casts, lambdas, distinct calls and struct updates", () => {
+    const df = session()
+      .read.parquet("/data/input.parquet")
+      .filter("amount > 10")
+      .selectExpr("id", "amount * 2 AS doubled")
+      .select(
+        col("amount").tryCast("decimal(10,2)"),
+        F.transform("tags", (tag, i) => tag.plus(i)),
+        F.count_distinct("id"),
+        col("address").withField("zip", lit("1000")).dropFields("street"),
+        col("tags").getItem(0),
+        F.from_json("payload", "a INT", { mode: "PERMISSIVE" }),
+      );
+    const decoded = wireRoundTrip(planOf(df));
+    const project = decoded.plan.root.project;
+    const [cast, transform, distinct, update, extract, fromJson] = project.expressions;
+
+    expect(cast.cast).toMatchObject({ type_str: "decimal(10,2)", eval_mode: "EVAL_MODE_TRY" });
+
+    const lambda = transform.unresolved_function.arguments[1].lambda_function;
+    const [x, i] = lambda.arguments.map((argument: { name_parts: string[] }) => argument.name_parts[0]);
+    expect(lambda.function.unresolved_function.arguments).toEqual([
+      expect.objectContaining({ unresolved_named_lambda_variable: { name_parts: [x] } }),
+      expect.objectContaining({ unresolved_named_lambda_variable: { name_parts: [i] } }),
+    ]);
+
+    expect(distinct.unresolved_function).toMatchObject({ function_name: "count", is_distinct: true });
+    expect(update.update_fields.field_name).toBe("street");
+    expect(update.update_fields.struct_expression.update_fields).toMatchObject({
+      field_name: "zip",
+      value_expression: { literal: { string: "1000" } },
+    });
+    expect(extract.unresolved_extract_value.extraction.literal.integer).toBe(0);
+    expect(fromJson.unresolved_function.arguments[2].unresolved_function.function_name).toBe("map");
+
+    const selectExpr = project.input.project;
+    expect(selectExpr.expressions.map((e: { expression_string: { expression: string } }) =>
+      e.expression_string.expression)).toEqual(["id", "amount * 2 AS doubled"]);
+    expect(selectExpr.input.filter.condition.expression_string.expression).toBe("amount > 10");
+  });
+
+  it("encodes range bounds as int64 and keeps absent start/partitions unset", () => {
+    const decoded = wireRoundTrip(planOf(session().range(1n, 9007199254740993n, 2, 3)));
+    expect(decoded.plan.root.range).toEqual({
+      start: "1",
+      end: "9007199254740993",
+      step: "2",
+      num_partitions: 3,
+      _start: "start",
+      _num_partitions: "num_partitions",
+    });
+    const single = wireRoundTrip(planOf(session().range(4)));
+    expect(single.plan.root.range).toMatchObject({ end: "4", step: "1" });
+    expect(single.plan.root.range).not.toHaveProperty("_start");
+  });
+
+  it("encodes catalog cache levels, unparsed schemas and options", () => {
+    const cached = wireRoundTrip(ProtoDFAlg.catalog({ method: "cacheTable", tableName: "t", storageLevel: "DISK_ONLY" }));
+    expect(cached.plan.root.catalog.cache_table).toMatchObject({
+      table_name: "t",
+      storage_level: { use_disk: true, use_memory: false, use_off_heap: false, deserialized: false, replication: 1 },
+    });
+    const created = wireRoundTrip(ProtoDFAlg.catalog({
+      method: "createTable",
+      tableName: "people",
+      source: "parquet",
+      schema: "id INT, name STRING",
+      options: { mergeSchema: "true" },
+    }));
+    expect(created.plan.root.catalog.create_table).toMatchObject({
+      table_name: "people",
+      source: "parquet",
+      schema: { unparsed: { data_type_string: "id INT, name STRING" } },
+      options: { mergeSchema: "true" },
+    });
+    expect(created.plan.root.catalog.create_table).not.toHaveProperty("_path");
+    const functions = wireRoundTrip(ProtoDFAlg.catalog({ method: "listFunctions", pattern: "up*" }));
+    expect(functions.plan.root.catalog.list_functions).toMatchObject({ pattern: "up*" });
+    expect(functions.plan.root.catalog.list_functions).not.toHaveProperty("_db_name");
+  });
+
+  it("encodes artifact, status and Java UDF registration messages", () => {
+    const add = messageType("AddArtifactsRequest");
+    const chunk = { data: Buffer.from("bytes"), crc: 123456789 };
+    const batch = add.deserialize(add.serialize({
+      session_id: "00112233-4455-4677-8899-aabbccddeeff",
+      user_context: { user_id: "u" },
+      client_type: "ts",
+      batch: { artifacts: [{ name: "jars/a.jar", data: chunk }] },
+    }));
+    expect(batch.batch).toMatchObject({ artifacts: [{ name: "jars/a.jar", data: { crc: "123456789" } }] });
+    const begin = add.deserialize(add.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      begin_chunk: { name: "jars/big.jar", total_bytes: 70000, num_chunks: 3, initial_chunk: chunk },
+    }));
+    expect(begin.begin_chunk).toMatchObject({ name: "jars/big.jar", total_bytes: "70000", num_chunks: "3" });
+    expect(begin.payload).toBe("begin_chunk");
+
+    const statuses = messageType("ArtifactStatusesRequest");
+    expect(statuses.deserialize(statuses.serialize({ session_id: "s", user_context: { user_id: "u" }, names: ["jars/a.jar"] })))
+      .toMatchObject({ names: ["jars/a.jar"] });
+
+    const getStatus = messageType("GetStatusRequest");
+    expect(getStatus.deserialize(getStatus.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      operation_status: { operation_ids: ["00112233-4455-4677-8899-aabbccddeeff"] },
+    })).operation_status).toMatchObject({ operation_ids: ["00112233-4455-4677-8899-aabbccddeeff"] });
+
+    const registered = executePlanRequest.deserialize(executePlanRequest.serialize({
+      session_id: "s",
+      user_context: { user_id: "u" },
+      plan: {
+        command: {
+          register_function: {
+            function_name: "shout",
+            deterministic: true,
+            arguments: [],
+            java_udf: { class_name: "io.example.Shout", output_type: { unparsed: { data_type_string: "string" } }, aggregate: false },
+          },
+        },
+      },
+    })) as { plan: { command: { register_function: ProtoObject } } };
+    expect(registered.plan.command.register_function).toMatchObject({
+      function_name: "shout",
+      java_udf: { class_name: "io.example.Shout", output_type: { unparsed: { data_type_string: "string" } } },
+    });
   });
 
   it("rejects empty batch paths before producing an invalid request", () => {

@@ -71,16 +71,18 @@ export enum GroupType {
     GROUP_TYPE_ROLLUP = 2,
     GROUP_TYPE_CUBE = 3,
     GROUP_TYPE_PIVOT = 4,
+    GROUP_TYPE_GROUPING_SETS = 5,
 }
 
 /** @public */
-export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot";
+export type GroupTypeInput = "groupby" | "rollup" | "cube" | "pivot" | "grouping_sets";
 
 const groupTypeMap: Record<GroupTypeInput, GroupType> = {
     groupby: GroupType.GROUP_TYPE_GROUPBY,
     rollup: GroupType.GROUP_TYPE_ROLLUP,
     cube: GroupType.GROUP_TYPE_CUBE,
     pivot: GroupType.GROUP_TYPE_PIVOT,
+    grouping_sets: GroupType.GROUP_TYPE_GROUPING_SETS,
 };
 
 export function toProtoGroupType(type: GroupTypeInput = "groupby"): GroupType {

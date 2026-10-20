@@ -1,4 +1,6 @@
-import { JoinHintName } from "../../engine/sparkConnectEnums";
+import { JoinHintName, JoinTypeInput } from "../../engine/sparkConnectEnums";
+import type { SortOrder } from "../../types";
+import type { LiteralValue } from "./expressions";
 
 // Gestión de cache/persist
 /** @internal */
@@ -50,4 +52,113 @@ export interface DescribeCap<R, E> {
 /** @internal */
 export interface SummaryCap<R, E> {
     summary(plan: R, metrics: E[], columns: E[]): R;
+}
+
+/** @internal One `na.replace` pair: values equal to `from` become `to`. */
+export type NAReplacement = { from: LiteralValue; to: LiteralValue };
+
+/**
+ * Null handling (`df.na`). An empty column list means "every compatible
+ * column", matching Spark's `DataFrameNaFunctions`.
+ * @internal
+ */
+export interface NullHandlingCap<R> {
+    fillNa(plan: R, columns: string[], values: LiteralValue[]): R;
+    dropNa(plan: R, columns: string[], minNonNulls?: number): R;
+    replaceNa(plan: R, columns: string[], replacements: NAReplacement[]): R;
+}
+
+/** @internal One `sampleBy` stratum and the fraction of its rows to keep. */
+export type SampleFraction = { stratum: LiteralValue; fraction: number };
+
+/** @internal Statistic relations (`df.stat`). */
+export interface StatCap<R, E> {
+    crosstab(plan: R, col1: string, col2: string): R;
+    cov(plan: R, col1: string, col2: string): R;
+    corr(plan: R, col1: string, col2: string, method?: string): R;
+    approxQuantile(plan: R, columns: string[], probabilities: number[], relativeError: number): R;
+    freqItems(plan: R, columns: string[], support?: number): R;
+    sampleBy(plan: R, column: E, fractions: SampleFraction[], seed: number): R;
+}
+
+/** @internal Relations that reshape or re-label the input. */
+export interface ReshapeCap<R, E> {
+    unpivot(plan: R, ids: E[], values: E[] | undefined, variableColumnName: string, valueColumnName: string): R;
+    toDF(plan: R, columnNames: string[]): R;
+    transpose(plan: R, indexColumns: E[]): R;
+    withColumns(plan: R, columns: Array<{ name: string; column: E }>): R;
+    subqueryAlias(plan: R, alias: string): R;
+    crossJoin(left: R, right: R): R;
+}
+
+/** @internal Row-position relations. */
+export interface OffsetCap<R> {
+    offset(plan: R, n: number): R;
+    tail(plan: R, n: number): R;
+}
+
+/**
+ * Expression partitioning. With `range` the expressions become ascending sort
+ * orders unless they already are sort keys, which Spark turns into range
+ * partitioning; otherwise Spark hash-partitions on them.
+ * @internal
+ */
+export interface RepartitionByExpressionCap<R, E> {
+    repartitionByExpression(plan: R, partitionExprs: E[], numPartitions: number | undefined, range: boolean): R;
+}
+
+/** Where an as-of join looks for the matching row. @public */
+export type AsOfDirection = "backward" | "forward" | "nearest";
+
+/** @internal `asOfJoin` parameters, mirroring Spark's `AsOfJoin` relation. */
+export type AsOfJoinSpec<E> = {
+    leftAsOf: E;
+    rightAsOf: E;
+    /** Join condition; absent when `usingColumns` is given. */
+    on?: E;
+    usingColumns?: string[];
+    joinType: string;
+    tolerance?: E;
+    allowExactMatches: boolean;
+    direction: AsOfDirection;
+};
+
+/** @internal Sorts every partition on its own (`Sort.is_global = false`). */
+export interface PartitionSortCap<R, E> {
+    sortWithinPartitions(plan: R, orders: SortOrder<E>[]): R;
+}
+
+/** @internal `dropDuplicates` that also drops late duplicates within the watermark. */
+export interface WatermarkDedupCap<R, E> {
+    dropDuplicatesWithinWatermark(plan: R, cols?: E[]): R;
+}
+
+/** @internal `right` may reference columns of `left` (`LateralJoin`). */
+export interface LateralJoinCap<R, E> {
+    lateralJoin(left: R, right: R, on: E | undefined, joinType: JoinTypeInput): R;
+}
+
+/** @internal Closest-match join on an ordered column (`AsOfJoin`). */
+export interface AsOfJoinCap<R, E> {
+    asOfJoin(left: R, right: R, spec: AsOfJoinSpec<E>): R;
+}
+
+/** @internal `CollectMetrics`: named metrics evaluated over the rows the plan produces. */
+export interface ObserveCap<R, E> {
+    observe(plan: R, name: string, metrics: E[]): R;
+}
+
+/** @internal A relation checkpointed on the server (`CachedRemoteRelation`). */
+export interface CachedRelationCap<R> {
+    cachedRemoteRelation(relationId: string): R;
+}
+
+/** @internal Reconciles the rows to a DDL schema (`ToSchema`). */
+export interface SchemaCap<R> {
+    toSchema(plan: R, ddl: string): R;
+}
+
+/** @internal Re-emits `column` as `name` with JSON column metadata. */
+export interface MetadataCap<R, E> {
+    withMetadata(plan: R, name: string, column: E, metadata: string): R;
 }

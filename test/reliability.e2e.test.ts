@@ -57,16 +57,60 @@ const SENDER_MAX_STREAM_SIZE = "spark.connect.execute.reattachable.senderMaxStre
 const SENDER_MAX_STREAM_SIZE_CEILING = 8 * 1024 * 1024;
 
 /**
- * 192 single-row tasks that each sleep 1.5 s. The job needs at least 1.5 s of
- * wall time on any machine and about 1.5 s * ceil(192 / cores) otherwise, so it
- * is comfortably longer than the deadline/abort below while staying bounded if
- * server-side cleanup ever regressed. java_method is a Spark builtin, so no
- * extra jars are involved.
+ * 192 single-row partitions that each sleep `sleepMs`. Spark Connect streams
+ * the result partition by partition, so the first Arrow batch arrives after
+ * about `sleepMs` on any machine while the whole job takes about
+ * `sleepMs * ceil(192 / cores)`: long enough to notice when a cancelled job is
+ * left running, bounded if server-side cleanup ever regressed. java_method is a
+ * Spark builtin, so no extra jars are involved.
  */
-const SLOW_JOB_SQL =
-    "SELECT COUNT(napped) AS n FROM (" +
-    "SELECT java_method('java.lang.Thread', 'sleep', 1500L) AS napped FROM range(0, 192, 1, 192))";
+function slowJobSql(sleepMs: number): string {
+    return `SELECT java_method('java.lang.Thread', 'sleep', ${sleepMs}L) AS napped FROM range(0, 192, 1, 192)`;
+}
 const SLOW_JOB_MIN_MS = 1_500;
+const SLOW_JOB_SQL = slowJobSql(SLOW_JOB_MIN_MS);
+
+/**
+ * Two partitions: the first sleeps 0.5 s so the first batch arrives at once,
+ * the second sleeps 30 s so the job stays running. Several of these fit the
+ * executor at the same time, which the 192-partition job does not: with FIFO
+ * scheduling a second job only starts once every task of the first has been
+ * launched.
+ */
+const SMALL_SLOW_JOB_SQL =
+    "SELECT java_method('java.lang.Thread', 'sleep', CASE WHEN id = 0 THEN 500L ELSE 30000L END) AS napped " +
+    "FROM range(0, 2, 1, 2)";
+
+type RunningJob = {
+    /** Resolves once the first Arrow batch arrived, i.e. the job is running on the server. */
+    started: Promise<void>;
+    /** Settles when the stream ends; resolves with the number of Arrow batches. */
+    finished: Promise<number>;
+};
+
+/**
+ * Consumes a raw response stream. Tests that cancel or interrupt wait for
+ * `started` first: an interrupt that reaches the server before the job is
+ * submitted finds nothing to cancel, and the job then runs to completion.
+ */
+function runSlowJob(responses: AsyncIterable<Record<string, unknown>>): RunningJob {
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    const finished = (async () => {
+        let batches = 0;
+        for await (const response of responses) {
+            if ((response as { arrow_batch?: { data?: unknown } }).arrow_batch?.data) {
+                batches += 1;
+                if (batches === 1) markStarted();
+            }
+        }
+        return batches;
+    })();
+    // A job that fails before its first batch must not hang the test; the
+    // failure surfaces when the test awaits `finished`.
+    finished.catch(() => markStarted());
+    return { started, finished };
+}
 
 describe("production reliability (E2E)", () => {
     it("round-trips decimal, timestamp, array, struct and map values through Arrow", async () => {
@@ -217,18 +261,20 @@ describe("production reliability (E2E)", () => {
             .getOrCreate();
         const reason = "cancelled mid-stream by E2E";
 
-        const startedAt = Date.now();
-        const timer = setTimeout(() => controller.abort(reason), 300);
-        const error = await captureRejection(abortable.sql(SLOW_JOB_SQL).collect()) as Error;
-        clearTimeout(timer);
-        const elapsedMs = Date.now() - startedAt;
+        const job = runSlowJob(abortable.sql(SLOW_JOB_SQL).streamRaw());
+        await job.started;
+        const abortedAt = Date.now();
+        controller.abort(reason);
+        const error = await captureRejection(job.finished) as Error;
+        const elapsedMs = Date.now() - abortedAt;
 
-        // The rejection is the abort itself, not a transport failure.
+        // The rejection is the abort itself, not a transport failure, and it
+        // does not wait for the remaining partitions.
         expect(error).toBeInstanceOf(Error);
         expect(error).not.toBeInstanceOf(SparkConnectError);
         expect(error.name).toBe("AbortError");
         expect(error.message).toBe(reason);
-        expect(elapsedMs).toBeLessThan(SLOW_JOB_MIN_MS);
+        expect(elapsedMs).toBeLessThan(5_000);
 
         // Cancellation still releases the operation server-side.
         expect(eventNames(events)).toContain("spark.execute.start");
@@ -261,8 +307,12 @@ describe("production reliability (E2E)", () => {
             .withLogger(event => events.push(event))
             .getOrCreate();
         try {
+            // Partitions of 0.5 s: the first batch arrives before the 1 s
+            // deadline, so the deadline cuts a running job, and the deadline
+            // fires before the server ends the stream at 2 s (which would
+            // start a fresh per-stream deadline).
             const startedAt = Date.now();
-            const error = await captureRejection(deadlineSession.sql(SLOW_JOB_SQL).collect()) as SparkConnectError;
+            const error = await captureRejection(deadlineSession.sql(slowJobSql(500)).collect()) as SparkConnectError;
             const elapsedMs = Date.now() - startedAt;
 
             expect(error).toBeInstanceOf(SparkConnectError);
@@ -275,7 +325,7 @@ describe("production reliability (E2E)", () => {
             expect(error.details).toMatch(/^Deadline exceeded/);
             expect(error.errorId).toBeUndefined();
             expect(elapsedMs).toBeGreaterThanOrEqual(900);
-            expect(elapsedMs).toBeLessThan(SLOW_JOB_MIN_MS * 2);
+            expect(elapsedMs).toBeLessThan(10_000);
 
             // The client reports the failure and releases the operation, which
             // interrupts the job instead of leaving it running until the
@@ -353,4 +403,130 @@ describe("production reliability (E2E)", () => {
         },
         30_000,
     );
+});
+
+/**
+ * One task that sleeps `ms`, so the job lasts that long on any machine and
+ * produces its single row only at the end. java_method is a Spark builtin.
+ */
+function sleepJobSql(ms: number): string {
+    return "SELECT COUNT(napped) AS n FROM (" +
+        `SELECT java_method('java.lang.Thread', 'sleep', ${ms}L) AS napped FROM range(0, 1, 1, 1))`;
+}
+
+/** spark-server/conf/spark-defaults.conf ends every response stream after 2 s. */
+const SENDER_MAX_STREAM_DURATION_MS = 2_000;
+
+function reattachCount(events: readonly SparkTelemetryEvent[]): number {
+    return events.filter(event => event.name === "spark.execute.reattach").length;
+}
+
+describe("execution liveness and per-query control (E2E)", () => {
+    it("follows a job that stays silent through more than eight empty streams", async ctx => {
+        const events: SparkTelemetryEvent[] = [];
+        const observed = connectedBuilder().withLogger(event => events.push(event)).getOrCreate();
+        try {
+            const rows = await observed.sql(sleepJobSql(20_000)).collect();
+            expect(rows).toHaveLength(1);
+        } finally {
+            await observed.close();
+        }
+
+        // The former limit failed the query after eight empty streams, so the
+        // regression is only observable when the server produces more. Servers
+        // from 4.0.4 on end an idle stream every senderMaxStreamDuration (2 s
+        // here), about ten in this job; Spark 4.0.0 ends them irregularly (one
+        // to three in 20 s), which is not enough to tell the fix from the bug.
+        const idleStreams = reattachCount(events);
+        const serverVersion = process.env.SPARK_VERSION;
+        if (idleStreams <= 8 && (serverVersion === undefined || serverVersion === "4.0.0")) {
+            return ctx.skip(`only ${idleStreams} idle streams on this server; the regression is not observable`);
+        }
+        expect(idleStreams).toBeGreaterThan(8);
+    });
+
+    it("cancels one execution with its own signal and keeps the session usable", async () => {
+        const controller = new AbortController();
+        const job = runSlowJob(session.sql(SLOW_JOB_SQL).streamRaw({ signal: controller.signal }));
+        await job.started;
+        const abortedAt = Date.now();
+        controller.abort("stop this query");
+
+        expect(await captureRejection(job.finished)).toMatchObject({ name: "AbortError", message: "stop this query" });
+        expect(Date.now() - abortedAt).toBeLessThan(5_000);
+
+        // Same session, immediately usable, and fast because the job was released.
+        const probeStartedAt = Date.now();
+        expect(await session.sql("SELECT 1 AS alive").collect()).toEqual([{ alive: 1 }]);
+        expect(Date.now() - probeStartedAt).toBeLessThan(5_000);
+    });
+
+    it("interrupts tagged operations from a different call", async () => {
+        const operationId = "6f1c5a52-6a0e-4a46-9f39-0c6f6a3b0c11";
+        session.addTag("e2e-session-tag");
+        const job = runSlowJob(session.sql(SLOW_JOB_SQL).streamRaw({ tags: ["e2e-slow"], operationId }));
+        session.removeTag("e2e-session-tag");
+        await job.started;
+
+        await expect(session.interruptTag("e2e-session-tag")).resolves.toEqual([operationId]);
+        const error = await captureRejection(job.finished) as SparkConnectError;
+        expect(error).toBeInstanceOf(SparkConnectError);
+        expect(error.message).toMatch(/cancel/i);
+        await expect(session.interruptTag("e2e-slow")).resolves.toEqual([]);
+        expect(await session.sql("SELECT 1 AS alive").collect()).toEqual([{ alive: 1 }]);
+    });
+
+    it("interrupts one operation by id and the rest with interruptAll", async () => {
+        const first = "0b9f7c1e-2d4a-4c55-8e7f-1a2b3c4d5e6f";
+        const second = "7d3e9a10-5b6c-4d7e-9f80-a1b2c3d4e5f6";
+        const firstJob = runSlowJob(session.sql(SMALL_SLOW_JOB_SQL).streamRaw({ operationId: first }));
+        const secondJob = runSlowJob(session.sql(SMALL_SLOW_JOB_SQL).streamRaw({ operationId: second }));
+        await Promise.all([firstJob.started, secondJob.started]);
+
+        await expect(session.interruptOperation(first)).resolves.toEqual([first]);
+        expect(await captureRejection(firstJob.finished)).toBeInstanceOf(SparkConnectError);
+        await expect(session.interruptAll()).resolves.toEqual([second]);
+        expect(await captureRejection(secondJob.finished)).toBeInstanceOf(SparkConnectError);
+        expect(await session.sql("SELECT 1 AS alive").collect()).toEqual([{ alive: 1 }]);
+    });
+
+    it("keeps unary deadlines short without capping how long a query may run", async () => {
+        const unbounded = connectedBuilder()
+            .withRpcTimeout(SENDER_MAX_STREAM_DURATION_MS / 4)
+            .withExecuteTimeout(Number.POSITIVE_INFINITY)
+            .getOrCreate();
+        try {
+            await expect(unbounded.sql(sleepJobSql(5_000)).collect()).resolves.toHaveLength(1);
+            await expect(unbounded.conf.get("spark.sql.shuffle.partitions")).resolves.toEqual(expect.any(String));
+        } finally {
+            await unbounded.close();
+        }
+    });
+
+    it("bounds the whole execution across reattaches and retries with executeTimeoutMs", async () => {
+        const events: SparkTelemetryEvent[] = [];
+        const bounded = connectedBuilder()
+            .withExecuteTimeout(5_000)
+            .withRetry({ maxRetries: 5, initialBackoffMs: 50, maxBackoffMs: 100 })
+            .withLogger(event => events.push(event))
+            .getOrCreate();
+        try {
+            const startedAt = Date.now();
+            const error = await captureRejection(bounded.sql(SLOW_JOB_SQL).collect()) as SparkConnectError;
+            const elapsedMs = Date.now() - startedAt;
+
+            expect(error).toMatchObject({ operation: "ExecutePlan", code: status.DEADLINE_EXCEEDED });
+            expect(elapsedMs).toBeGreaterThanOrEqual(4_900);
+            expect(elapsedMs).toBeLessThan(15_000);
+            // On servers that end idle streams every 2 s the budget spans
+            // several continuations; Spark 4.0.0 keeps the first stream open,
+            // and the deadline must hold either way.
+            expect(releasedExecute(events)).toBe(true);
+        } finally {
+            await bounded.close();
+        }
+        const probeStartedAt = Date.now();
+        expect(await session.sql("SELECT 1 AS alive").collect()).toEqual([{ alive: 1 }]);
+        expect(Date.now() - probeStartedAt).toBeLessThan(5_000);
+    });
 });

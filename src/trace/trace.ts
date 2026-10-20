@@ -36,6 +36,23 @@ export const TraceExprAlg: ExprAlg<TraceNode> = {
     logical: (op, l, r) => node("logical", op, [l, r]),
     alias: (input, ...names) => node("alias", `alias(${names.join(",")})`, [input]),
     call: (fn, args) => node("call", fn, args),
+    callDistinct: (fn, args) => node("call", `${fn}(distinct)`, args),
+    exprString: sql => node("expr", `expr(${JSON.stringify(sql)})`),
+    cast: (input, type, evalMode) =>
+        node("cast", `${evalMode === "try" ? "try_cast" : "cast"}(${type}${
+            evalMode === undefined || evalMode === "try" ? "" : `,${evalMode}`
+        })`, [input]),
+    lambda: (params, body) => node("lambda", `lambda(${params.join(",")})`, [body]),
+    lambdaVar: name => node("lambdaVar", name),
+    updateFields: (struct, field, value) =>
+        value === undefined
+            ? node("dropField", `dropField(${field})`, [struct])
+            : node("withField", `withField(${field})`, [struct, value]),
+    extractValue: (child, extraction) => node("extract", "extract", [child, extraction]),
+    colRegex: (regex, planId) =>
+        node("colRegex", `colRegex(${regex}${planId === undefined ? "" : `@${planId}`})`),
+    metadataCol: (name, planId) =>
+        node("metadataCol", `metadataCol(${name}${planId === undefined ? "" : `@${planId}`})`),
     sortKey: (input, direction, nulls) => node("sortKey", `sortKey(${sortLabel(direction, nulls)})`, [input]),
     star: () => node("star", "*"),
     caseWhen: (branches, elze) =>
@@ -89,10 +106,14 @@ const orderLabels = (orders: SortOrder<TraceNode>[]): TraceNode[] => orders.map(
  * relation added to `DFAlg` cannot silently break plan inspection.
  */
 export const TraceDFAlg: TraceDFAlgebra = {
-    relation: (format, _path, _opts, schema) =>
-        node("rel", `relation(${format}${schema ? ",schema" : ""})`),
+    relation: (format, _path, _opts, schema, predicates) =>
+        node("rel", `relation(${format}${schema ? ",schema" : ""}${predicates?.length ? `,predicates[${predicates.length}]` : ""})`),
 
     catalog: op => node("rel", `catalog(${op.method})`),
+    range: (start, end, step, numPartitions) => node(
+        "rel",
+        `range[${start ?? 0n}..${end} step ${step}${numPartitions !== undefined ? ` partitions ${numPartitions}` : ""}]`,
+    ),
 
     localRelation: (_ddl, _data, rowCount) => node("rel", `localRelation[${rowCount}]`),
 
@@ -106,7 +127,21 @@ export const TraceDFAlg: TraceDFAlgebra = {
 
     join: (l, r, on, jt?: JoinTypeInput) => node("join", `join(${jt ?? "INNER"})`, [l, r, on]),
 
-    groupBy: (df, keys) => node("groupBy", `groupBy[${keys.length}]`, [df, ...keys]),
+    groupBy: (df, keys, spec) =>
+        spec === undefined
+            ? node("groupBy", `groupBy[${keys.length}]`, [df, ...keys])
+            : node(
+                "groupBy",
+                `${spec.groupType}[${keys.length}]${spec.pivot?.values ? `(values[${spec.pivot.values.length}])` : ""}${
+                    spec.groupingSets ? `(sets[${spec.groupingSets.length}])` : ""
+                }`,
+                [
+                    df,
+                    ...keys,
+                    ...(spec.pivot ? [spec.pivot.column] : []),
+                    ...(spec.groupingSets ?? []).flat(),
+                ],
+            ),
 
     agg: (dfOrG, pairs, groupType?: GroupTypeInput) =>
         node("agg", `agg[${Object.keys(pairs).length}]${groupType ? `(${groupType})` : ""}`, [
@@ -167,6 +202,100 @@ export const TraceDFAlg: TraceDFAlgebra = {
 
     summary: (df, metrics, columns) =>
         node("summary", `summary[${metrics.length}x${columns.length}]`, [df, ...metrics, ...columns]),
+
+    fillNa: (df, columns, values) =>
+        node("fillNa", `fillNa[${values.length}]${columns.length ? `(${columns.join(",")})` : ""}`, [df]),
+
+    dropNa: (df, columns, minNonNulls) =>
+        node(
+            "dropNa",
+            `dropNa${minNonNulls === undefined ? "" : `(min=${minNonNulls})`}${columns.length ? `(${columns.join(",")})` : ""}`,
+            [df],
+        ),
+
+    replaceNa: (df, columns, replacements) =>
+        node("replaceNa", `replaceNa[${replacements.length}]${columns.length ? `(${columns.join(",")})` : ""}`, [df]),
+
+    crosstab: (df, col1, col2) => node("crosstab", `crosstab(${col1},${col2})`, [df]),
+
+    cov: (df, col1, col2) => node("cov", `cov(${col1},${col2})`, [df]),
+
+    corr: (df, col1, col2, method) => node("corr", `corr(${col1},${col2}${method ? `,${method}` : ""})`, [df]),
+
+    approxQuantile: (df, columns, probabilities, relativeError) =>
+        node("approxQuantile", `approxQuantile(${columns.join(",")};p[${probabilities.length}];e=${relativeError})`, [df]),
+
+    freqItems: (df, columns, support) =>
+        node("freqItems", `freqItems(${columns.join(",")}${support === undefined ? "" : `;support=${support}`})`, [df]),
+
+    sampleBy: (df, column, fractions, seed) =>
+        node("sampleBy", `sampleBy[${fractions.length}](seed=${seed})`, [df, column]),
+
+    unpivot: (df, ids, values, variableColumnName, valueColumnName) =>
+        node(
+            "unpivot",
+            `unpivot(${variableColumnName},${valueColumnName};ids[${ids.length}]${values ? `;values[${values.length}]` : ""})`,
+            [df, ...ids, ...(values ?? [])],
+        ),
+
+    toDF: (df, columnNames) => node("toDF", `toDF(${columnNames.join(",")})`, [df]),
+
+    transpose: (df, indexColumns) => node("transpose", `transpose[${indexColumns.length}]`, [df, ...indexColumns]),
+
+    withColumns: (df, columns) =>
+        node(
+            "withCols",
+            `withColumns(${columns.map(column => column.name).join(",")})`,
+            [df, ...columns.map(column => column.column)],
+        ),
+
+    subqueryAlias: (df, alias) => node("alias", `alias(${alias})`, [df]),
+
+    crossJoin: (l, r) => node("join", "join(CROSS)", [l, r]),
+
+    offset: (df, n) => node("offset", `offset(${n})`, [df]),
+
+    tail: (df, n) => node("tail", `tail(${n})`, [df]),
+
+    repartitionByExpression: (df, exprs, numPartitions, range) =>
+        node(
+            "repartition",
+            `repartition${range ? "ByRange" : ""}[${exprs.length}]${numPartitions === undefined ? "" : `(${numPartitions})`}`,
+            [df, ...exprs],
+        ),
+
+    sortWithinPartitions: (df, orders) =>
+        node("sortWithinPartitions", `sortWithinPartitions[${orders.length}]`, [df, ...orderLabels(orders)]),
+
+    dropDuplicatesWithinWatermark: (df, exprs) =>
+        node("dropDup", `dropDuplicatesWithinWatermark[${exprs?.length ?? 0}]`, [df, ...(exprs ?? [])]),
+
+    lateralJoin: (l, r, on, joinType) =>
+        node("join", `lateralJoin(${String(joinType).toUpperCase()})`, [l, r, ...(on === undefined ? [] : [on])]),
+
+    asOfJoin: (l, r, spec) =>
+        node(
+            "join",
+            `asOfJoin(${spec.joinType},${spec.direction}${spec.allowExactMatches ? "" : ",strict"}${
+                spec.usingColumns ? `;using[${spec.usingColumns.join(",")}]` : ""
+            })`,
+            [
+                l,
+                r,
+                spec.leftAsOf,
+                spec.rightAsOf,
+                ...(spec.on === undefined ? [] : [spec.on]),
+                ...(spec.tolerance === undefined ? [] : [spec.tolerance]),
+            ],
+        ),
+
+    observe: (df, name, metrics) => node("observe", `observe(${name})[${metrics.length}]`, [df, ...metrics]),
+
+    cachedRemoteRelation: relationId => node("checkpoint", `checkpoint(${relationId})`),
+
+    toSchema: (df, ddl) => node("toSchema", `to(${ddl})`, [df]),
+
+    withMetadata: (df, name, column, _metadata) => node("withMetadata", `withMetadata(${name})`, [df, column]),
 
     readStream: (format, options) =>
         node("readStream", `readStream(${format}${options ? ",opts" : ""})`),

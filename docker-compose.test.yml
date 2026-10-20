@@ -37,6 +37,7 @@ services:
       SPARK_TLS_CA: /app/spark-server/certs/ca.crt
       SPARK_TLS_SERVER_NAME: spark-connect
       SPARK_TEST_DEST: /data/dest/e2e
+      SPARK_VERSION: "${SPARK_VERSION:-4.0.4}"
     networks:
       - test-network
 

@@ -1,6 +1,7 @@
 import { GroupTypeInput, JoinHintName, JoinTypeInput } from "./sparkConnectEnums";
 import { CatalogOperation } from "../types/catalog";
-import { LiteralValue } from "../algebra/read";
+import { CastEvalMode, LiteralValue } from "../algebra/read";
+import type { AsOfJoinSpec, NAReplacement, SampleFraction } from "../algebra/read/batch-capabilities";
 import { FrameBoundary } from "./column";
 import { FrameType, SortOrder } from "../types";
 
@@ -19,6 +20,9 @@ export type GroupBy = {
     type: "GroupBy";
     input: LogicalPlan;
     expressions: Expression[];
+    groupType?: GroupTypeInput;
+    pivot?: { column: Expression; values?: LiteralValue[] };
+    groupingSets?: Expression[][];
 };
 
 export type DataSource = {
@@ -29,16 +33,16 @@ export type DataSource = {
 };
 
 export type LogicalPlan =
-    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string>; schema?: string }
+    | { type: "Relation"; format: string; path: string | string[]; options?: Record<string, string>; schema?: string; predicates?: string[] }
     | { type: "Filter"; input: LogicalPlan; condition: Expression }
     | { type: "Project"; input: LogicalPlan; columns: Expression[] }
     | { type: "Aggregate"; input: GroupBy; aggregations: Record<string, Expression>; groupType?: GroupTypeInput }
     | { type: "GroupBy"; input: LogicalPlan; expressions: Expression[] }
     | { type: "Join"; left: LogicalPlan; right: LogicalPlan; on: Expression; joinType: JoinTypeInput }
-    | { type: "Sort"; input: LogicalPlan; orders: SortOrder<Expression>[] }
+    | { type: "Sort"; input: LogicalPlan; orders: SortOrder<Expression>[]; isGlobal?: boolean }
     | { type: "Limit"; input: LogicalPlan; limit: number }
     | { type: "Distinct"; input: LogicalPlan }
-    | { type: "Deduplicate"; input: LogicalPlan; columnNames?: string[] }
+    | { type: "Deduplicate"; input: LogicalPlan; columnNames?: string[]; withinWatermark?: boolean }
     | { type: "Union"; inputs: LogicalPlan[]; byName?: boolean; allowMissingColumns?: boolean }
     | { type: "SetOperation"; left: LogicalPlan; right: LogicalPlan; setOpType: "intersect" | "except"; isAll?: boolean }
     | { type: "WithColumnsRenamed"; input: LogicalPlan; mapping: Record<string, string> }
@@ -52,10 +56,34 @@ export type LogicalPlan =
     | { type: "Sql"; query: string }
     | { type: "Catalog"; operation: CatalogOperation }
     | { type: "LocalRelation"; schema: string; rowCount: number }
+    | { type: "Range"; start?: bigint; end: bigint; step: bigint; numPartitions?: number }
     | { type: "Hint"; name: JoinHintName | string; params?: unknown[]; child: LogicalPlan }
     | { type: "Sample"; input: LogicalPlan; lowerBound: number; upperBound: number; withReplacement?: boolean; seed?: number; deterministicOrder?: boolean }
     | { type: "Drop"; input: LogicalPlan; columnNames: string[] }
     | { type: "EventTimeWatermark"; input: LogicalPlan; eventTimeColumn: string; delay: string }
+    | { type: "FillNa"; input: LogicalPlan; columns: string[]; values: LiteralValue[] }
+    | { type: "DropNa"; input: LogicalPlan; columns: string[]; minNonNulls?: number }
+    | { type: "ReplaceNa"; input: LogicalPlan; columns: string[]; replacements: NAReplacement[] }
+    | { type: "Crosstab"; input: LogicalPlan; col1: string; col2: string }
+    | { type: "Cov"; input: LogicalPlan; col1: string; col2: string }
+    | { type: "Corr"; input: LogicalPlan; col1: string; col2: string; method?: string }
+    | { type: "ApproxQuantile"; input: LogicalPlan; columns: string[]; probabilities: number[]; relativeError: number }
+    | { type: "FreqItems"; input: LogicalPlan; columns: string[]; support?: number }
+    | { type: "SampleBy"; input: LogicalPlan; column: Expression; fractions: SampleFraction[]; seed: number }
+    | { type: "Unpivot"; input: LogicalPlan; ids: Expression[]; values?: Expression[]; variableColumnName: string; valueColumnName: string }
+    | { type: "ToDF"; input: LogicalPlan; columnNames: string[] }
+    | { type: "Transpose"; input: LogicalPlan; indexColumns: Expression[] }
+    | { type: "SubqueryAlias"; input: LogicalPlan; alias: string }
+    | { type: "CrossJoin"; left: LogicalPlan; right: LogicalPlan }
+    | { type: "Offset"; input: LogicalPlan; offset: number }
+    | { type: "Tail"; input: LogicalPlan; limit: number }
+    | { type: "RepartitionByExpression"; input: LogicalPlan; partitionExprs: Expression[]; numPartitions?: number; range: boolean }
+    | { type: "LateralJoin"; left: LogicalPlan; right: LogicalPlan; on?: Expression; joinType: JoinTypeInput }
+    | { type: "AsOfJoin"; left: LogicalPlan; right: LogicalPlan; spec: AsOfJoinSpec<Expression> }
+    | { type: "CollectMetrics"; input: LogicalPlan; name: string; metrics: Expression[] }
+    | { type: "CachedRemoteRelation"; relationId: string }
+    | { type: "ToSchema"; input: LogicalPlan; schema: string }
+    | { type: "WithMetadata"; input: LogicalPlan; name: string; column: Expression; metadata: string }
     | { type: "Read"; data_source: DataSource; is_streaming?: boolean };
 
 export type Expression =
@@ -64,7 +92,15 @@ export type Expression =
     | { type: "Binary"; op: string; left: Expression; right: Expression }
     | { type: "Logical"; op: "AND" | "OR"; left: Expression; right: Expression }
     | { type: "Alias"; input: Expression; alias: string }
-    | { type: "UnresolvedFunction"; name: string; args: Expression[] }
+    | { type: "UnresolvedFunction"; name: string; args: Expression[]; isDistinct?: true }
+    | { type: "ExpressionString"; expression: string }
+    | { type: "Cast"; input: Expression; dataType: string; evalMode?: CastEvalMode }
+    | { type: "LambdaFunction"; params: string[]; body: Expression }
+    | { type: "LambdaVariable"; name: string }
+    | { type: "UpdateFields"; struct: Expression; field: string; value?: Expression }
+    | { type: "ExtractValue"; child: Expression; extraction: Expression }
+    | { type: "ColumnRegex"; regex: string; planId?: number }
+    | { type: "MetadataColumn"; name: string; planId?: number }
     | { type: "SortKey"; input: Expression; direction: "asc" | "desc"; nulls?: "nullsFirst" | "nullsLast" }
     | { type: "UnresolvedStar" }
     | { type: "CaseWhen"; branches: Array<{ when: Expression; then: Expression }>; else?: Expression }

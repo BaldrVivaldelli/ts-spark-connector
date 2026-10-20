@@ -1,6 +1,7 @@
 import * as grpc from "@grpc/grpc-js";
 import { describe, expect, it, vi } from "vitest";
 import {
+    EMPTY_STREAM_GRACE_MS,
     executeReattachable,
     type ReattachableResponse,
     type RpcMessage,
@@ -340,5 +341,160 @@ describe("reattachable execution completion", () => {
             }, { retry: noRetry })) void value;
         };
         await expect(run()).rejects.toThrow(/operation_id wrong/);
+    });
+});
+
+/** Emits on a later event-loop turn, like a real gRPC stream fed by I/O. */
+function ioCall<T>(values: T[], ending: "end" | Error = "end"): ManualCall<T> {
+    const call = new ManualCall<T>();
+    setImmediate(() => {
+        values.forEach(value => call.data(value));
+        if (ending === "end") call.end();
+        else call.error(ending);
+    });
+    return call;
+}
+
+describe("reattachable execution liveness", () => {
+    it("follows a long job through idle continuation streams of any count", async () => {
+        // Spark closes a reattachable stream after senderMaxStreamDuration even
+        // while the job is still computing; each idle stream "lasts" the grace.
+        let clock = 0;
+        let idleStreams = 0;
+        const reattach = vi.fn(() => {
+            clock += EMPTY_STREAM_GRACE_MS;
+            idleStreams += 1;
+            return scheduledCall(idleStreams <= 20 ? [] : [response("done", { result_complete: {} })]);
+        });
+
+        const rows: ReattachableResponse[] = [];
+        for await (const value of executeReattachable(baseRequest, {
+            execute: () => {
+                clock += EMPTY_STREAM_GRACE_MS;
+                return scheduledCall([]);
+            },
+            reattach,
+            release: async () => ({}),
+        }, { retry: noRetry, maxEmptyReattachments: 1, now: () => clock })) rows.push(value);
+
+        expect(rows.map(row => row.response_id)).toEqual(["done"]);
+        expect(reattach).toHaveBeenCalledTimes(21);
+    });
+
+    it("counts only streams that end empty immediately, and an idle one resets them", async () => {
+        let clock = 0;
+        const outcomes = ["fast", "idle", "fast", "fast", "done"];
+        const reattach = vi.fn(() => {
+            const outcome = outcomes.shift();
+            if (outcome === "idle") clock += EMPTY_STREAM_GRACE_MS;
+            return scheduledCall(outcome === "done" ? [response("done", { result_complete: {} })] : []);
+        });
+        const run = async () => {
+            const values: ReattachableResponse[] = [];
+            for await (const value of executeReattachable(baseRequest, {
+                execute: () => scheduledCall([]),
+                reattach,
+                release: async () => ({}),
+            }, { retry: noRetry, maxEmptyReattachments: 2, now: () => clock })) values.push(value);
+            return values;
+        };
+        // execute (fast #1), fast #2, idle (reset), fast #1, fast #2, done.
+        await expect(run()).resolves.toEqual([response("done", { result_complete: {} })]);
+
+        const broken = vi.fn(() => scheduledCall<ReattachableResponse>([]));
+        await expect((async () => {
+            for await (const value of executeReattachable(baseRequest, {
+                execute: () => scheduledCall([]),
+                reattach: broken,
+                release: async () => ({}),
+            }, { retry: noRetry, maxEmptyReattachments: 2, now: () => clock })) void value;
+        })()).rejects.toThrow(/ended 3 times without a response/);
+        expect(broken).toHaveBeenCalledTimes(2);
+    });
+
+    it("never retries a failure once the execution deadline has passed", async () => {
+        let clock = 0;
+        const reattach = vi.fn(() => scheduledCall([response("done", { result_complete: {} })]));
+        const release = vi.fn(async () => ({}));
+        const unavailable = Object.assign(new Error("connection lost"), { code: grpc.status.UNAVAILABLE });
+
+        const run = async () => {
+            for await (const value of executeReattachable(baseRequest, {
+                execute: () => {
+                    clock = 1_500;
+                    return scheduledCall([response("first")], unavailable);
+                },
+                reattach,
+                release,
+            }, {
+                retry: resolveRetryConfig({ retry: { maxRetries: 5, initialBackoffMs: 0 } }),
+                deadline: 1_000,
+                now: () => clock,
+            })) void value;
+        };
+
+        await expect(run()).rejects.toBe(unavailable);
+        expect(reattach).not.toHaveBeenCalled();
+        expect(release).toHaveBeenCalledOnce();
+    });
+
+    it("refuses to open a continuation after the deadline with DEADLINE_EXCEEDED", async () => {
+        let clock = 0;
+        const reattach = vi.fn(() => scheduledCall<ReattachableResponse>([]));
+        const release = vi.fn(async () => ({}));
+        const run = async () => {
+            for await (const value of executeReattachable(baseRequest, {
+                execute: () => {
+                    clock = 2_000;
+                    return scheduledCall([response("first")]);
+                },
+                reattach,
+                release,
+            }, {
+                retry: resolveRetryConfig({ retry: { maxRetries: 5, initialBackoffMs: 0 } }),
+                deadline: 1_000,
+                now: () => clock,
+            })) void value;
+        };
+
+        await expect(run()).rejects.toMatchObject({
+            code: grpc.status.DEADLINE_EXCEEDED,
+            message: expect.stringMatching(/execution timeout elapsed/),
+        });
+        expect(reattach).not.toHaveBeenCalled();
+        expect(release).toHaveBeenCalledOnce();
+    });
+
+    it("keeps reattaching within the deadline", async () => {
+        let clock = 0;
+        const unavailable = Object.assign(new Error("connection lost"), { code: grpc.status.UNAVAILABLE });
+        const rows = await consume(baseRequest, () => {
+            clock = 500;
+            return scheduledCall([response("first")], unavailable);
+        }, {
+            retry: resolveRetryConfig({ retry: { maxRetries: 1, initialBackoffMs: 0 } }),
+            deadline: 1_000,
+            now: () => clock,
+        });
+        expect(rows.map(row => row.response_id)).toEqual(["first", "complete"]);
+    });
+
+    it("waits for asynchronously opened streams, e.g. after refreshing credentials", async () => {
+        const execute = vi.fn(async () => ioCall([response("first")], Object.assign(
+            new Error("connection lost"),
+            { code: grpc.status.UNAVAILABLE },
+        )));
+        const reattach = vi.fn(async () => ioCall([response("done", { result_complete: {} })]));
+        const rows: ReattachableResponse[] = [];
+        for await (const value of executeReattachable(baseRequest, {
+            execute,
+            reattach,
+            release: async () => ({}),
+        }, {
+            retry: resolveRetryConfig({ retry: { maxRetries: 1, initialBackoffMs: 0 } }),
+        })) rows.push(value);
+
+        expect(rows.map(row => row.response_id)).toEqual(["first", "done"]);
+        expect(reattach).toHaveBeenCalledWith(expect.objectContaining({ last_response_id: "first" }));
     });
 });

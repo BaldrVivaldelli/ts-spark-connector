@@ -3,13 +3,17 @@
 TypeScript client for [Apache Spark Connect](https://spark.apache.org/docs/latest/spark-connect-overview.html).
 It builds Spark logical plans in TypeScript and executes them against a Spark Connect server.
 
+**Documentation:** [API reference](https://baldrvivaldelli.github.io/ts-spark-connector/) ·
+[Architecture and contributor guide](docs/ARCHITECTURE.md) ·
+[PySpark parity tracker](docs/PARITY.md) · [Migration guide](MIGRATION.md)
+
 ## What is solid today
 
 - Fluent DataFrame-style API in TypeScript
 - Client-side plan inspection in JSON / Mermaid / proto JSON
 - Spark Connect execution over gRPC
 - Batch reads, projections, filters, joins, aggregates, sorting, limits, unions, temp views, and writes
-- Structured Streaming reads/writes with query handles, termination timeouts, stop, watermark, triggers, and output modes
+- Structured Streaming reads/writes with query handles (status, progress, plans), the session's query manager, lifecycle listeners, termination timeouts, stop, watermark, triggers, and output modes
 
 ## Installation
 
@@ -109,9 +113,69 @@ await people.filter(col("id").gt(1)).show();
 
 Rows are validated during encoding: a `null` in a non-nullable column or a
 value that does not match its token fails with the column and row in the
-message, before anything reaches the network. Complex column types (decimal,
-array, map, struct) are not supported yet and are rejected explicitly. An
+message, before anything reaches the network, including nested values inside
+arrays, maps and structs (`decimalType`, `arrayType`, `mapType`,
+`structType`). An
 empty row array produces an empty, correctly-typed relation.
+
+## Column expressions and functions
+
+Column methods follow PySpark: a bare string on the right-hand side of a method
+is a literal (`col("country").eq("AR")`), while a bare string passed where a
+column is expected is a column name.
+
+```ts
+import { col, expr, functions as F } from "ts-spark-connector";
+
+purchases
+  .filter(col("amount").between(100, 1000).and(col("product").isin("Monitor", "Chair")))
+  .withColumn("total", col("amount").multiply(1.21).cast("decimal(10,2)"))
+  .withColumn("first_tag", F.split("tags", ",").getItem(0))  // 0-based, like PySpark
+  .withColumn("label", expr("upper(product) || '!'"));       // parsed by Spark
+```
+
+SQL text is accepted wherever PySpark accepts it: `df.selectExpr("id", "amount
+* 2 AS doubled")`, `df.filter("amount > 100")` and its alias `df.where(...)`.
+
+The `functions` object mirrors `pyspark.sql.functions` (about 430 functions,
+named as in PySpark). Arguments that are literals in practice (patterns,
+formats, delimiters, sizes) take JS values; every other argument takes a column
+or a column name. Higher-order functions take JS callbacks:
+
+```ts
+import { Window, col, functions as F } from "ts-spark-connector";
+
+const perUser = purchases
+  .withColumn("tags", F.split("tags", ","))
+  .withColumn("tags", F.transform("tags", (tag, i) => F.concat_ws(":", i.cast("string"), F.upper(tag))))
+  .groupBy("user_id")
+  .agg({
+    orders: F.count("*"),
+    products: F.array_sort(F.collect_list("product")),
+    p50: F.percentile_approx("amount", 0.5),
+  });
+
+const ranked = purchases.select(
+  col("user_id"),
+  F.row_number().over(Window.partitionBy("user_id").orderBy(col("amount").desc())).alias("rank"),
+  F.sum("amount").over(Window.partitionBy("user_id").orderBy("year").rowsBetween(-Infinity, 0)).alias("running"),
+);
+```
+
+Every function is also exported from the package root under the same name,
+except where the root already exports a helper with that name: `abs`, `concat`,
+`length`, `lower`, `round` and `upper` at the root are the schema-aware typed
+functions, and `coalesce`, `explode`, `from_json`, `map_keys`, `map_values`,
+`posexplode`, `split`, `struct` and `to_json` keep their original signatures.
+Use `functions.<name>` for the library version. Schema-aware
+`groupBy().agg(a => [...])` adds typed `first`, `last`, `collectList`,
+`collectSet`, `stddev`, `variance`, `approxCountDistinct` and `countIf` to the
+existing `count`, `countDistinct`, `sum`, `avg`, `min` and `max`.
+
+The library is generated from `scripts/functions/catalog.mjs`
+(`npm run functions:generate`); the E2E suite has every Spark server in the
+matrix resolve each catalog function with its required and its full argument
+list.
 
 ## Plan inspection
 
@@ -311,9 +375,48 @@ Notes:
 - Retry counts and delays must be non-negative safe integers; delays are limited to Node's maximum timer duration, the multiplier must be finite and at least `1`, and the initial delay cannot exceed the maximum delay. Invalid configurations throw instead of being silently clamped.
 - `explain` and `interrupt` are unary and idempotent, so they are always safe to retry.
 - Every `executePlan` has a stable operation UUID and requests reattachable execution. Recovery uses `ReattachExecute` from the last response id and never resends the original read, SQL, DDL, or write plan; `ReleaseExecute` cleans server buffers afterward.
-- `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits.
+- `withRpcTimeout(ms)` sets per-RPC deadlines and `withAbortSignal(signal)` cancels RPCs and retry waits. The session-wide signal is sticky: once it aborts, every later RPC of that session rejects. To cancel a single query, use the per-execution options below.
+- By default each ExecutePlan/ReattachExecute stream gets its own `rpcTimeoutMs` deadline, so a query that streams for longer than that fails. `withExecuteTimeout(ms)` instead bounds the whole execution, across every reattach and retry, while unary RPCs keep `rpcTimeoutMs`; `withExecuteTimeout(Infinity)` keeps short unary deadlines without capping query time.
+- Spark closes every reattachable response stream after `spark.connect.execute.reattachable.senderMaxStreamDuration` (two minutes by default), even while a long job has not produced a row yet. The client follows such idle streams for as long as the job runs; only streams that end empty immediately, which indicates a broken server, are limited.
+- Cleanup RPCs (`ReleaseExecute`, `ReleaseSession`, `FetchErrorDetails`) never use the caller's signal and are bounded by a 10 s deadline (or `rpcTimeoutMs`, when shorter), so an unreachable server cannot hold an aborted query or `close()` open.
+- `close()` always releases local state. When `ReleaseSession` fails, the session is still closed and its channel released; the failure is rethrown so the caller knows the server may keep the session until its idle timeout.
+- Provider credentials (`withAuth({ type: "provider" })`) are resolved again for every ReattachExecute and ReleaseExecute, so a query can outlive the token it started with.
 - gRPC send and receive limits default to 128 MiB, avoiding grpc-js's small default for normal Arrow batches; advanced callers can override the validated `grpcMaxReceiveMessageBytes` / `grpcMaxSendMessageBytes` connection options before the first RPC.
 - Client session ids and operation ids are UUIDs. If the compatibility helper `createSparkSession(id)` is given an explicit id, it must be a canonical UUID.
+
+### Cancelling and tagging queries
+
+Actions accept per-execution options. Aborting the `signal` cancels only that
+query: the stream is cancelled and the operation is released, which interrupts
+the job on the server, and the session stays usable.
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort("too slow"), 30_000);
+const rows = await df.collect({ signal: controller.signal });
+```
+
+`collect`, `collectRaw`, `toRows`, `toArrowBatches` and `streamRaw` take the
+same options. Spark operation tags group executions so another part of the
+program can interrupt them, and `operationId` (a canonical UUID) lets the
+caller target one execution:
+
+```ts
+session.addTag("nightly-etl");              // every operation started from now on
+const report = big.collect({ tags: ["report"] });
+await session.interruptTag("report");      // resolves to the interrupted operation ids
+session.removeTag("nightly-etl");
+
+const id = crypto.randomUUID();
+const pending = other.collect({ operationId: id });
+await session.interruptOperation(id);
+await session.interruptAll();              // everything this session is running
+```
+
+Session tags are read when an action starts, so later `addTag`/`removeTag`
+calls do not affect executions already in flight. Batch writes carry the
+session tags as well. An interrupted execution rejects with a
+`SparkConnectError` from Spark.
 
 RPC failures are wrapped as `SparkConnectError` with the operation, gRPC code,
 Spark error class and error id when available. Spark 4's binary
@@ -359,9 +462,68 @@ await session.catalog.dropTempView("people_view");
 
 Scalar operations (`currentCatalog`, `currentDatabase`, `databaseExists`,
 `tableExists`, `functionExists`, `dropTempView`, `dropGlobalTempView`,
-`setCurrentCatalog`, `setCurrentDatabase`) execute immediately and unwrap
-their single result. Catalog plans print through the same inspection surface
-as any other DataFrame (`toProtoJSON`, Mermaid, client AST).
+`setCurrentCatalog`, `setCurrentDatabase`, `isCached`) execute immediately and
+unwrap their single result; `getDatabase`, `getTable` and `getFunction` resolve
+to one typed row and reject when the object does not exist. `listFunctions`
+lists registered functions. Tables are created from data sources with
+`createTable(name, { path, source, schema, description, options })` (external
+when `path` is given) or `createExternalTable`; both create the table right
+away and resolve with it as a DataFrame; `cacheTable(name, storageLevel?)`, `uncacheTable`, `clearCache`,
+`refreshTable`, `refreshByPath` and `recoverPartitions` manage caches and
+metadata:
+
+```ts
+const people = await session.catalog.createTable("people", {
+  path: "/data/people.tsv",
+  source: "csv",
+  schema: schema({ id: "int", name: "string" }),
+  options: { header: "true", delimiter: "\t" },
+});
+await people.show();
+await session.catalog.cacheTable("people", "MEMORY_ONLY");
+console.log(await session.catalog.isCached("people")); // true
+```
+
+Catalog plans print through the same inspection surface as any other
+DataFrame (`toProtoJSON`, Mermaid, client AST).
+
+## Sessions, artifacts and Java UDFs
+
+`session.range(end)` / `session.range(start, end, step?, numPartitions?)`
+builds Spark's `range` relation, typed as `{ id: bigint }`.
+`session.newSession()` returns an independent session with the same
+connection settings and user and no server round trip; unlike
+`cloneSession()` (Spark 4.1+), nothing is copied: temporary views and runtime
+configuration start empty.
+
+Local files are shipped to the server with `addArtifact(path, kind?)` and
+`addArtifacts(...uploads)`: a `.jar` joins the session's classpath, other
+files need `kind: "file"` or `"archive"`. Uploads stream through the
+`AddArtifacts` RPC (small files batched, large ones chunked, every chunk
+CRC-checked by the server) and resolve with the server-side names; a CRC
+failure rejects with `ArtifactUploadError`, listing the names that did and
+did not make it. Uploads are bounded like queries, by `withExecuteTimeout()`
+when set and otherwise by the per-stream `withRpcTimeout()` deadline, so give
+large jars an execute timeout (or `Infinity`); the session's abort signal
+cancels them. `cacheArtifact(bytes)` stores a blob by its SHA-256 (PySpark's
+`cache_artifact`, skipping blobs the server already holds) and
+`isArtifactCached(hash)` checks it; those hashed blobs
+are the only artifacts Spark's `ArtifactStatus` reports on, so the raw
+`artifactStatus(...names)` answers `false` for jars and files. User-defined functions
+have to run on the server, so `session.udf.registerJavaFunction(name,
+className, returnType?)` and `registerJavaUDAF` register classes from an
+uploaded jar, after which SQL and `call(name, [...])` can use them:
+
+```ts
+await session.addArtifact("./build/udfs.jar");
+await session.udf.registerJavaFunction("shout", "io.example.Shout", "string");
+await session.sql("SELECT shout('hi') AS v").show(); // HI!
+```
+
+On Spark 4.2 and later, `session.getStatus(operationIds?)` reports the state
+of this session's operations (`RUNNING`, `SUCCEEDED`, `FAILED`, ...); pair it
+with `ExecutionOptions.operationId` to follow a query. Older servers reject
+it with `UnsupportedServerVersionError` before any RPC.
 
 ## Delta Lake and Iceberg
 
@@ -393,18 +555,146 @@ Spark Connect server, both formats require the matching jars and catalog
 configuration server-side — see `spark-server/Dockerfile` for the exact
 pinned artifacts.
 
+## Null handling, statistics and introspection
+
+`df.na` and `df.stat` mirror PySpark; the same methods also exist directly on
+the DataFrame (`fillna`, `dropna`, `replace`, `corr`, ...). Null handling keeps
+the declared schema, while relations that reshape the data (`crosstab`,
+`unpivot`, `toDF`, `transpose`) fall back to the untyped surface.
+
+```ts
+const filled = df.na.fill({ age: 0, name: "unknown" });
+const complete = df.dropna("any", undefined, ["age"]);
+const renamed = df.replace(["n/a", "-"], null, "name");
+
+const r = await df.stat.corr("age", "score");          // number
+const [p50, p90] = await df.approxQuantile("age", [0.5, 0.9], 0.01);
+const pairs = df.crosstab("country", "year");           // DataFrame
+const sample = df.sampleBy("country", { AR: 0.1, US: 0.5 }, 42);
+
+const rows = await df.count();                          // bigint, like every Spark long
+const first = await df.first();                        // row or undefined
+const last = await df.tail(5);
+const fields = await df.schema();                       // { fields: [{ name, dataType, nullable }] }
+await df.printSchema();
+```
+
+`schema()`, `columns()`, `dtypes()`, `treeString()`, `isLocal()`,
+`isStreaming()`, `inputFiles()`, `sameSemantics()` and `semanticHash()` are
+answered by Spark's `AnalyzePlan` RPC without running the query.
+
+## Table writes and MERGE INTO
+
+`df.writeTo(table)` is Spark's DataFrameWriterV2, and `df.mergeInto(table,
+condition)` builds a `MERGE INTO` command. Qualify the target columns with the
+table name and the source columns with an `alias()`:
+
+```ts
+await df.writeTo("default.customers").using("delta").partitionedBy("country").create();
+await updates.writeTo("default.customers").append();
+await updates.writeTo("default.customers").overwrite(col("country").eq("AR"));
+
+await updates
+  .alias("s")
+  .mergeInto("default.customers", col("customers.id").eq(col("s.id")))
+  .whenMatched().updateAll()
+  .whenNotMatched().insertAll()
+  .whenNotMatchedBySource().delete()
+  .merge();
+```
+
+Both are verified against the bundled Delta catalog on every E2E matrix
+version; see [`docs/examples/merge.ts`](docs/examples/merge.ts).
+`writeTo(...).withSchemaEvolution()` lets an append add the columns the table
+lacks. It needs Spark 4.2: 4.1 already defines the protocol field but the
+server still writes without evolving the schema, so 4.0 and 4.1 are rejected
+with `UnsupportedServerVersionError` before anything is sent.
+
+## JDBC tables and insertInto
+
+`df.write().insertInto(table, overwrite?)` inserts rows into an existing table
+by column position, like PySpark; `overwrite` picks the overwrite or append
+save mode. JDBC goes through Spark's `jdbc` data source, so the driver must be
+on the server's classpath:
+
+```ts
+const url = "jdbc:postgresql://db:5432/shop";
+const properties = { driver: "org.postgresql.Driver", user: "shop", password };
+
+await orders.write().jdbc(url, "orders", "append", properties);
+
+const all = session.read.jdbc(url, "orders", { properties });
+const split = session.read.jdbc(url, "orders", {
+  column: "id", lowerBound: 1, upperBound: 1_000_000, numPartitions: 8, properties,
+});
+const byPredicate = session.read.jdbc(url, "orders", {
+  predicates: ["status = 'open'", "status <> 'open'"], properties,
+});
+```
+
+The E2E suite exercises both against the embedded Derby database that ships
+with Spark.
+
+## Streaming query control
+
+The handle returned by `start()` and `toTable()` mirrors Spark's
+`StreamingQuery`: `id`, `runId`, `isActive()`, `status()`, `lastProgress()`,
+`recentProgress()`, `explain(extended?)`, `exception()` and
+`processAllAvailable()`, next to `awaitTermination()` and `stop()`.
+`session.streams` is the `StreamingQueryManager`:
+
+```ts
+const query = await events.writeStream().format("memory").queryName("events").start();
+console.log(await query.status(), (await query.lastProgress())?.batchId);
+
+for (const active of await session.streams.active()) console.log(active.name);
+const same = await session.streams.get(query.id);
+await session.streams.awaitAnyTermination(60_000);
+
+await session.streams.addListener({
+  onQueryStarted: event => console.log("started", event.name),
+  onQueryProgress: event => console.log("batch", event.progress.batchId),
+  onQueryIdle: event => console.log("idle", event.id),
+  onQueryTerminated: event => console.log("terminated", event.exception ?? "cleanly"),
+});
+```
+
+Listeners receive the events of every query of the session over one
+long-running execution that the client keeps alive (the session's
+`rpcTimeoutMs` does not cut it). The first listener opens it, the last
+`removeListener()` closes it, and `close()` drops it with the session. A
+listener that throws is reported through the session logger and never stops
+the stream. See [`docs/examples/streamingQueries.ts`](docs/examples/streamingQueries.ts).
+
 ## Compatibility
 
 The currently verified compatibility targets are:
 
-- Vendored Spark Connect protocol descriptors from 4.0.4 (pinned to the oldest
-  fully supported line; newer servers are verified behaviorally)
+- Vendored Spark Connect protocol descriptors from 4.2.0, the newest line in
+  the matrix. The connector only sends messages an older server understands:
+  features that need a newer server are gated on the version it reports and
+  fail with `UnsupportedServerVersionError` before any RPC
 - Spark Connect servers 4.0.0, 4.0.4, 4.1.3 and 4.2.0 covered by the Docker E2E
   matrix
 - Scala 2.13 artifacts on the server image
 - Node.js 22 and 24
 - TypeScript 7 for compilation; TypeScript 6 API compatibility only for
   tooling that has not migrated to the new compiler API
+
+`session.version()` returns the server's Spark version (fetched once with
+AnalyzePlan and cached). Version-gated features:
+
+| Feature | Minimum server |
+| --- | --- |
+| `session.cloneSession()` — copy the server-side session (temp views, runtime configuration) into an independent new session | 4.1.0 |
+
+```ts
+if ((await session.version()).startsWith("4.0")) {
+  // cloneSession() would reject with UnsupportedServerVersionError
+}
+const sandbox = await session.cloneSession();
+await sandbox.conf.set("spark.sql.shuffle.partitions", 4); // the original keeps its value
+```
 
 Other Spark Connect versions may work, but they are not
 currently part of a green compatibility matrix and are therefore not claimed
@@ -416,18 +706,24 @@ E2E suite passes in CI.
 Implemented and exposed in the public API:
 
 - Reads: CSV / JSON / Parquet / ORC / Avro
-- Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation` (primitive column types)
+- Local data: `createDataFrame(rows, schema)` over Arrow `LocalRelation`, including decimal, array, map and struct columns; `session.range()`
 - Lakehouse formats against the bundled server: Delta Lake on every matrix version (reads, writes, time travel) and Iceberg on Spark 4.0/4.1 (Hadoop catalog and metadata tables)
-- Transformations: `select`, `filter`, `join`, `groupBy().agg()`, `sort`, `limit`, `distinct`, `dropDuplicates`, `withColumn`, `withColumnRenamed`, `withColumnsRenamed`, `drop`, `sample`, `randomSplit`, `repartition`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper
+- Transformations: `select`, `selectExpr`, `filter`/`where` (expressions or SQL strings), `join`, `crossJoin`, `lateralJoin`, `asOfJoin`, `groupBy().agg()`, `rollup`, `cube`, `groupingSets`, `groupBy().pivot()`, `sort`, `sortWithinPartitions`, `limit`, `offset`, `distinct`, `dropDuplicates`, `dropDuplicatesWithinWatermark`, `withColumn`, `withColumns`, `withColumnRenamed`, `withColumnsRenamed`, `withMetadata`, `toDF`, `to(schema)`, `toJSON`, `alias`, `drop`, `unpivot` / `melt`, `transpose`, `sample`, `randomSplit`, `repartition` (by count or by columns), `repartitionByRange`, `coalescePartitions`; `coalesce(name, ...)` is the column expression helper; `colRegex` and `metadataColumn` build column references
+- Expressions: column methods (arithmetic, comparisons, `isin`, `between`, `like`/`rlike`, `cast`/`tryCast`, `getItem`/`getField`, `withField`/`dropFields`, ...), `expr()` SQL fragments, windows (`partitionBy`, `orderBy`, `rowsBetween`, `rangeBetween`) and the PySpark-style `functions` library: aggregate, window, string, date/time, math, array, map, JSON/CSV/XML, variant, URL, hash and higher-order functions with JS lambdas
+- Null handling (`df.na`, `fillna`, `dropna`, `replace`) and statistics (`df.stat`: `corr`, `cov`, `crosstab`, `freqItems`, `approxQuantile`, `sampleBy`)
+- Actions and introspection: `collect`, `toRows`, `show`, `count`, `first`, `head`, `take`, `tail`, `isEmpty`, `schema`, `columns`, `dtypes`, `printSchema` / `treeString`, `isLocal`, `isStreaming`, `inputFiles`, `sameSemantics`, `semanticHash`, `storageLevel`, `observe` with `Observation` (metrics arrive with `collect`, `toRows`, `save`, `writeTo` and `mergeInto`), `checkpoint` / `localCheckpoint` with `releaseCheckpoint`
 - Set ops: `union`, `unionByName`, `intersect`, `intersectAll`, `except`, `exceptAll`
-- SQL / temp views
-- Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables and columns, existence checks, and temp-view drops
-- Batch writes plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
+- SQL / temp views, including global temp views (`createGlobalTempView`, `createOrReplaceGlobalTempView`)
+- Catalog metadata (`session.catalog`): current catalog/database, listing catalogs, databases, tables, columns and functions, `getDatabase`/`getTable`/`getFunction`, existence checks, temp-view drops, `createTable`/`createExternalTable`, cache management (`cacheTable`, `uncacheTable`, `isCached`, `clearCache`) and refreshes (`refreshTable`, `refreshByPath`, `recoverPartitions`)
+- Sessions: `newSession()`, `cloneSession()` (4.1+), `version()`, `getStatus()` (4.2+), artifact upload (`addArtifact`, `addArtifacts`, `artifactStatus`) and Java UDF registration (`session.udf`)
+- Batch writes, `insertInto`, JDBC reads/writes, plus executable streaming writes with `start()`, `toTable()`, `awaitTermination()` and `stop()`
+- Streaming query control: `status`, `lastProgress`/`recentProgress`, `explain`, `exception`, `processAllAvailable`; `session.streams` (`active`, `get`, `awaitAnyTermination`, `resetTerminated`) and query lifecycle listeners
+- Table writes through `writeTo(table)` (DataFrameWriterV2: `create`, `replace`, `createOrReplace`, `append`, `overwrite(condition)`, `overwritePartitions`) and `mergeInto(table, condition)` (`MERGE INTO` with matched / not-matched / not-matched-by-source clauses)
 - `explain(...)`
 
 Not exposed as stable public API yet:
 
-- JDBC / Hudi
+- Hudi
 - MLlib
 
 ## Package contract

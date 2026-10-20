@@ -9,10 +9,13 @@ import {
 } from "./sparkConnectEnums";
 import {SparkSession} from "../client/session";
 import {SparkConnectExecutor} from "../client/sparkConnectExecutor";
+import type {ResolvedExecution} from "../client/executionOptions";
 import {CatalogOperation, SortOrder, WindowSpec} from "../types";
 import {DFExec} from "../executables";
-import {DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
+import {CastEvalMode, DFAlg, ExprAlg, LiteralValue} from "../algebra/read";
+import type {GroupingSpec} from "../algebra/read/df-core";
 import {StreamingCaps} from "../algebra/read/streaming-dataframe";
+import {toProtoStorageLevel} from "../client/storageLevel";
 
 type CDF = StreamingCaps<ProtoRel, ProtoExpr>;
 
@@ -178,6 +181,54 @@ function protoLiteral(value: LiteralValue): ProtoExpr {
     return {literal: {string: value}};
 }
 
+/**
+ * `na.fill` literal. Spark's `DataFrameNaFunctions` only accepts long, double,
+ * string and boolean fill values, so integers travel as longs (an int32
+ * literal is rejected) and fractional numbers as doubles.
+ */
+function naFillLiteral(value: LiteralValue): ProtoMessage {
+    // Integers that fit a long fill integral columns; anything larger is a
+    // double, as PySpark sends a float, instead of failing lazily at execution.
+    if (typeof value === "number") {
+        return Number.isSafeInteger(value)
+            ? protoLiteral(BigInt(value)).literal as ProtoMessage
+            : { double: value };
+    }
+    return protoLiteral(value).literal as ProtoMessage;
+}
+
+/**
+ * `na.replace` literal. Spark compares numeric replacements as doubles (null,
+ * boolean, double and string are the supported kinds), so every number,
+ * including a bigint, is sent as a double.
+ */
+function naReplaceLiteral(value: LiteralValue): ProtoMessage {
+    if (typeof value === "number" || typeof value === "bigint") {
+        return { double: Number(value) };
+    }
+    return protoLiteral(value).literal as ProtoMessage;
+}
+
+/**
+ * Expression partitioning. Range partitioning needs `SortOrder` expressions:
+ * sort keys keep their direction, anything else sorts ascending. Hash
+ * partitioning rejects sort keys, which Spark would refuse at analysis.
+ */
+function protoPartitionExpression(expr: ProtoExpr, range: boolean): ProtoExpr {
+    const marker = expr.sort_key_marker;
+    if (range) {
+        return {
+            sort_order: marker
+                ? protoSortOrder(marker.input, marker.direction, marker.nulls)
+                : protoSortOrder(expr, "asc"),
+        };
+    }
+    if (marker) {
+        throw new TypeError("repartition() does not accept sort keys; use repartitionByRange().");
+    }
+    return expr;
+}
+
 function protoHintParameter(value: unknown): ProtoExpr {
     if (value !== null && typeof value === "object") return value as ProtoExpr;
     if (["string", "number", "boolean", "bigint"].includes(typeof value) || value === null) {
@@ -248,6 +299,12 @@ function protoWindowFrame(frame: ProtoWindowFrame) {
     };
 }
 
+const PROTO_CAST_EVAL_MODES: Record<CastEvalMode, string> = {
+    legacy: "EVAL_MODE_LEGACY",
+    ansi: "EVAL_MODE_ANSI",
+    try: "EVAL_MODE_TRY",
+};
+
 export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     col: (name, planId) => ({
         unresolved_attribute: {
@@ -267,6 +324,51 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
     }),
     call: (name, args) => ({
         unresolved_function: {function_name: name, arguments: args},
+    }),
+    callDistinct: (name, args) => ({
+        unresolved_function: {function_name: name, arguments: args, is_distinct: true},
+    }),
+    exprString: sql => ({
+        expression_string: {expression: sql},
+    }),
+    cast: (input, type, evalMode) => ({
+        cast: {
+            expr: input,
+            type_str: type,
+            ...(evalMode === undefined ? {} : {eval_mode: PROTO_CAST_EVAL_MODES[evalMode]}),
+        },
+    }),
+    lambda: (params, body) => ({
+        lambda_function: {
+            function: body,
+            arguments: params.map(name => ({name_parts: [name]})),
+        },
+    }),
+    lambdaVar: name => ({
+        unresolved_named_lambda_variable: {name_parts: [name]},
+    }),
+    updateFields: (struct, field, value) => ({
+        update_fields: {
+            struct_expression: struct,
+            field_name: field,
+            ...(value === undefined ? {} : {value_expression: value}),
+        },
+    }),
+    extractValue: (child, extraction) => ({
+        unresolved_extract_value: {child, extraction},
+    }),
+    colRegex: (regex, planId) => ({
+        unresolved_regex: {
+            col_name: regex,
+            ...(planId === undefined ? {} : { plan_id: planId }),
+        },
+    }),
+    metadataCol: (name, planId) => ({
+        unresolved_attribute: {
+            unparsed_identifier: name,
+            ...(planId === undefined ? {} : { plan_id: planId }),
+            is_metadata_column: true,
+        },
     }),
     sortKey: (input, direction, nulls) => ({
         // No es expresión ejecutable; el DFAlg.orderBy lo "desenvuelve".
@@ -336,14 +438,13 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: [input],
         }
     }),
+    // Spark has no `getfield` function; struct access is an extract value,
+    // exactly what PySpark's Column.getField sends.
     getField: (structExpr, fieldName) => ({
-        unresolved_function: {
-            function_name: "getfield",
-            arguments: [
-                structExpr,
-                {literal: {string: fieldName}}
-            ]
-        }
+        unresolved_extract_value: {
+            child: structExpr,
+            extraction: {literal: {string: fieldName}},
+        },
     }),
     map_keys: (mapExpr) => ({
         unresolved_function: {
@@ -363,18 +464,17 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
             arguments: [mapExpr, typeof key === "object" ? key : {literal: {string: String(key)}}]
         }
     }),
+    // Same expression as `col.getItem(key)`: 0-based for arrays, by key for
+    // maps and structs. The 1-based `element_at` form is `elementAt`.
     getItem: (collectionExpr, key) => ({
-        unresolved_function: {
-            function_name: "element_at",
-            arguments: [
-                collectionExpr,
-                typeof key === "object"
-                    ? key
-                    : typeof key === "number"
-                        ? protoLiteral(key)
-                        : {literal: {string: String(key)}}
-            ]
-        }
+        unresolved_extract_value: {
+            child: collectionExpr,
+            extraction: typeof key === "object"
+                ? key
+                : typeof key === "number"
+                    ? protoLiteral(key)
+                    : {literal: {string: String(key)}},
+        },
     }),
     split: (input, delimiter) => ({
         unresolved_function: {
@@ -407,7 +507,7 @@ export const ProtoExprAlg: ExprAlg<ProtoExpr> = {
 };
 
 export type ProtoGroup = {
-    __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: GroupTypeInput };
+    __group__: { input: ProtoRel; keys: ProtoExpr[]; groupType?: GroupTypeInput; spec?: GroupingSpec<ProtoExpr> };
 };
 
 function protoSortedRelation(
@@ -425,6 +525,9 @@ function protoSortedRelation(
                     marker?.nulls ?? order.nulls,
                 );
             }),
+            // Spark reads an unset is_global as false, i.e. a sort within each
+            // partition; orderBy()/sort() promise a total order.
+            is_global: true,
         },
     };
 }
@@ -481,11 +584,82 @@ function catalogProtoPayload(op: CatalogOperation): ProtoMessage {
             return { drop_temp_view: { view_name: op.viewName } };
         case "dropGlobalTempView":
             return { drop_global_temp_view: { view_name: op.viewName } };
+        case "listFunctions":
+            return {
+                list_functions: {
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                    ...(op.pattern !== undefined ? { pattern: op.pattern } : {}),
+                },
+            };
+        case "getDatabase":
+            return { get_database: { db_name: op.dbName } };
+        case "getTable":
+            return {
+                get_table: {
+                    table_name: op.tableName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "getFunction":
+            return {
+                get_function: {
+                    function_name: op.functionName,
+                    ...(op.dbName !== undefined ? { db_name: op.dbName } : {}),
+                },
+            };
+        case "createTable":
+            return {
+                create_table: {
+                    table_name: op.tableName,
+                    ...(op.path !== undefined ? { path: op.path } : {}),
+                    ...(op.source !== undefined ? { source: op.source } : {}),
+                    ...(op.description !== undefined ? { description: op.description } : {}),
+                    ...(op.schema !== undefined ? { schema: unparsedDataType(op.schema) } : {}),
+                    options: { ...(op.options ?? {}) },
+                },
+            };
+        case "createExternalTable":
+            return {
+                create_external_table: {
+                    table_name: op.tableName,
+                    ...(op.path !== undefined ? { path: op.path } : {}),
+                    ...(op.source !== undefined ? { source: op.source } : {}),
+                    ...(op.schema !== undefined ? { schema: unparsedDataType(op.schema) } : {}),
+                    options: { ...(op.options ?? {}) },
+                },
+            };
+        case "cacheTable":
+            return {
+                cache_table: {
+                    table_name: op.tableName,
+                    ...(op.storageLevel !== undefined ? { storage_level: toProtoStorageLevel(op.storageLevel) } : {}),
+                },
+            };
+        case "uncacheTable":
+            return { uncache_table: { table_name: op.tableName } };
+        case "isCached":
+            return { is_cached: { table_name: op.tableName } };
+        case "clearCache":
+            return { clear_cache: {} };
+        case "refreshTable":
+            return { refresh_table: { table_name: op.tableName } };
+        case "refreshByPath":
+            return { refresh_by_path: { path: op.path } };
+        case "recoverPartitions":
+            return { recover_partitions: { table_name: op.tableName } };
     }
 }
 
+/**
+ * A `DataType` the server parses itself: Spark accepts both a type string
+ * (`struct<a:int>`) and a DDL column list (`a INT, b STRING`).
+ */
+export function unparsedDataType(dataTypeString: string): ProtoMessage {
+    return { unparsed: { data_type_string: dataTypeString } };
+}
+
 export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
-    relation: (format, path, options, schema) => {
+    relation: (format, path, options, schema, predicates) => {
         if (format === "table") {
             if (Array.isArray(path)) throw new TypeError("table reads accept exactly one identifier.");
             return {
@@ -508,11 +682,21 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
                     paths: Array.isArray(path) ? path : [path],
                     options: options ?? {},
                     ...(schema ? { schema } : {}),
+                    ...(predicates && predicates.length > 0 ? { predicates: [...predicates] } : {}),
                 },
             },
         };
     },
     catalog: op => ({ catalog: catalogProtoPayload(op) }),
+    // int64 fields travel as decimal strings so values beyond 2^53 survive.
+    range: (start, end, step, numPartitions) => ({
+        range: {
+            ...(start !== undefined ? { start: start.toString() } : {}),
+            end: end.toString(),
+            step: step.toString(),
+            ...(numPartitions !== undefined ? { num_partitions: numPartitions } : {}),
+        },
+    }),
     localRelation: (ddl, data, _rowCount) => ({
         local_relation: {
             schema: ddl,
@@ -558,18 +742,35 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
         },
     }),
 
-    groupBy: (input, cols) => ({__group__: {input, keys: cols}}),
+    groupBy: (input, cols, spec) => ({__group__: {input, keys: cols, ...(spec ? { spec } : {})}}),
 
-    agg: (g, aggregations, groupType) => ({
-        aggregate: {
-            input: g.__group__.input,
-            grouping_expressions: g.__group__.keys,
-            group_type: toProtoGroupType(groupType ?? "groupby"),
-            aggregate_expressions: Object.entries(aggregations).map(([alias, expr]) => ({
-                alias: {expr, name: [alias]},
-            })),
-        },
-    }),
+    agg: (g, aggregations, groupType) => {
+        const spec = g.__group__.spec;
+        return {
+            aggregate: {
+                input: g.__group__.input,
+                grouping_expressions: g.__group__.keys,
+                group_type: toProtoGroupType(groupType ?? spec?.groupType ?? "groupby"),
+                aggregate_expressions: Object.entries(aggregations).map(([alias, expr]) => ({
+                    alias: {expr, name: [alias]},
+                })),
+                ...(spec?.pivot
+                    ? {
+                        pivot: {
+                            col: spec.pivot.column,
+                            // Pivot.values holds Literal messages, not Expressions.
+                            ...(spec.pivot.values
+                                ? { values: spec.pivot.values.map(value => protoLiteral(value).literal as ProtoMessage) }
+                                : {}),
+                        },
+                    }
+                    : {}),
+                ...(spec?.groupingSets
+                    ? { grouping_sets: spec.groupingSets.map(set => ({ grouping_set: set })) }
+                    : {}),
+            },
+        };
+    },
 
     orderBy: protoSortedRelation,
 
@@ -729,6 +930,116 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
             column_names: columnNames, // usamos nombres; también podrías usar 'columns' (expr)
         }
     }),
+    fillNa: (input, cols, values) => ({
+        fill_na: { input, cols, values: values.map(naFillLiteral) },
+    }),
+    dropNa: (input, cols, minNonNulls) => ({
+        drop_na: {
+            input,
+            cols,
+            ...(minNonNulls !== undefined ? { min_non_nulls: minNonNulls } : {}),
+        },
+    }),
+    replaceNa: (input, cols, replacements) => ({
+        replace: {
+            input,
+            cols,
+            replacements: replacements.map(({ from, to }) => ({
+                old_value: naReplaceLiteral(from),
+                new_value: naReplaceLiteral(to),
+            })),
+        },
+    }),
+    crosstab: (input, col1, col2) => ({ crosstab: { input, col1, col2 } }),
+    cov: (input, col1, col2) => ({ cov: { input, col1, col2 } }),
+    corr: (input, col1, col2, method) => ({
+        corr: { input, col1, col2, ...(method !== undefined ? { method } : {}) },
+    }),
+    approxQuantile: (input, cols, probabilities, relativeError) => ({
+        approx_quantile: { input, cols, probabilities, relative_error: relativeError },
+    }),
+    freqItems: (input, cols, support) => ({
+        freq_items: { input, cols, ...(support !== undefined ? { support } : {}) },
+    }),
+    sampleBy: (input, col, fractions, seed) => ({
+        sample_by: {
+            input,
+            col,
+            fractions: fractions.map(({ stratum, fraction }) => ({
+                stratum: protoLiteral(stratum).literal,
+                fraction,
+            })),
+            seed,
+        },
+    }),
+    unpivot: (input, ids, values, variableColumnName, valueColumnName) => ({
+        unpivot: {
+            input,
+            ids,
+            ...(values !== undefined ? { values: { values } } : {}),
+            variable_column_name: variableColumnName,
+            value_column_name: valueColumnName,
+        },
+    }),
+    toDF: (input, columnNames) => ({ to_df: { input, column_names: columnNames } }),
+    transpose: (input, indexColumns) => ({ transpose: { input, index_columns: indexColumns } }),
+    withColumns: (input, columns) => ({
+        with_columns: {
+            input,
+            aliases: columns.map(({ name, column }) => ({ expr: column, name: [name] })),
+        },
+    }),
+    subqueryAlias: (input, alias) => ({ subquery_alias: { input, alias } }),
+    crossJoin: (left, right) => ({
+        join: { left, right, join_type: toProtoJoinType("CROSS") },
+    }),
+    offset: (input, offset) => ({ offset: { input, offset } }),
+    tail: (input, limit) => ({ tail: { input, limit } }),
+    repartitionByExpression: (input, partitionExprs, numPartitions, range) => ({
+        repartition_by_expression: {
+            input,
+            partition_exprs: partitionExprs.map(expr => protoPartitionExpression(expr, range)),
+            ...(numPartitions !== undefined ? { num_partitions: numPartitions } : {}),
+        },
+    }),
+    sortWithinPartitions: (input, orders) => ({
+        sort: { ...(protoSortedRelation(input, orders).sort as ProtoMessage), is_global: false },
+    }),
+    dropDuplicatesWithinWatermark: (input, cols) => ({
+        deduplicate: {
+            ...(ProtoDFAlg.dropDuplicates(input, cols).deduplicate as ProtoMessage),
+            within_watermark: true,
+        },
+    }),
+    lateralJoin: (left, right, on, joinType) => ({
+        lateral_join: {
+            left,
+            right,
+            ...(on === undefined ? {} : { join_condition: on }),
+            join_type: toProtoJoinType(joinType),
+        },
+    }),
+    asOfJoin: (left, right, spec) => ({
+        as_of_join: {
+            left,
+            right,
+            left_as_of: spec.leftAsOf,
+            right_as_of: spec.rightAsOf,
+            ...(spec.on === undefined ? {} : { join_expr: spec.on }),
+            ...(spec.usingColumns === undefined ? {} : { using_columns: spec.usingColumns }),
+            join_type: spec.joinType,
+            ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
+            allow_exact_matches: spec.allowExactMatches,
+            direction: spec.direction,
+        },
+    }),
+    observe: (input, name, metrics) => ({ collect_metrics: { input, name, metrics } }),
+    cachedRemoteRelation: relationId => ({ cached_remote_relation: { relation_id: relationId } }),
+    // The server parses the DDL; the client never builds DataType messages.
+    toSchema: (input, ddl) => ({ to_schema: { input, schema: { unparsed: { data_type_string: ddl } } } }),
+    withMetadata: (input, name, column, metadata) => ({
+        with_columns: { input, aliases: [{ expr: column, name: [name], metadata }] },
+    }),
     withWatermark(input, eventTimeCol, delay) {
         const eventTimeColumn = protoExprToColumnName(eventTimeCol);
         if (!eventTimeColumn) {
@@ -756,9 +1067,9 @@ export const ProtoDFAlg: DFAlg<ProtoRel, ProtoExpr, ProtoGroup,CDF> = {
 };
 
 export const ProtoExec: DFExec<ProtoRel> = {
-    async collect(root: ProtoRel, session: SparkSession) {
+    async collect(root: ProtoRel, session: SparkSession, execution?: ResolvedExecution) {
         const executor = await applyPendingAnalyzeActions(root, session);
-        return executor.execute(root);
+        return executor.execute(root, execution);
     },
 
     async explain(root: ProtoRel, session: SparkSession, mode: ExplainModeInput = "simple"): Promise<string> {

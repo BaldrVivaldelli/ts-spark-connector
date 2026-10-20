@@ -16,6 +16,7 @@ import type {
     RpcReadable,
 } from "../src/client/reattachableExecution";
 import type { SparkConnectionConfig } from "../src/client/session";
+import { CLEANUP_RPC_TIMEOUT_MS } from "../src/client/rpcLifecycle";
 
 type StreamEvent =
     | { kind: "data"; value: ReattachableResponse }
@@ -33,7 +34,9 @@ class FakeStream implements RpcReadable<ReattachableResponse> {
     readonly resume = vi.fn();
 
     constructor(events: StreamEvent[]) {
-        queueMicrotask(() => {
+        // Like a real gRPC stream, events arrive from I/O on a later turn of
+        // the event loop, never inside the microtasks that opened the call.
+        setImmediate(() => {
             for (const event of events) {
                 if (event.kind === "data") {
                     this.listeners.data.forEach(listener => listener(event.value));
@@ -65,12 +68,18 @@ type UnaryName =
     | "config"
     | "interrupt"
     | "releaseSession"
-    | "fetchErrorDetails";
+    | "fetchErrorDetails"
+    | "cloneSession"
+    | "artifactStatus"
+    | "getStatus";
 
 type UnaryOutcome = RpcMessage | Error;
 
 const state = {
     instances: [] as FakeService[],
+    /** Outcome of the next AddArtifacts stream and the requests it received. */
+    artifactOutcome: undefined as RpcMessage | Error | undefined,
+    artifactRequests: [] as RpcMessage[],
     executeStreams: [] as StreamEvent[][],
     reattachStreams: [] as StreamEvent[][],
     unary: new Map<UnaryName, UnaryOutcome[]>(),
@@ -119,6 +128,47 @@ class FakeService {
     interrupt = this.unary("interrupt");
     releaseSession = this.unary("releaseSession");
     fetchErrorDetails = this.unary("fetchErrorDetails");
+    cloneSession = this.unary("cloneSession");
+    artifactStatus = this.unary("artifactStatus");
+    getStatus = this.unary("getStatus");
+
+    addArtifacts(
+        metadata: Grpc.Metadata,
+        options: Grpc.CallOptions,
+        callback: (error: Error | null, response: RpcMessage) => void,
+    ): Grpc.ClientWritableStream<RpcMessage> {
+        state.calls.push({ name: "addArtifacts", request: {}, metadata, options });
+        const listeners: Array<() => void> = [];
+        let writes = 0;
+        const stream = {
+            write: (request: RpcMessage) => {
+                state.artifactRequests.push(request);
+                writes += 1;
+                // Every other write asks the caller to wait for drain.
+                if (writes % 2 === 0) {
+                    setImmediate(() => listeners.splice(0).forEach(listener => listener()));
+                    return false;
+                }
+                return true;
+            },
+            once: (event: string, listener: () => void) => {
+                if (event === "drain") listeners.push(listener);
+                return stream;
+            },
+            on: (event: string, listener: () => void) => stream.once(event, listener),
+            removeListener: () => stream,
+            off: () => stream,
+            end: () => {
+                const outcome = state.artifactOutcome ?? {};
+                setImmediate(() => outcome instanceof Error ? callback(outcome, {}) : callback(null, outcome));
+            },
+            // Like grpc-js, a cancelled call still reports CANCELLED to its callback.
+            cancel: vi.fn(() => {
+                setImmediate(() => callback(Object.assign(new Error("1 CANCELLED: Cancelled on client"), { code: 1 }), {}));
+            }),
+        };
+        return stream as unknown as Grpc.ClientWritableStream<RpcMessage>;
+    }
 
     private unary(name: UnaryName) {
         return (
@@ -194,6 +244,8 @@ describe("spark gRPC client complete behavior", () => {
     afterEach(() => {
         state.executeStreams.length = 0;
         state.reattachStreams.length = 0;
+        state.artifactRequests.length = 0;
+        state.artifactOutcome = undefined;
         state.unary.clear();
         state.calls.length = 0;
         vi.restoreAllMocks();
@@ -493,6 +545,215 @@ describe("spark gRPC client complete behavior", () => {
         expect(instance?.close).toHaveBeenCalledOnce();
         sparkGrpcClient.close(config);
     });
+    it("shares one absolute execution deadline across ExecutePlan and every ReattachExecute", async () => {
+        const config = connection({
+            rpcTimeoutMs: 50,
+            executeTimeoutMs: 60_000,
+            retry: { maxRetries: 1, initialBackoffMs: 0 },
+        });
+        const request = executeRequest();
+        state.executeStreams.push([
+            { kind: "data", value: { operation_id: request.operation_id as string, response_id: "r1" } },
+            { kind: "error", error: Object.assign(new Error("connection lost"), { code: 14 }) },
+        ]);
+        state.reattachStreams.push(complete(request, { response_id: "r2" }));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(2);
+
+        const execute = state.calls.find(call => call.name === "executePlan")!;
+        const reattach = state.calls.find(call => call.name === "reattachExecute")!;
+        const deadline = execute.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + 60_000);
+        expect(deadline).toBeLessThan(before + 61_000);
+        // The continuation does not restart the clock (a per-RPC rpcTimeoutMs would).
+        expect(reattach.options.deadline).toBe(deadline);
+        // Unary cleanup keeps the (bounded) per-RPC deadline.
+        const release = state.calls.find(call => call.name === "releaseExecute")!;
+        expect(release.options.deadline as number).toBeLessThanOrEqual(Date.now() + 50);
+        sparkGrpcClient.close(config);
+    });
+
+    it("lets executions run without a stream deadline while unary RPCs keep rpcTimeoutMs", async () => {
+        const config = connection({ rpcTimeoutMs: 50, executeTimeoutMs: Number.POSITIVE_INFINITY });
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(1);
+        expect(state.calls.find(call => call.name === "executePlan")?.options).toEqual({});
+        expect(state.calls.find(call => call.name === "releaseExecute")?.options.deadline)
+            .toEqual(expect.any(Number));
+        sparkGrpcClient.close(config);
+    });
+
+    it("keeps the legacy per-stream rpcTimeoutMs deadline when no execution timeout is set", async () => {
+        const config = connection({ rpcTimeoutMs: 5_000 });
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await sparkGrpcClient.executePlan(request, config);
+        const deadline = state.calls.find(call => call.name === "executePlan")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + 5_000);
+        expect(deadline).toBeLessThan(before + 6_000);
+        sparkGrpcClient.close(config);
+    });
+
+    it("bounds ReleaseExecute with the cleanup deadline when no rpcTimeoutMs is set", async () => {
+        const config = connection();
+        const request = executeRequest();
+        state.executeStreams.push(complete(request));
+        setUnary("releaseExecute", {});
+        const before = Date.now();
+
+        await sparkGrpcClient.executePlan(request, config);
+        expect(state.calls.find(call => call.name === "executePlan")?.options).toEqual({});
+        const deadline = state.calls.find(call => call.name === "releaseExecute")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(before + CLEANUP_RPC_TIMEOUT_MS);
+        expect(deadline).toBeLessThan(before + CLEANUP_RPC_TIMEOUT_MS + 1_000);
+        sparkGrpcClient.close(config);
+    });
+
+    it("resolves provider credentials again for every continuation and release", async () => {
+        let issued = 0;
+        const provider = vi.fn(async () => {
+            issued += 1;
+            // Already inside the refresh window, so every resolution refreshes.
+            return { headers: { authorization: `Bearer token-${issued}` }, expiresAt: Date.now() };
+        });
+        const config = connection({
+            auth: { type: "provider", provider },
+            allowInsecureAuth: true,
+            retry: { maxRetries: 1, initialBackoffMs: 0 },
+        });
+        const request = executeRequest();
+        state.executeStreams.push([
+            { kind: "data", value: { operation_id: request.operation_id as string, response_id: "r1" } },
+            { kind: "error", error: Object.assign(new Error("connection lost"), { code: 14 }) },
+        ]);
+        state.reattachStreams.push(complete(request, { response_id: "r2" }));
+        setUnary("releaseExecute", {});
+
+        await expect(sparkGrpcClient.executePlan(request, config)).resolves.toHaveLength(2);
+        const tokens = ["executePlan", "reattachExecute", "releaseExecute"].map(name =>
+            state.calls.find(call => call.name === name)?.metadata.get("authorization")[0]
+        );
+        expect(tokens).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-3"]);
+        sparkGrpcClient.close(config);
+    });
+
+    it("streams artifact requests, honouring backpressure, and returns the summary", async () => {
+        const config = connection();
+        state.artifactOutcome = { session_id: "session-1", artifacts: [{ name: "jars/a.jar", is_crc_successful: true }] };
+        const requests = [1, 2, 3].map(index => ({ session_id: "session-1", batch: { artifacts: [{ name: `jars/${index}.jar` }] } }));
+
+        await expect(sparkGrpcClient.addArtifacts(requests, config)).resolves.toMatchObject({
+            artifacts: [{ name: "jars/a.jar" }],
+        });
+        expect(state.artifactRequests).toEqual(requests);
+        expect(state.calls.find(call => call.name === "addArtifacts")).toBeDefined();
+        sparkGrpcClient.close(config);
+    });
+
+    it("enriches AddArtifacts failures and never retries them", async () => {
+        const config = connection({ retry: { maxRetries: 3, initialBackoffMs: 0 } });
+        state.artifactOutcome = Object.assign(new Error("unavailable"), { code: 14, errorId: "error-3" });
+        setUnary("fetchErrorDetails", { detail: "upload detail" });
+
+        await expect(sparkGrpcClient.addArtifacts([{ session_id: "session-1", batch: { artifacts: [] } }], config))
+            .rejects.toMatchObject({ operation: "AddArtifacts", remoteDetails: { detail: "upload detail" } });
+        expect(state.calls.filter(call => call.name === "addArtifacts")).toHaveLength(1);
+        sparkGrpcClient.close(config);
+    });
+
+    it("rejects when the request iterator itself fails, without an unhandled rejection", async () => {
+        const config = connection();
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => unhandled.push(reason);
+        process.on("unhandledRejection", onUnhandled);
+        try {
+            function* broken(): Generator<RpcMessage> {
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                throw new Error("disk vanished");
+            }
+            await expect(sparkGrpcClient.addArtifacts(broken(), config)).rejects.toThrow(/disk vanished/);
+            // Let the cancelled call's CANCELLED callback fire.
+            await new Promise(resolve => setImmediate(resolve));
+            await new Promise(resolve => setImmediate(resolve));
+        } finally {
+            process.off("unhandledRejection", onUnhandled);
+        }
+        expect(unhandled).toEqual([]);
+        sparkGrpcClient.close(config);
+    });
+
+    it("bounds uploads like executions and cancels them with the session signal", async () => {
+        const started = Date.now();
+        const bounded = connection({ rpcTimeoutMs: 1_000, executeTimeoutMs: 60_000 });
+        state.artifactOutcome = { artifacts: [] };
+        await sparkGrpcClient.addArtifacts([{ session_id: "session-1", batch: { artifacts: [] } }], bounded);
+        const deadline = state.calls.find(call => call.name === "addArtifacts")?.options.deadline as number;
+        expect(deadline).toBeGreaterThanOrEqual(started + 60_000);
+        sparkGrpcClient.close(bounded);
+
+        const aborted = new AbortController();
+        aborted.abort("no uploads today");
+        const refused = connection({ signal: aborted.signal });
+        await expect(sparkGrpcClient.addArtifacts([{ session_id: "session-1" }], refused))
+            .rejects.toMatchObject({ name: "AbortError", message: "no uploads today" });
+
+        const controller = new AbortController();
+        const cancelled = connection({ signal: controller.signal });
+        state.artifactOutcome = { artifacts: [] };
+        // The fake asks to wait for drain on the second write; abort while waiting.
+        const upload = sparkGrpcClient.addArtifacts(
+            (function* () {
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+                controller.abort("stop uploading");
+                yield { session_id: "session-1", batch: { artifacts: [] } };
+            })(),
+            cancelled,
+        );
+        await expect(upload).rejects.toMatchObject({ name: "AbortError", message: "stop uploading" });
+        sparkGrpcClient.close(cancelled);
+        sparkGrpcClient.close(refused);
+    });
+
+    it("sends ArtifactStatus and GetStatus as retried unary calls", async () => {
+        const config = connection({ retry: { maxRetries: 1, initialBackoffMs: 0 } });
+        setUnary("artifactStatus", Object.assign(new Error("unavailable"), { code: 14 }), { statuses: { "jars/a.jar": { exists: true } } });
+        await expect(sparkGrpcClient.artifactStatus({ session_id: "session-1", names: ["jars/a.jar"] }, config))
+            .resolves.toEqual({ statuses: { "jars/a.jar": { exists: true } } });
+        expect(state.calls.filter(call => call.name === "artifactStatus")).toHaveLength(2);
+
+        setUnary("getStatus", { operation_statuses: [{ operation_id: "op", state: "OPERATION_STATE_RUNNING" }] });
+        await expect(sparkGrpcClient.getStatus({ session_id: "session-1" }, config))
+            .resolves.toMatchObject({ operation_statuses: [{ operation_id: "op" }] });
+        sparkGrpcClient.close(config);
+    })
+
+    it("clones a session without retrying and enriches CloneSession failures", async () => {
+        const config = connection({ retry: { maxRetries: 3, initialBackoffMs: 0 } });
+        const request = { ...executeRequest(), new_session_id: "new-1" };
+        setUnary("cloneSession", { session_id: "session-1", new_session_id: "new-1" });
+        await expect(sparkGrpcClient.cloneSession(request, config))
+            .resolves.toMatchObject({ new_session_id: "new-1" });
+
+        const failure = Object.assign(new Error("unavailable"), { code: 14, errorId: "error-9" });
+        setUnary("cloneSession", failure);
+        setUnary("fetchErrorDetails", { detail: "clone detail" });
+        await expect(sparkGrpcClient.cloneSession(request, config)).rejects.toMatchObject({
+            operation: "CloneSession",
+            remoteDetails: { detail: "clone detail" },
+        });
+        expect(state.calls.filter(call => call.name === "cloneSession")).toHaveLength(2);
+        sparkGrpcClient.close(config);
+    });
+
 });
 
 describe("streaming handle completion", () => {
@@ -635,4 +896,5 @@ describe("streaming handle completion", () => {
             client_observed_server_side_session_id: "server-from-request",
         });
     });
+
 });

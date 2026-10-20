@@ -69,7 +69,7 @@ export function rowsFromArrowBuffers<Row>(buffers: Buffer[], expectedSchema?: Sc
                 const name = requiredAt(names, c, "field name");
                 const vector = requiredAt(vectors, c, "column vector");
                 const field = requiredAt(fields, c, "field");
-                row[name] = normalizeValue(vector.get(r), field.type);
+                row[name] = normalizeArrowValue(vector.get(r), field.type);
             }
             rows.push(row as Row);
         }
@@ -81,8 +81,10 @@ export function rowsFromArrowBuffers<Row>(buffers: Buffer[], expectedSchema?: Sc
 /**
  * Normaliza un valor decodificado de Arrow. Los `BigInt` se conservan siempre;
  * el resto de los valores se convierte según el tipo Arrow declarado.
+ * `show()` usa la misma conversión, así una celda impresa y la fila de
+ * `collect()` muestran el mismo valor.
  */
-function normalizeValue(value: unknown, type: DataType): unknown {
+export function normalizeArrowValue(value: unknown, type: DataType): unknown {
     if (value == null) return value;
     const { DataType } = arrow();
 
@@ -101,13 +103,13 @@ function normalizeValue(value: unknown, type: DataType): unknown {
     }
     if (DataType.isList(type) || DataType.isFixedSizeList(type)) {
         const childType = requiredAt(type.children, 0, "list child").type;
-        return Array.from(value as Iterable<unknown>, item => normalizeValue(item, childType));
+        return Array.from(value as Iterable<unknown>, item => normalizeArrowValue(item, childType));
     }
     if (DataType.isStruct(type)) {
         const source = value as Record<string, unknown>;
         return Object.fromEntries(type.children.map(field => [
             field.name,
-            normalizeValue(source[field.name], field.type),
+            normalizeArrowValue(source[field.name], field.type),
         ]));
     }
     if (DataType.isMap(type)) {
@@ -116,7 +118,7 @@ function normalizeValue(value: unknown, type: DataType): unknown {
         const valueType = requiredAt(entry.children, 1, "map value").type;
         return new Map(Array.from(
             value as Iterable<[unknown, unknown]>,
-            ([key, item]) => [normalizeValue(key, keyType), normalizeValue(item, valueType)],
+            ([key, item]) => [normalizeArrowValue(key, keyType), normalizeArrowValue(item, valueType)],
         ));
     }
     return value;

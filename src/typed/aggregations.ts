@@ -33,7 +33,7 @@ import {
     UsableColumnType,
 } from "../schema/schema-model";
 import type { Aggregation as AggregationShape } from "../schema/schema-transforms";
-import { Columns, ExprThunk, makeColumns, NumericValue } from "./typed-column";
+import { Columns, Condition, ExprThunk, makeColumns, NumericValue } from "./typed-column";
 
 /**
  * Alias of the `ExprThunk` declared in `./typed-column`, kept for compatibility.
@@ -166,8 +166,9 @@ function resolve<S extends SchemaShape, E>(ref: ColRef<S, E>, EX: ExprAlg<E>): E
  * - `sum`, `avg`, `min`, `max` son nullables: pueden ser null sobre grupos
  *   vacíos o de entradas todo-null.
  *
- * COUNT/COUNT DISTINCT se modelan como `bigint`, acorde al BIGINT de Spark. Se
- * usa la función canónica `count_distinct`, no `count(col)`.
+ * COUNT/COUNT DISTINCT se modelan como `bigint`, acorde al BIGINT de Spark.
+ * COUNT DISTINCT es `count` con `is_distinct`: Spark no registra ninguna
+ * función `count_distinct`.
  * @public
  */
 export type AggFactory<S extends SchemaShape, E> = {
@@ -177,6 +178,36 @@ export type AggFactory<S extends SchemaShape, E> = {
     avg(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
     min<K extends NumericColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<NumericResult<S, K> | null, E>;
     max<K extends NumericColumnKey<S>>(ref: ColRef<S, E, K>): PendingAggregation<NumericResult<S, K> | null, E>;
+    /**
+     * First value of the group (`null` for an empty group). With
+     * `ignoreNulls`, the first non-null value. Without an ordering the row is
+     * not deterministic.
+     */
+    first<K extends UsableColumnKey<S>>(
+        ref: ColRef<S, E, K>,
+        ignoreNulls?: boolean,
+    ): PendingAggregation<NonNull<UsableColumnType<S, K>> | null, E>;
+    /** Last value of the group; see `first`. */
+    last<K extends UsableColumnKey<S>>(
+        ref: ColRef<S, E, K>,
+        ignoreNulls?: boolean,
+    ): PendingAggregation<NonNull<UsableColumnType<S, K>> | null, E>;
+    /** Non-null values of the group as an array (empty, never `null`). */
+    collectList<K extends UsableColumnKey<S>>(
+        ref: ColRef<S, E, K>,
+    ): PendingAggregation<Array<NonNull<UsableColumnType<S, K>>>, E>;
+    /** Distinct non-null values of the group as an array (empty, never `null`). */
+    collectSet<K extends UsableColumnKey<S>>(
+        ref: ColRef<S, E, K>,
+    ): PendingAggregation<Array<NonNull<UsableColumnType<S, K>>>, E>;
+    /** Sample standard deviation; `null` for fewer than two non-null values. */
+    stddev(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
+    /** Sample variance; `null` for fewer than two non-null values. */
+    variance(ref: ColRef<S, E, NumericColumnKey<S>>): PendingAggregation<number | null, E>;
+    /** HyperLogLog++ distinct count, `rsd` being the maximum relative error (default 0.05). */
+    approxCountDistinct(ref: ColRef<S, E>, rsd?: number): PendingAggregation<bigint, E>;
+    /** Number of rows for which the predicate is `true`. */
+    countIf(predicate: (columns: Columns<S, E>) => Condition<E>): PendingAggregation<bigint, E>;
 };
 
 /**
@@ -203,12 +234,17 @@ export function makeAggFactory<S extends SchemaShape, E>(): AggFactory<S, E> {
     ): PendingAggregation<SumResult<S, K> | null, E> =>
         new PendingAggregation<SumResult<S, K> | null, E>(EX => EX.call("sum", [resolve(ref, EX)]));
 
+    const valueFn = <T extends ColumnType>(name: string, ref: ColRef<S, E>, ...extra: boolean[]) =>
+        new PendingAggregation<T, E>(EX =>
+            EX.call(name, [resolve(ref, EX), ...extra.map(flag => EX.lit(flag))])
+        );
+
     return {
         // Spark COUNT devuelve BIGINT y nunca null, incluso para cero filas.
         count: () => new PendingAggregation<bigint, E>(EX => EX.call("count", [EX.lit(1)])),
         countDistinct: ref =>
             new PendingAggregation<bigint, E>(EX =>
-                EX.call("count_distinct", [resolve(ref, EX)])
+                EX.callDistinct("count", [resolve(ref, EX)])
             ),
         // Agregaciones nullables sobre grupos vacíos / todo-null.
         // INT widens to BIGINT, while FLOAT/DOUBLE remain JS number. Since the
@@ -218,5 +254,22 @@ export function makeAggFactory<S extends SchemaShape, E>(): AggFactory<S, E> {
         avg: ref => nullableNumberFn("avg", ref),
         min: ref => preservingNumericFn("min", ref),
         max: ref => preservingNumericFn("max", ref),
+        first: (ref, ignoreNulls = false) => valueFn("first", ref, ignoreNulls),
+        last: (ref, ignoreNulls = false) => valueFn("last", ref, ignoreNulls),
+        collectList: ref => valueFn("collect_list", ref),
+        collectSet: ref => valueFn("collect_set", ref),
+        stddev: ref => nullableNumberFn("stddev", ref),
+        variance: ref => nullableNumberFn("variance", ref),
+        approxCountDistinct: (ref, rsd) =>
+            new PendingAggregation<bigint, E>(EX =>
+                EX.call("approx_count_distinct", [
+                    resolve(ref, EX),
+                    ...(rsd === undefined ? [] : [EX.lit(rsd)]),
+                ])
+            ),
+        countIf: predicate =>
+            new PendingAggregation<bigint, E>(EX =>
+                EX.call("count_if", [predicate(makeColumns<S, E>()).build(EX)])
+            ),
     };
 }

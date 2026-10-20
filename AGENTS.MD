@@ -36,9 +36,11 @@ Spark's plaintext backend loopback-only on port 15003.
 - When editing README examples, imports should be from the package name (not `./src/...`).
 
 ## Compatibility
-- Spark Connect protocol descriptors remain pinned to 4.0.4 (the oldest fully
-  supported line); the E2E matrix covers server versions 4.0.0, 4.0.4, 4.1.3
-  and 4.2.0, with the newer servers verified behaviorally.
+- Spark Connect protocol descriptors are vendored from 4.2.0, the newest line
+  in the E2E matrix (server versions 4.0.0, 4.0.4, 4.1.3 and 4.2.0). Anything
+  that needs a newer server than 4.0 must be gated with
+  `session.requireServerVersion(minimum, feature)` so older servers fail with
+  `UnsupportedServerVersionError` before any RPC is sent.
 - Do not claim another version until its full behavior suite is green in the CI
   compatibility matrix.
 - TypeScript 7 is the build compiler. The aliased TypeScript 6 package exists

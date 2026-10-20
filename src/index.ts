@@ -11,9 +11,15 @@ export type {
     TLSConfig, RetryConfig, RetryEvent,
     SparkConnectionConfig, SparkLogger, SparkTelemetryEvent,
     SparkMetric, SparkMetricObserver,
-    SessionConfigMap, SessionConfigValue, SparkUserContext,
+    SessionConfigMap, SessionConfigValue, SparkUserContext, RangeRow,
+    OperationState, OperationStatus,
 } from "./client/session";
+export type { ArtifactKind, ArtifactUpload } from "./client/artifacts";
+export { ArtifactUploadError } from "./client/artifacts";
+export { SparkUdfRegistration } from "./client/udf";
+export type { ExecutionOptions, ResolvedExecution } from "./client/executionOptions";
 export { SparkConnectError } from "./client/errors";
+export { UnsupportedServerVersionError } from "./client/serverVersion";
 export type { SparkConnectErrorOptions, SparkErrorDetails, SparkGrpcErrorInfo } from "./client/errors";
 export {
     Window,
@@ -22,6 +28,7 @@ export {
     col,
     elementAt,
     explode,
+    expr,
     from_json,
     getField,
     getItem,
@@ -38,18 +45,37 @@ export {
 } from "./engine/column";
 export type {
     CaseChain as ExpressionCaseChain,
+    ColumnOperand,
     EBuilder,
     FrameBoundary,
+    FrameBoundaryInput,
     SortKeyBuilder,
+    WindowOrderInput,
+    WindowPartitionInput,
+    WindowSpecBuilder,
 } from "./engine/column";
+
+// The PySpark-style function library. `functions` holds every function
+// (`import { functions as F } from "ts-spark-connector"`); the root entry also
+// exports each one by name, except where a name above or below already
+// exports a different helper (`abs`, `concat`, `length`, `lower`, `round`,
+// `upper` are the schema-aware typed functions, and `coalesce`, `explode`,
+// `from_json`, `map_keys`, `map_values`, `posexplode`, `split`, `struct`,
+// `to_json` keep their original signatures). ES module semantics give explicit
+// exports precedence over `export *`, so those names resolve to the helpers
+// declared here and their library versions are reached through `functions`.
+export * as functions from "./functions";
+export * from "./functions";
 
 // Unified schema-aware DataFrame surface. The same classes retain the lax path
 // when no schema is declared; these exports do not introduce a parallel engine.
 export { GroupedDataFrameTF, ReadChainedDataFrame } from "./read/readChainedDataFrame";
 export type {
     AddedColumnSchema,
+    AddedColumnsSchema,
     AggregatedSchema,
     ColumnName,
+    CrossJoinSchema,
     DuplicateRenameTargets,
     DroppedSchema,
     EBuilder as DataFrameExpressionBuilder,
@@ -61,13 +87,22 @@ export type {
     StatisticsSchema,
     TypedAggBuilder,
     TypedColumnFactory,
+    TypedColumnsFactory,
     TypedJoinPredicate,
     TypedOrderFactory,
     TypedPredicate,
     UniqueAggregationTuple,
     ValidRenameMap,
     ValidRenameTarget,
+    GroupingInput,
 } from "./read/readChainedDataFrame";
+export { DataFrameNaFunctions, DataFrameStatFunctions } from "./read/dataFrameFunctions";
+export type { NAFillValue, NAHow, NAReplaceValue } from "./read/dataFrameFunctions";
+export type { SparkStructField, SparkStructType } from "./read/dataTypes";
+export { Observation } from "./read/observation";
+export type { AsOfJoinOptions } from "./read/readChainedDataFrame";
+export type { AsOfDirection } from "./algebra/read/batch-capabilities";
+export type { StorageLevel } from "./client/storageLevel";
 export { DataFrameReaderTF } from "./read/dataFrameReaderTF";
 export {
     SparkCatalog,
@@ -75,12 +110,15 @@ export {
     CatalogDatabaseRow,
     CatalogTableRow,
     CatalogColumnRow,
+    CatalogFunctionRow,
 } from "./client/catalog";
 export type {
     CatalogEntry,
     CatalogDatabase,
     CatalogTable,
     CatalogColumn,
+    CatalogFunction,
+    CreateTableOptions,
 } from "./client/catalog";
 export type { CatalogOperation, CatalogMethod } from "./types/catalog";
 export type {
@@ -88,6 +126,14 @@ export type {
     ReaderOptionValue,
 } from "./read/dataFrameReaderTF";
 export { DataFrameWriterTF } from "./write/dataFrameWriterTF";
+export { DataFrameWriterV2 } from "./write/dataFrameWriterV2";
+export type { WriterV2Mode } from "./write/dataFrameWriterV2";
+export {
+    MergeIntoWriter,
+    WhenMatched,
+    WhenNotMatched,
+    WhenNotMatchedBySource,
+} from "./write/mergeIntoWriter";
 export type {
     DefaultR as DefaultDataFrameRepresentation,
     Impl as WriterBackendImplementation,
@@ -97,7 +143,18 @@ export type {
     StreamTriggerInput,
     WriterOptionValue,
 } from "./write/dataFrameWriterTF";
+export type { JdbcReadOptions } from "./read/dataFrameReaderTF";
 export type { StreamingQueryHandle } from "./client/sparkClient";
+export { StreamingQueryError } from "./client/streamingProtocol";
+export type { StreamingQueryProgress, StreamingQueryStatus } from "./client/streamingProtocol";
+export { StreamingQueryManager } from "./client/streamingQueryManager";
+export type {
+    QueryIdleEvent,
+    QueryProgressEvent,
+    QueryStartedEvent,
+    QueryTerminatedEvent,
+    StreamingQueryListener,
+} from "./client/streamingQueryManager";
 export type {
     BatchWriterFormat,
     SaveMode,
@@ -114,6 +171,7 @@ export type {
 } from "./algebra/write/write-stream-capabilities";
 export type {
     BatchFormatCap,
+    InsertIntoCap,
     BucketSortCap,
     ViewsCap,
 } from "./algebra/write/write-batch-capabilities";
@@ -132,18 +190,35 @@ export type {
     CacheCap,
     DescribeCap,
     HintCap,
+    NAReplacement,
+    NullHandlingCap,
+    OffsetCap,
+    AsOfJoinCap,
+    AsOfJoinSpec,
+    CachedRelationCap,
+    LateralJoinCap,
+    MetadataCap,
+    ObserveCap,
+    PartitionSortCap,
+    SchemaCap,
+    WatermarkDedupCap,
+    RepartitionByExpressionCap,
     RepartitionCap,
+    ReshapeCap,
+    SampleFraction,
     SamplingCap,
     SqlCap,
+    StatCap,
     SummaryCap,
 } from "./algebra/read/batch-capabilities";
-export type { DFCore } from "./algebra/read/df-core";
+export type { DFCore, GroupingSpec } from "./algebra/read/df-core";
 export type {
     EventTimeWatermarkCap,
     StreamingMark,
     StreamingReadCap,
 } from "./algebra/read/streaming-capabilities";
 export type {
+    CastEvalMode,
     DFAlg,
     DFBatchCaps,
     DFProgram,

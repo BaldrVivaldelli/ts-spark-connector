@@ -23,9 +23,14 @@ export type ReattachableResponse = RpcMessage & {
     resultComplete?: unknown;
 };
 
+/**
+ * Opens the gRPC streams of one execution. `reattach` may resolve
+ * asynchronously so a transport can refresh per-call credentials before every
+ * continuation of a long-running operation.
+ */
 export interface ReattachableTransport<TResponse extends ReattachableResponse> {
-    execute(request: RpcMessage): RpcReadable<TResponse>;
-    reattach(request: RpcMessage): RpcReadable<TResponse>;
+    execute(request: RpcMessage): RpcReadable<TResponse> | Promise<RpcReadable<TResponse>>;
+    reattach(request: RpcMessage): RpcReadable<TResponse> | Promise<RpcReadable<TResponse>>;
     release(request: RpcMessage): Promise<unknown>;
 }
 
@@ -36,13 +41,31 @@ export type ReattachableExecutionOptions = {
     sleep?: (ms: number) => Promise<void>;
     /** Test hook; production uses full jitter. */
     jitter?: (backoff: number) => number;
-    /** Guards against a broken server repeatedly ending empty continuation streams. */
+    /** Test hook; production uses `Date.now`. */
+    now?: () => number;
+    /**
+     * Guards against a broken server repeatedly ending empty continuation
+     * streams. Only streams that end empty within `EMPTY_STREAM_GRACE_MS`
+     * count: a server closes every reattachable stream after
+     * `spark.connect.execute.reattachable.senderMaxStreamDuration` (two
+     * minutes by default) even while the query is still computing, so an
+     * empty stream of that length is a healthy idle cycle of a long job.
+     */
     maxEmptyReattachments?: number;
+    /**
+     * Absolute epoch-millisecond budget for the whole execution, including
+     * every ReattachExecute. Once it passes, no further continuation is opened
+     * and a failure is never retried.
+     */
+    deadline?: number;
     /** Best-effort observer for ReleaseExecute failures after confirmed completion. */
     onCleanupError?: (error: unknown) => void;
 };
 
 const DEFAULT_MAX_EMPTY_REATTACHMENTS = 8;
+/** Empty continuation streams shorter than this are suspicious, not idle. */
+export const EMPTY_STREAM_GRACE_MS = 1_000;
+const DEADLINE_EXCEEDED = 4;
 const HIGH_WATER_MARK = 16;
 const LOW_WATER_MARK = 8;
 
@@ -77,6 +100,19 @@ function invalidSessionError(message: string): Error & { errorClass: string; __n
         errorClass: "INVALID_HANDLE.SESSION_CHANGED",
         __noRetry: true as const,
     });
+}
+
+function executionDeadlineError(): Error & { code: number; details: string; __noRetry: true } {
+    const details = "Deadline exceeded: the execution timeout elapsed before Spark completed the operation.";
+    return Object.assign(new Error(details), {
+        code: DEADLINE_EXCEEDED,
+        details,
+        __noRetry: true as const,
+    });
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+    return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
 function isResultComplete(response: ReattachableResponse): boolean {
@@ -191,6 +227,8 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
     );
     let consecutiveFailures = 0;
     let emptyReattachments = 0;
+    const now = options.now ?? Date.now;
+    const deadlinePassed = () => options.deadline !== undefined && now() >= options.deadline;
 
     const reattachRequest = (): RpcMessage => ({
         session_id: sessionId,
@@ -209,17 +247,22 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
         while (!completed) {
             throwIfAborted(options.signal);
             let madeProgress = false;
+            const streamStartedAt = now();
             try {
-                let call: RpcReadable<TResponse>;
+                let opened: RpcReadable<TResponse> | Promise<RpcReadable<TResponse>>;
                 if (shouldReattach) {
-                    call = transport.reattach(reattachRequest());
+                    if (deadlinePassed()) throw executionDeadlineError();
+                    opened = transport.reattach(reattachRequest());
                 } else {
                     // Mark before opening the call: even a synchronous transport
                     // failure is ambiguous, so the original plan must not replay.
                     initialSent = true;
                     shouldReattach = true;
-                    call = transport.execute(executeRequest);
+                    opened = transport.execute(executeRequest);
                 }
+                // Await only real promises: a synchronous call may already have
+                // queued its first events, and listeners attach right below.
+                const call = isPromiseLike(opened) ? await opened : opened;
 
                 for await (const response of readBoundedStream(call, options.signal)) {
                     const returnedSessionId = response.session_id ?? response.sessionId;
@@ -265,16 +308,23 @@ export async function* executeReattachable<TResponse extends ReattachableRespons
 
                 if (completed) break;
                 if (!madeProgress) {
-                    emptyReattachments += 1;
-                    if (emptyReattachments > maxEmptyReattachments) {
-                        throw new Error(
-                            `ReattachExecute ended ${emptyReattachments} times without a response.`
-                        );
+                    if (now() - streamStartedAt >= EMPTY_STREAM_GRACE_MS) {
+                        // The server closed an idle stream of a job that is
+                        // still computing; keep following it.
+                        emptyReattachments = 0;
+                    } else {
+                        emptyReattachments += 1;
+                        if (emptyReattachments > maxEmptyReattachments) {
+                            throw new Error(
+                                `ReattachExecute ended ${emptyReattachments} times without a response.`
+                            );
+                        }
                     }
                 }
             } catch (error) {
                 shouldReattach = initialSent;
                 consecutiveFailures += 1;
+                if (deadlinePassed()) throw error;
                 await waitBeforeRetry(error, consecutiveFailures, options.retry, {
                     signal: options.signal,
                     sleep: options.sleep,

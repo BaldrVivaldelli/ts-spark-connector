@@ -7,7 +7,9 @@ import {
     col,
     elementAt,
     explode,
+    expr,
     from_json,
+    functions as F,
     getField,
     getItem,
     isNotNull,
@@ -128,6 +130,61 @@ describe("client-side plan inspection covers the whole algebra", () => {
         expect(matching(labels, /^to_json/).length).toBeGreaterThanOrEqual(2);
     });
 
+    it("renders casts, SQL expressions, lambdas, distinct calls and struct updates", () => {
+        const df = people()
+            .filter("age > 18")
+            .where(col("age").lt(99))
+            .select(
+                col("age").cast("bigint"),
+                col("age").tryCast("int"),
+                expr("upper(name)"),
+                F.transform("tags", (tag, i) => tag.plus(i)),
+                F.count_distinct("id"),
+                col("address").withField("zip", lit("1000")).dropFields("street"),
+                col("address").getField("city"),
+            );
+
+        const labels = expectInspectable(df);
+        expect(labels).toEqual(expect.arrayContaining([
+            'expr("age > 18")', "cast(bigint)", "try_cast(int)", 'expr("upper(name)")', "count(distinct)",
+            "withField(zip)", "dropField(street)", "extract",
+        ]));
+        expect(matching(labels, /^lambda\(x_\d+,i_\d+\)$/)).toHaveLength(1);
+        expect(matching(labels, /^[xi]_\d+$/)).toHaveLength(2);
+
+        const plan = JSON.parse(df.toSparkLogicalPlanJSON()) as { input: { condition: unknown }; columns: unknown[] };
+        expect(plan.columns).toEqual(expect.arrayContaining([
+            { type: "Cast", input: { type: "Column", name: "age" }, dataType: "bigint" },
+            { type: "Cast", input: { type: "Column", name: "age" }, dataType: "int", evalMode: "try" },
+            { type: "ExpressionString", expression: "upper(name)" },
+            { type: "UnresolvedFunction", name: "count", args: [{ type: "Column", name: "id" }], isDistinct: true },
+            {
+                type: "UpdateFields",
+                struct: {
+                    type: "UpdateFields",
+                    struct: { type: "Column", name: "address" },
+                    field: "zip",
+                    value: { type: "Literal", value: "1000" },
+                },
+                field: "street",
+            },
+            {
+                type: "ExtractValue",
+                child: { type: "Column", name: "address" },
+                extraction: { type: "Literal", value: "city" },
+            },
+        ]));
+        const lambda = (plan.columns[3] as { args: Array<{ type: string; params: string[]; body: unknown }> }).args[1]!;
+        expect(lambda.type).toBe("LambdaFunction");
+        expect(lambda.body).toEqual({
+            type: "Binary",
+            op: "+",
+            left: { type: "LambdaVariable", name: lambda.params[0] },
+            right: { type: "LambdaVariable", name: lambda.params[1] },
+        });
+        expect(JSON.stringify(plan)).toContain('"ExpressionString","expression":"age > 18"');
+    });
+
     it("renders every DataFrame relation reachable from the public API", () => {
         const left = people()
             .withColumn("adult", col("age").gt(18))
@@ -218,6 +275,10 @@ describe("client-side plan inspection covers the whole algebra", () => {
         expect(TraceExprAlg.split(id, id).label).toBe("split");
         expect(TraceExprAlg.getItem(id, 0).label).toBe("getItem(0)");
         expect(TraceExprAlg.getItem(id, id).label).toBe("getItem");
+        expect(TraceExprAlg.cast(id, "int", "ansi").label).toBe("cast(int,ansi)");
+        expect(TraceExprAlg.cast(id, "int", "legacy").label).toBe("cast(int,legacy)");
+        expect(TraceExprAlg.lambdaVar("x_1").label).toBe("x_1");
+        expect(TraceExprAlg.extractValue(id, id).children).toHaveLength(2);
 
         const rel = TraceDFAlg.relation("csv", "/tmp/x");
         expect(TraceDFAlg.join(rel, rel, id).label).toBe("join(INNER)");

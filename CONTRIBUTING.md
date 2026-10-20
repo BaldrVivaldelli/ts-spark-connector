@@ -12,12 +12,25 @@ Thanks for considering a contribution to **ts-spark-connector**!
    npm ci
    ```
 
+## Where to start
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how a DataFrame call
+  becomes a Spark Connect request and lists everything a new operation needs,
+  from the algebra to the E2E test.
+- [docs/PARITY.md](docs/PARITY.md) tracks the PySpark API surface: every
+  unchecked item is an open, self-contained contribution. Issues labelled
+  `good first issue` point at the smallest ones.
+- `npm run docs:api` builds the TypeDoc API reference into `docs-site/`.
+
 ## Development
 
 - Code style: TypeScript + ESLint (`npm run lint`)
 - Tests: Vitest (`npm test` for unit tests)
 - Build: TypeScript 7 (`npm run build`)
 - Executable examples: `npm run examples:run -- join`
+- Function library: `functions` is generated from `scripts/functions/catalog.mjs`;
+  edit the catalog (or `src/functions/special.ts` for hand-written functions)
+  and run `npm run functions:generate`
 
 ## Testing
 
@@ -96,7 +109,8 @@ compatibility layer required by the current `typescript-eslint` release.
 Releases are published from `main` only. Once a PR with a Conventional Commit
 title is merged and the unit (Node.js 22 and 24), publishable-tarball and
 Spark E2E jobs are green, semantic-release publishes the package to npm with
-provenance and tags the release; the workflow then installs that exact version
+provenance (through npm trusted publishing, so there is no npm token to manage)
+and tags the release; the workflow then installs that exact version
 from the registry and verifies it. A red job blocks the publish until a fix
 lands on `main`; see the release flow in [MIGRATION.md](./MIGRATION.md).
 

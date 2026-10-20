@@ -1,5 +1,47 @@
 # Migration guide
 
+## After 3.2.0: protocol descriptors from Spark 4.2.0
+
+The vendored `.proto` files now come from Apache Spark 4.2.0 instead of 4.0.4.
+Every server in the compatibility matrix (4.0.0 to 4.2.0) keeps working:
+requests only use messages the connected server knows, and features that need
+a newer server (`session.cloneSession()`, Spark 4.1+) reject with
+`UnsupportedServerVersionError` before sending anything. `session.version()`
+reports the server version. Code that loaded the packaged `proto/` directory
+directly sees the 4.2.0 definitions, including the new `pipelines.proto`.
+
+## After 3.2.0: `getItem()` indexes arrays from 0
+
+The root helper `getItem(column, key)` compiled to Spark's `element_at`,
+whose array index starts at 1. It now builds the same expression as
+PySpark's `Column.getItem` and the new `col.getItem(key)` method: arrays are
+indexed from 0, maps and structs by key. Code that passed 1-based indexes
+to `getItem` should subtract one or switch to `elementAt(column, index)`
+(`functions.element_at`), which keeps Spark's 1-based semantics.
+
+Custom interpreters passed to `ReadChainedDataFrame.runWith(DF, EX)` must
+implement the expression operations added in this release (`callDistinct`,
+`exprString`, `cast`, `lambda`, `lambdaVar`, `updateFields`, `extractValue`).
+
+## After 3.2.0: `StreamingQueryHandle` has more members
+
+The handle returned by `writeStream().start()` / `toTable()` now mirrors
+Spark's `StreamingQuery`: `id`, `runId`, `isActive()`, `status()`,
+`lastProgress()`, `recentProgress()`, `explain()`, `exception()` and
+`processAllAvailable()` are required members of `StreamingQueryHandle`.
+Code that only calls handles is unaffected; code that *implements* the
+interface (test doubles, custom writer backends returning handles) must add
+them.
+
+## After 3.2.0: `close()` always closes
+
+`SparkSession.close()` used to leave the session open when `ReleaseSession`
+failed, so a second `close()` could retry the release. It now releases local
+state (the session becomes unusable and its gRPC channel is released) and then
+rethrows the `ReleaseSession` failure. Callers that retried `close()` in a loop
+should log the error instead; the server drops the session after its idle
+timeout.
+
 ## 3.0: one authentication source, loud header collisions
 
 Authentication misconfigurations that previous releases resolved silently are
@@ -113,6 +155,9 @@ Every release is cut from `main`:
    `join` example and publishes JUnit, JSON and Markdown evidence.
 3. When every job is green, semantic-release computes the version from the
    commits, publishes the package to npm with provenance and tags the release.
+   Publishing uses npm trusted publishing: npmjs.com accepts the release job's
+   GitHub OIDC identity for this repository's `workflow.yml`, so no npm token
+   is stored in GitHub.
 4. The workflow then installs the exact published version from the registry
    and re-checks the registry metadata, the CommonJS and ESM entry points, the
    TypeScript 7 declarations and the production audit against it.

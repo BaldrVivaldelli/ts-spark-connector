@@ -7,18 +7,19 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const directory = join(root, "proto", "spark", "connect");
-const sparkVersion = "4.0.4";
+const sparkVersion = "4.2.0";
 const expected = {
-    "base.proto": "e523f95a4124fed8129e3f082aae20befe12db10170426880a165b160e7b1996",
-    "catalog.proto": "f4e4211e4b1b0905c7b1e1b05bb008e2c0354b1dec971188cb2d76ab654699da",
-    "commands.proto": "d934c9fb02911866c38d4e7fe08b280a802e1f7deb2cc4d9524c2f904d4d4c53",
-    "common.proto": "cb508096334b83f61e2020d7929e7b357647d67858d29fa7fe2aa8bcb8f5652a",
+    "base.proto": "86d49472e8c905245b5007f19a3ed9cea740140376b5515c6034fbd2a2f6d31f",
+    "catalog.proto": "c0f655f0edc9c83b2229da28233dbf2802bd8d8f91035942e53f22bfdeb94fd5",
+    "commands.proto": "923a4fddf21120e8d5f6ed304fbfd7ed8aa5885c7548ed1b909db56e0f12496d",
+    "common.proto": "1c111676e247370259273863e2b37247b913f94221c6f1f4a609fe037169e783",
     "example_plugins.proto": "73c74dc164cc6c78ef7ce362ce2e0e0efa5b02aeaf1dce118e817f06a80b1291",
-    "expressions.proto": "2ce3849fda7d48546b1ef5ea2ba30cede6a6348582bbe6ef8b14df57ff25cb9a",
-    "ml.proto": "0f5372140417fb4888075c52416ab0ebcce410c895ccc4f92c684f2dd10141b6",
+    "expressions.proto": "03a0995ca94aa8c87af64462e6926eade335732e6edf95e2a0625496c39d1eb5",
+    "ml.proto": "7d61c9098d25dd8b1c3484222d8298e6891a02366c59f454e24dd90993422a13",
     "ml_common.proto": "237628488246b193c2711d05b2657d640b5e044c4bcffd786dcd2ae56224e8ba",
-    "relations.proto": "8a82ffc93dabb34fcef721dd14842e808280926745cc487d320d3f40367caab8",
-    "types.proto": "78d41d565a51bbf826cfc427b891e5e84e3b9c80a3876500ffcaeea4204d8256",
+    "pipelines.proto": "6624415fc3dd80834eb7fa14e6427f5af0ec41ea80280380a0645df13190f98e",
+    "relations.proto": "cf6b233f07d9fb4c1b708ac74260b3885b2cbbed1ee5a6b139e58423fd44c60d",
+    "types.proto": "192e4c1af57e81247e946813f37c886af0ed201d9305e2350e9a228030ea0b8b",
 };
 
 const actualFiles = readdirSync(directory).filter(name => name.endsWith(".proto")).sort();

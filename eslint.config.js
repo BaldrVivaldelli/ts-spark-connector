@@ -5,7 +5,7 @@ const globals = require('globals');
 
 module.exports = [
     // Ignorar artefactos y generados
-    { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'proto/**', 'eslint.config.*', 'docs/examples/**'] },
+    { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'proto/**', 'eslint.config.*', 'docs/examples/**', 'docs-site/**', '.claude/**'] },
 
     // Base JS
     js.configs.recommended,

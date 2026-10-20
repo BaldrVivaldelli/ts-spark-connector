@@ -1,0 +1,22 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "name": "ts-spark-connector",
+    "entryPoints": ["src/index.ts"],
+    "tsconfig": "tsconfig.json",
+    "out": "docs-site",
+    "readme": "README.md",
+    "includeVersion": true,
+    "excludeInternal": true,
+    "excludePrivate": true,
+    "excludeProtected": true,
+    "sort": ["kind", "alphabetical"],
+    "navigationLinks": {
+        "GitHub": "https://github.com/BaldrVivaldelli/ts-spark-connector",
+        "npm": "https://www.npmjs.com/package/ts-spark-connector"
+    },
+    "validation": {
+        "notExported": false,
+        "invalidLink": true,
+        "notDocumented": false
+    }
+}
