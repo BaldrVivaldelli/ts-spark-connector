@@ -60,6 +60,8 @@ try {
     const installedPackage = join(nodeModulesDir, "ts-spark-connector");
     assert.ok(existsSync(join(extractedPackage, "dist", "index.js")), "tarball is missing dist/index.js");
     assert.ok(existsSync(join(extractedPackage, "dist", "index.d.ts")), "tarball is missing dist/index.d.ts");
+    assert.ok(existsSync(join(extractedPackage, "dist", "index.mjs")), "tarball is missing the ES module entry dist/index.mjs");
+    assert.ok(existsSync(join(extractedPackage, "dist", "index.d.mts")), "tarball is missing dist/index.d.mts");
     assert.ok(existsSync(join(extractedPackage, "proto", "spark", "connect", "base.proto")), "tarball is missing Spark proto files");
     assert.ok(existsSync(join(extractedPackage, "MIGRATION.md")), "tarball is missing the migration guide");
     assert.ok(existsSync(join(extractedPackage, "docs", "examples", "join.ts")), "tarball is missing executable examples");
@@ -107,19 +109,46 @@ assert.equal(loaded.some(path => path.includes("@grpc/grpc-js")), false, "gRPC l
 assert.equal(loaded.some(path => path.includes("@grpc/proto-loader")), false, "proto-loader loaded during plan-only import");
 `);
 
+    // The ES module entry must be a real ES module that hands out the CommonJS
+    // build's own objects: same classes for instanceof, same lazy loading.
     writeFileSync(join(consumerDir, "consumer.mjs"), `
 import assert from "node:assert/strict";
-import { SparkSession, col } from "ts-spark-connector";
+import { createRequire } from "node:module";
+import connector, { SparkSession, col, typeof as typeOf } from "ts-spark-connector";
+assert.match(import.meta.resolve("ts-spark-connector"), /\\/dist\\/index\\.mjs$/);
 assert.equal(typeof SparkSession, "function");
 assert.equal(typeof col, "function");
+assert.equal(typeof typeOf, "function");
 assert.equal(typeof SparkSession.builder().getOrCreate().getSessionId(), "string");
+const require = createRequire(import.meta.url);
+const loaded = Object.keys(require.cache);
+assert.equal(loaded.some(path => path.includes("apache-arrow")), false, "Arrow loaded during plan-only import");
+assert.equal(loaded.some(path => path.includes("@grpc/grpc-js")), false, "gRPC loaded during plan-only import");
+assert.equal(loaded.some(path => path.includes("@grpc/proto-loader")), false, "proto-loader loaded during plan-only import");
+const commonJs = require("ts-spark-connector");
+assert.equal(connector, commonJs, "default export is not the CommonJS module");
+assert.equal(SparkSession, commonJs.SparkSession, "ESM and CJS consumers get different classes");
+const namespace = await import("ts-spark-connector");
+for (const name of Object.keys(commonJs).filter(key => key !== "__esModule")) {
+    assert.equal(namespace[name], commonJs[name], \`ES module entry lacks \${name}\`);
+}
 `);
 
     writeFileSync(join(consumerDir, "consumer.mts"), `
-import { SparkSession, col } from "ts-spark-connector";
+import connector, { SparkSession, col, typeof as typeOf } from "ts-spark-connector";
 const sessionId: string = SparkSession.builder().getOrCreate().getSessionId();
+const viaDefault: typeof SparkSession = connector.SparkSession;
 void sessionId;
+void viaDefault;
 void col("id");
+void typeOf("id");
+`);
+
+    writeFileSync(join(consumerDir, "consumer.cts"), `
+import connector = require("ts-spark-connector");
+const sessionId: string = connector.SparkSession.builder().getOrCreate().getSessionId();
+void sessionId;
+void connector.col("id");
 `);
 
     writeFileSync(join(consumerDir, "tsconfig.json"), `${JSON.stringify({
@@ -131,7 +160,7 @@ void col("id");
             noEmit: true,
             skipLibCheck: false,
         },
-        include: ["consumer.mts", "examples/**/*.ts"],
+        include: ["consumer.mts", "consumer.cts", "examples/**/*.ts"],
     }, null, 2)}\n`);
 
     run(process.execPath, [join(consumerDir, "consumer.cjs")], { cwd: consumerDir });
@@ -142,7 +171,7 @@ void col("id");
         join(consumerDir, "tsconfig.json"),
     ], { cwd: consumerDir });
 
-    process.stdout.write("Package smoke passed for CJS, ESM, and TypeScript declarations.\n");
+    process.stdout.write("Package smoke passed for CJS, ESM, and TypeScript declarations (ESM and CJS).\n");
 } finally {
     rmSync(staleMarker, { force: true });
     rmSync(workspace, { recursive: true, force: true });
