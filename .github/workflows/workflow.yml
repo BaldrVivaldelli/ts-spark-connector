@@ -219,9 +219,108 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yml down --volumes
 
+  # The matrix above covers Spark server versions; this job covers the client
+  # runtime. The same E2E suite and installed-package example run inside Bun,
+  # against one Spark line, so a Bun regression in node:http2, TLS or streams
+  # blocks the release like any other red job.
+  bun:
+    name: E2E / Spark 4.0.4 on Bun
+    needs: unit
+    runs-on: ubuntu-latest
+    env:
+      SPARK_VERSION: 4.0.4
+      SPARK_AVRO_SHA256: f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55
+      # Pinned so a new Bun release cannot turn the job red on its own; bump it
+      # deliberately, together with the runtimes listed in the README.
+      BUN_VERSION: 1.4.3
+    steps:
+      - uses: actions/checkout@v7
+
+      # Dependencies are installed and the package is built with npm, exactly as
+      # in the Node.js jobs; only the code under test runs inside Bun.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Prepare writable Spark output
+        run: mkdir -p example_data/dest artifacts/e2e
+
+      - name: Boot Spark
+        run: docker compose -f docker-compose.yml up --build --detach --wait spark
+
+      # `bun --bun` runs Vitest itself and every worker it starts on Bun rather
+      # than on the Node.js named in Vitest's shebang.
+      - name: Run E2E tests on Bun
+        id: e2e
+        run: |
+          set -o pipefail
+          bun --bun node_modules/vitest/vitest.mjs run --config vitest.e2e.config.ts \
+            --reporter=default \
+            --reporter=junit \
+            --outputFile.junit="artifacts/e2e/spark-${SPARK_VERSION}.xml" \
+            2>&1 | tee "artifacts/e2e/spark-${SPARK_VERSION}-vitest.log"
+        env:
+          SPARK_CONNECT_URL: scs://127.0.0.1:15002
+          SPARK_TLS_CA: ./spark-server/certs/ca.crt
+          SPARK_TLS_SERVER_NAME: spark-connect
+          SPARK_TEST_DEST: /data/dest/ci
+
+      # npm ci already built dist/. The runner executes each compiled example
+      # with the runtime that launched it, so the example runs on Bun too.
+      - name: Run an installed-package example on Bun
+        id: example
+        if: always()
+        run: |
+          set -o pipefail
+          bun scripts/run-examples.mjs join \
+            2>&1 | tee "artifacts/e2e/spark-${SPARK_VERSION}-example.log"
+        env:
+          SPARK_CONNECT_URL: scs://127.0.0.1:15002
+          SPARK_TLS_CA: ./spark-server/certs/ca.crt
+          SPARK_TLS_SERVER_NAME: spark-connect
+
+      - name: Capture Spark logs on failure
+        if: failure()
+        continue-on-error: true
+        run: >-
+          docker compose -f docker-compose.yml logs --no-color spark
+          > "artifacts/e2e/spark-${SPARK_VERSION}.log"
+
+      - name: Publish E2E job summary
+        if: always()
+        env:
+          E2E_TEST_OUTCOME: ${{ steps.e2e.outcome }}
+          E2E_EXAMPLE_OUTCOME: ${{ steps.example.outcome }}
+          E2E_RUNTIME: Bun ${{ env.BUN_VERSION }}
+        run: node scripts/publish-e2e-report.mjs
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-bun-spark-${{ env.SPARK_VERSION }}
+          path: artifacts/e2e
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop Spark
+        if: always()
+        run: docker compose -f docker-compose.yml down --volumes
+
   release:
     name: Release
-    needs: [unit, package, e2e]
+    needs: [unit, package, e2e, bun]
     # Runs here, on the real push, rather than in a separate workflow_run. npm
     # builds its provenance predicate from the same environment variables the
     # registry then verifies against the OIDC token, so the spoofed GITHUB_REF and

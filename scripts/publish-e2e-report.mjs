@@ -11,6 +11,10 @@ import process from "node:process";
 
 const sparkVersion = process.env.SPARK_VERSION;
 assert.ok(sparkVersion, "SPARK_VERSION is required");
+// Set when the suite ran on a runtime other than the Node.js running this
+// script, e.g. "Bun 1.4.3", so its report is not mistaken for the Node job's.
+const runtime = process.env.E2E_RUNTIME?.trim() || undefined;
+const subject = runtime ? `Spark ${sparkVersion} on ${runtime}` : `Spark ${sparkVersion}`;
 
 const outputDirectory = resolve(process.env.E2E_ARTIFACT_DIR ?? "artifacts/e2e");
 const junitPath = resolve(
@@ -83,6 +87,7 @@ const report = {
     generatedAt: new Date().toISOString(),
     status: successful ? "passed" : "failed",
     sparkVersion,
+    ...(runtime ? { runtime } : {}),
     nodeVersion: process.version,
     commit: process.env.GITHUB_SHA,
     runUrl,
@@ -97,7 +102,7 @@ const report = {
 mkdirSync(outputDirectory, { recursive: true });
 const stem = `${outputDirectory}/spark-${sparkVersion}`;
 const markdown = [
-    `## Spark ${sparkVersion} E2E — ${successful ? "PASS" : "FAIL"}`,
+    `## ${subject} E2E — ${successful ? "PASS" : "FAIL"}`,
     "",
     "| Signal | Result |",
     "| --- | --- |",
@@ -106,7 +111,7 @@ const markdown = [
     `| Tests | ${tests?.total ?? "report unavailable"} |`,
     `| Failures / errors | ${tests ? `${tests.failures} / ${tests.errors}` : "report unavailable"} |`,
     `| Duration | ${tests ? `${tests.durationSeconds.toFixed(3)} s` : "report unavailable"} |`,
-    `| Node | ${process.version} |`,
+    runtime ? `| Runtime | ${runtime} |` : `| Node | ${process.version} |`,
     `| Commit | ${process.env.GITHUB_SHA ?? "local"} |`,
     runUrl ? `| Workflow | [Open run](${runUrl}) |` : undefined,
     "",
@@ -133,7 +138,7 @@ if (!successful && process.env.GITHUB_ACTIONS === "true") {
         .replaceAll("%", "%25")
         .replaceAll("\r", "%0D")
         .replaceAll("\n", "%0A");
-    process.stdout.write(`::error title=Spark ${sparkVersion} E2E diagnostics::${annotation}\n`);
+    process.stdout.write(`::error title=${subject} E2E diagnostics::${annotation}\n`);
 }
 
 process.stdout.write(markdown);
