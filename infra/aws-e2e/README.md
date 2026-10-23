@@ -61,10 +61,14 @@ aws iam create-open-id-connect-provider \
   --client-id-list sts.amazonaws.com
 ```
 
-Then copy the stack outputs into the repository variables the workflow reads:
-`AWS_E2E_ROLE_ARN` (output `GitHubActionsRoleArn`), `AWS_E2E_REGION`,
+Then copy the stack outputs into the repository secrets the workflow reads:
+`AWS_E2E_ROLE_ARN` (output `GitHubActionsRoleArn`),
 `AWS_E2E_EMR_APPLICATION_ID`, `AWS_E2E_EMR_EXECUTION_ROLE_ARN`,
-`AWS_E2E_GLUE_ROLE_ARN` and `AWS_E2E_ATHENA_WORKGROUP`.
+`AWS_E2E_GLUE_ROLE_ARN` and `AWS_E2E_ATHENA_WORKGROUP`; the region goes in the
+`AWS_E2E_REGION` variable. They are secrets because ARNs carry the account id
+and this repository's workflow logs are public: set them with
+`gh secret set AWS_E2E_ROLE_ARN` (it prompts for the value, so it stays out of
+your shell history), never as variables.
 
 ## Run the suite
 
@@ -82,6 +86,8 @@ npm run test:aws
 ```
 
 A service's tests run only when its variables are set; otherwise they skip.
+The snippet sets the variables without printing them; keep it that way, and
+redact ARNs and ids before sharing test output.
 
 ## Cost
 
