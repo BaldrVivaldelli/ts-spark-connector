@@ -267,6 +267,8 @@ function rangeBound(label: string, value: number | bigint): bigint {
 }
 /** gRPC status UNAVAILABLE: the server cannot be reached, so further cleanup RPCs are pointless. */
 const GRPC_UNAVAILABLE = 14;
+/** gRPC status UNIMPLEMENTED: the server predates the RPC (ReleaseSession arrived in Spark 4.0). */
+const GRPC_UNIMPLEMENTED = 12;
 
 /** @public */
 export class SparkSession implements SessionAlgebra {
@@ -854,7 +856,8 @@ export class SparkSession implements SessionAlgebra {
      * Idempotent. Local state is released even when the server cannot be
      * reached: the session is closed afterwards and the ReleaseSession failure
      * is rethrown so the caller knows remote state may linger until Spark's
-     * session timeout.
+     * session timeout. Spark 3.5 servers have no ReleaseSession and free the
+     * session on that timeout, so closing against them succeeds locally.
      */
     async close(): Promise<void> {
         if (this.closed) return;
@@ -880,9 +883,12 @@ export class SparkSession implements SessionAlgebra {
                     this.observeServerSideSessionId(response);
                 } catch (error) {
                     this.observeRemoteError(error);
-                    // A stale identity has no remote session left to release;
-                    // any other failure is reported after local cleanup.
-                    if (!this.invalidatedError) releaseFailure = { error };
+                    // A stale identity has no remote session left to release,
+                    // and a server without ReleaseSession has nothing to
+                    // release on request; any other failure is reported after
+                    // local cleanup.
+                    const unimplemented = (error as { code?: unknown } | null)?.code === GRPC_UNIMPLEMENTED;
+                    if (!this.invalidatedError && !unimplemented) releaseFailure = { error };
                 }
             }
             this.closed = true;
