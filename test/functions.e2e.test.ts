@@ -15,6 +15,12 @@ import {
 } from "../src";
 import { FUNCTION_CATALOG } from "./fixtures/function-catalog";
 import { SAMPLE_COLUMNS, callFunction, sampleCall } from "./fixtures/function-samples";
+import {
+    FUNCTIONS_ADDED_IN_SPARK_4,
+    OPTIONAL_ARGUMENTS_ADDED_IN_SPARK_4,
+    serverAtLeast,
+    supportedOrRefused,
+} from "./fixtures/server-version";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
 const caPath = process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt";
@@ -72,9 +78,10 @@ describe("function library against Spark", () => {
             "window", "map", "not", "in", "like", "ilike", "rlike", "startswith", "endswith", "contains",
             "substr", "isnan",
         ];
+        const newerThanServer = await serverAtLeast(session, "4.0.0") ? new Set<string>() : FUNCTIONS_ADDED_IN_SPARK_4;
         const missing = [...FUNCTION_CATALOG.map(fn => fn.sql), ...handWritten]
             // `product` is resolved by the Connect planner, not the registry.
-            .filter(name => name !== "product" && !registry.has(name));
+            .filter(name => name !== "product" && !registry.has(name) && !newerThanServer.has(name));
         expect(missing).toEqual([]);
     });
 
@@ -84,9 +91,11 @@ describe("function library against Spark", () => {
         // happen is an unknown routine or a wrong argument count, which would
         // mean the catalog sends a name or an arity this server rejects.
         const relation = session.sql(`SELECT ${SAMPLE_COLUMNS.map(name => `'1' AS ${name}`).join(", ")}`);
+        const spark4 = await serverAtLeast(session, "4.0.0");
         const unresolved: string[] = [];
-        for (const fn of FUNCTION_CATALOG) {
-            for (const includeOptional of [false, true]) {
+        for (const fn of FUNCTION_CATALOG.filter(entry => spark4 || !FUNCTIONS_ADDED_IN_SPARK_4.has(entry.sql))) {
+            const optionalSupported = spark4 || !OPTIONAL_ARGUMENTS_ADDED_IN_SPARK_4.has(fn.sql);
+            for (const includeOptional of optionalSupported ? [false, true] : [false]) {
                 const { values } = sampleCall(fn, includeOptional);
                 try {
                     await relation.select(callFunction(fn, values).alias("r")).explain();
@@ -104,7 +113,6 @@ describe("function library against Spark", () => {
     it("evaluates column methods with PySpark semantics", async () => {
         expect(await alice({
             asString: col("id").cast("string"),
-            invalid: lit("abc").tryCast("int"),
             plus: col("id").plus(1),
             product: col("id").multiply(col("id")),
             half: col("score").divide(2),
@@ -133,7 +141,6 @@ describe("function library against Spark", () => {
             dropped: col("addr").dropFields("zip"),
         })).toEqual({
             asString: "1",
-            invalid: null,
             plus: 2,
             product: 1,
             half: 5.25,
@@ -162,6 +169,11 @@ describe("function library against Spark", () => {
             dropped: { city: "BA" },
         });
         expect(await perPerson(col("score").eqNullSafe(null))).toEqual([false, true, false]);
+        // tryCast() is a Spark 4.0 cast mode; 3.5 would drop it and run a plain cast.
+        const tryCast = () => alice({ invalid: lit("abc").tryCast("int"), wide: lit(3_000_000_000n).tryCast("int") });
+        if (await supportedOrRefused(session, "4.0.0", "tryCast()", tryCast)) {
+            expect(await tryCast()).toEqual({ invalid: null, wide: null });
+        }
     });
 
     it("runs SQL text through expr, selectExpr, filter and where", async () => {
@@ -439,10 +451,11 @@ describe("function library against Spark", () => {
             path: "7",
             inferred: "STRUCT<a: BIGINT>",
         });
-        // FAILFAST only fails if the options map reaches the parser.
+        // FAILFAST only fails if the options map reaches the parser. Spark 3.5
+        // reports this failure without any message.
         await expect(
             people().select(F.from_json("js", "k INT", { mode: "FAILFAST" }).alias("v")).collect(),
-        ).rejects.toThrow(/MALFORMED|malformed/);
+        ).rejects.toThrow(await serverAtLeast(session, "4.0.0") ? /MALFORMED|malformed/ : /failed/);
     });
 
     it("evaluates conditional, hash and misc functions", async () => {
@@ -465,7 +478,7 @@ describe("function library against Spark", () => {
             type: "int",
         });
         expect(row.uuid).toMatch(/^[0-9a-f-]{36}$/);
-        expect(row.version).toMatch(/^4\.\d+\.\d+/);
+        expect(String(row.version).split(" ")[0]).toBe(await session.version());
         expect(await perPerson(F.nvl("score", lit(0)))).toEqual([10.5, 0, 7]);
         expect(await perPerson(F.coalesce("score", lit(-1)))).toEqual([10.5, -1, 7]);
     });

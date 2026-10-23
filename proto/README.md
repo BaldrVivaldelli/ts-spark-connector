@@ -7,9 +7,10 @@ These files are an exact copy of Apache Spark tag `v4.2.0` from:
 Source: <https://github.com/apache/spark/tree/v4.2.0/sql/connect/common/src/main/protobuf/spark/connect>
 
 The descriptors follow the newest Spark line in the E2E matrix. Older servers
-in the matrix (currently 4.0.0, 4.0.4 and 4.1.3) stay supported because the
-connector only emits messages they understand: anything newer is gated on the
-version the server reports (`session.requireServerVersion`).
+in the matrix (currently 3.5.6, 4.0.0, 4.0.4 and 4.1.3) stay supported because
+the connector only emits messages they understand: anything newer is gated on
+the version the server reports (`session.requireServerVersion`, and for plans
+`src/client/serverCompatibility.ts`).
 
 Run `npm run test:proto` to verify the complete file set and SHA-256 manifest.
 Wire-conformance tests load this descriptor with `@grpc/proto-loader` and

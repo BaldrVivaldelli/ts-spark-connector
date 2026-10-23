@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SparkSession, col, lit, schema } from "../src";
+import { supportedOrRefused } from "./fixtures/server-version";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
 const caPath = process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt";
@@ -134,11 +135,12 @@ describe("reshaping relations (E2E)", () => {
         expect(offset.map(row => row.id)).toEqual([2n, 3n]);
 
         const Wide = schema({ key: "string", a: "int", b: "int" });
-        const transposed = await session
+        const transpose = () => session
             .createDataFrame([{ key: "x", a: 1, b: 2 }, { key: "y", a: 3, b: 4 }], Wide)
             .transpose("key")
-            .collect() as Array<Record<string, unknown>>;
-        expect(transposed).toEqual([{ key: "a", x: 1, y: 3 }, { key: "b", x: 2, y: 4 }]);
+            .collect() as Promise<Array<Record<string, unknown>>>;
+        if (!await supportedOrRefused(session, "4.0.0", "transpose()", transpose)) return;
+        expect(await transpose()).toEqual([{ key: "a", x: 1, y: 3 }, { key: "b", x: 2, y: 4 }]);
     });
 
     it("cross-joins and repartitions without changing the rows", async () => {
@@ -221,6 +223,12 @@ describe("table writes on Delta (E2E)", () => {
     });
 
     it("merges a source DataFrame into a Delta table", async () => {
+        const merge = () => events([{ id: 1n, name: "ada", day: "d1" }])
+            .alias("s")
+            .mergeInto(target, col("parity_target.id").eq(col("s.id")))
+            .whenMatched().updateAll()
+            .merge();
+        if (!await supportedOrRefused(session, "4.0.0", "mergeInto()", merge)) return;
         await events([
             { id: 1n, name: "ada", day: "d1" },
             { id: 2n, name: "bob", day: "d1" },

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SparkSession, StreamingQueryManager } from "../src";
 import type { SparkTelemetryEvent, StreamingQueryListener } from "../src";
 import { sparkGrpcClient } from "../src/client/sparkClient";
@@ -167,6 +167,10 @@ describe("StreamingQueryManager commands", () => {
 });
 
 describe("streaming query listeners", () => {
+    // The listener bus is a Spark 4.0 command, checked against the server version.
+    beforeEach(() => {
+        vi.spyOn(SparkSession.prototype, "version").mockResolvedValue("4.0.4");
+    });
     afterEach(() => vi.restoreAllMocks());
 
     it("opens one unbounded listener bus for the first listener and dispatches every event kind", async () => {

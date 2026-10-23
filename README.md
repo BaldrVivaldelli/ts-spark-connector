@@ -674,9 +674,12 @@ The currently verified compatibility targets are:
   the matrix. The connector only sends messages an older server understands:
   features that need a newer server are gated on the version it reports and
   fail with `UnsupportedServerVersionError` before any RPC
-- Spark Connect servers 4.0.0, 4.0.4, 4.1.3 and 4.2.0 covered by the Docker E2E
-  matrix
-- Scala 2.13 artifacts on the server image
+- Spark Connect servers 3.5.6, 4.0.0, 4.0.4, 4.1.3 and 4.2.0 covered by the
+  Docker E2E matrix. 3.5.6 is the Spark version behind AWS's managed Spark
+  Connect endpoints (Athena for Apache Spark, EMR Serverless 7.13+, AWS Glue
+  5.1 interactive sessions); the matrix runs Apache Spark 3.5.6, not those
+  services. See [Spark 3.5 servers](#spark-35-servers) for what differs
+- Scala 2.13 artifacts on the 4.x server images, Scala 2.12 on 3.5
 - Node.js 22 and 24
 - Bun 1.4: CI runs the full E2E suite and an installed-package example inside
   Bun against Spark 4.0.4. Results arrive faster than on Node.js, but large
@@ -690,7 +693,17 @@ AnalyzePlan and cached). Version-gated features:
 
 | Feature | Minimum server |
 | --- | --- |
+| `tryCast()` — Spark 3.5 would drop the cast mode and run a plain cast, which wraps on overflow instead of returning null | 4.0.0 |
+| `groupingSets()`, `lateralJoin()`, `asOfJoin()`, `transpose()` | 4.0.0 |
+| `checkpoint()`, `localCheckpoint()` | 4.0.0 |
+| `mergeInto()`, `writeTo().clusterBy()` | 4.0.0 |
+| `session.streams.addListener()` | 4.0.0 |
 | `session.cloneSession()` — copy the server-side session (temp views, runtime configuration) into an independent new session | 4.1.0 |
+| `session.getStatus()`, `writeTo().withSchemaEvolution()` | 4.2.0 |
+
+DataFrame operations are checked when the plan is sent: a plan that uses one
+of them asks the server for its version once per session, and a plan that
+does not use any costs no extra round trip.
 
 ```ts
 if ((await session.version()).startsWith("4.0")) {
@@ -704,6 +717,26 @@ Other Spark Connect versions may work, but they are not
 currently part of a green compatibility matrix and are therefore not claimed
 as supported. Add a version to this list only after its protocol and behavioral
 E2E suite passes in CI.
+
+### Spark 3.5 servers
+
+Besides the gated features above, a 3.5 server behaves differently in these
+places:
+
+- Functions Spark added in 4.0 (`parse_json`, `try_mod`, `listagg`, the XML
+  and variant functions, ...) fail with `UNRESOLVED_ROUTINE`, and so does
+  `mode(col, deterministic)` with its second argument.
+- `close()` releases the client side only: 3.5 has no ReleaseSession RPC, so
+  the server keeps the session until its idle timeout.
+- Errors carry `errorClass` (read from the message) but no `errorId`, SQL state
+  or `remoteDetails`, since 3.5 has no FetchErrorDetails; a few failures
+  arrive with an empty message.
+- `catalog.listColumns()` reports `isCluster: false`, a column 3.5 does not
+  have.
+- Observed metrics are named by their aliases; an unaliased metric is named by
+  its position (`_1`, `_2`, ...).
+- `metadataColumn()` resolves like a regular column reference, so a data
+  column with the same name takes precedence.
 
 ## Current scope
 

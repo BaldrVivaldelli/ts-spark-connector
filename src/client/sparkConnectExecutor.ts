@@ -8,6 +8,7 @@ import type { NormalizedStreamingQueryInstanceId } from "./streamingProtocol";
 import { ProtoPlan, ProtoWriteRoot, protoWriteRootToPlan } from "../write/compilerWrite";
 import { ExplainModeInput, toProtoExplainMode } from "../engine/sparkConnectEnums";
 import { toProtoStorageLevel } from "./storageLevel";
+import { PlanInspection, preparePlanForServer } from "./serverCompatibility";
 
 type ExecutePlanResponse = Record<string, unknown>;
 type UserContext = ReturnType<SparkSession["getUserContext"]>;
@@ -65,10 +66,18 @@ function beginObservations(execution: ResolvedExecution): readonly Observation[]
     return observations;
 }
 
-/** Hands each ObservedMetrics of a response to the observations of this execution with that name. */
-function deliverObservedMetrics(observations: readonly Observation[], response: unknown): void {
+/**
+ * Hands each ObservedMetrics of a response to the observations of this
+ * execution with that name. `metricNames` names the values of servers that
+ * report them without keys (before 4.0).
+ */
+function deliverObservedMetrics(
+    observations: readonly Observation[],
+    response: unknown,
+    metricNames: PlanInspection["metricNames"],
+): void {
     if (observations.length === 0) return;
-    for (const metrics of observedMetricsOf(response)) {
+    for (const metrics of observedMetricsOf(response, metricNames)) {
         for (const observation of observations) {
             if (observation.name === metrics.name) observation.record(metrics.values);
         }
@@ -104,14 +113,14 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         plan: ProtoRel,
         execution: ResolvedExecution = this.session.resolveExecution(),
     ): Promise<ExecutePlanResponse[]> {
-        await this.prepareSession();
-        const request = this.buildExecuteRequest(plan, execution);
+        const prepared = await this.prepareSession(plan);
+        const request = this.buildExecuteRequest(prepared.plan, execution);
         return this.observing(execution, async observations => {
             const responses = await this.remote(() =>
                 sparkGrpcClient.executePlan(request, this.connectionConfigFor(execution))
             );
             responses.forEach(response => this.session.observeServerSideSessionId(response));
-            responses.forEach(response => deliverObservedMetrics(observations, response));
+            responses.forEach(response => deliverObservedMetrics(observations, response, prepared.metricNames));
             return responses;
         });
     }
@@ -121,8 +130,8 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         plan: ProtoRel,
         execution: ResolvedExecution = this.session.resolveExecution(),
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
-        await this.prepareSession();
-        const request = this.buildExecuteRequest(plan, execution);
+        const prepared = await this.prepareSession(plan);
+        const request = this.buildExecuteRequest(prepared.plan, execution);
         const observations = beginObservations(execution);
         let completed = false;
         let failure: unknown;
@@ -132,7 +141,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
                 this.connectionConfigFor(execution)
             )) {
                 this.session.observeServerSideSessionId(response);
-                deliverObservedMetrics(observations, response);
+                deliverObservedMetrics(observations, response, prepared.metricNames);
                 yield response;
             }
             completed = true;
@@ -151,8 +160,8 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
     }
 
     async explain(plan: ProtoRel, mode: ExplainModeInput): Promise<string> {
-        await this.prepareSession();
-        const request = this.buildAnalyzeRequest(plan, mode);
+        const prepared = await this.prepareSession(plan);
+        const request = this.buildAnalyzeRequest(prepared.plan, mode);
         const result = await this.remote(() =>
             sparkGrpcClient.explainWithResponse(request, this.session.getConnectionConfig())
         );
@@ -162,7 +171,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
 
     /** Applies deferred cache/persist/unpersist operations via AnalyzePlan RPC. */
     async runAnalyzeAction(action: AnalyzeAction): Promise<void> {
-        await this.prepareSession();
+        const { plan: relation } = await this.prepareSession(action.relation);
         const requestBase = {
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
@@ -173,14 +182,14 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
             ? {
                 ...requestBase,
                 persist: {
-                    relation: action.relation,
+                    relation,
                     storage_level: toProtoStorageLevel(action.level),
                 },
             }
             : {
                 ...requestBase,
                 unpersist: {
-                    relation: action.relation,
+                    relation,
                     ...(action.blocking === undefined ? {} : { blocking: action.blocking }),
                 },
             };
@@ -195,13 +204,13 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
      * and returns the response's sub-message of the same name.
      */
     async analyzePlan(field: AnalyzeField, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-        await this.prepareSession();
+        const prepared = await this.prepareSession(payload);
         const request = {
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector",
             ...this.observedServerSessionField(),
-            [field]: payload,
+            [field]: prepared.plan,
         };
         const response = await this.remote(() =>
             sparkGrpcClient.analyze(request, this.session.getConnectionConfig())
@@ -223,9 +232,9 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         command: Record<string, unknown>,
         execution: ResolvedExecution = this.session.resolveExecution(),
     ): Promise<ExecutePlanResponse[]> {
-        await this.prepareSession();
+        const prepared = await this.prepareSession(command);
         const request = {
-            plan: { command },
+            plan: { command: prepared.plan },
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector" as const,
@@ -237,7 +246,7 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return this.observing(execution, async observations => {
             const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
             responses.forEach(response => this.session.observeServerSideSessionId(response));
-            responses.forEach(response => deliverObservedMetrics(observations, response));
+            responses.forEach(response => deliverObservedMetrics(observations, response, prepared.metricNames));
             return responses;
         });
     }
@@ -253,9 +262,9 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         execution: ResolvedExecution = this.session.resolveExecution(),
         options: { unboundedStreams?: boolean } = {},
     ): AsyncGenerator<ExecutePlanResponse, void, void> {
-        await this.prepareSession();
+        const prepared = await this.prepareSession(command);
         const request = {
-            plan: { command },
+            plan: { command: prepared.plan },
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector" as const,
@@ -298,10 +307,9 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         root: ProtoWriteRoot,
         execution: ResolvedExecution = this.session.resolveExecution(),
     ): Promise<ExecutePlanResponse[]> {
-        await this.prepareSession();
-        const plan = protoWriteRootToPlan(root);
+        const prepared = await this.prepareSession(protoWriteRootToPlan(root));
         const request = {
-            plan,
+            plan: prepared.plan,
             session_id: this.session.getSessionId(),
             user_context: this.session.getUserContext(),
             client_type: "ts-spark-connector" as const,
@@ -315,14 +323,13 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         return this.observing(execution, async observations => {
             const responses = await this.remote(() => sparkGrpcClient.executePlan(request, config));
             responses.forEach(response => this.session.observeServerSideSessionId(response));
-            responses.forEach(response => deliverObservedMetrics(observations, response));
+            responses.forEach(response => deliverObservedMetrics(observations, response, prepared.metricNames));
             return responses;
         });
     }
 
     async runStream(root: ProtoWriteRoot): Promise<StreamingQueryHandle> {
-        await this.prepareSession();
-        const plan = protoWriteRootToPlan(root);
+        const { plan } = await this.prepareSession(protoWriteRootToPlan(root));
         const orderedPlan = Array.isArray(plan) ? this.reorderStreamingCommands(plan) : [plan];
         const sessionId = this.session.getSessionId();
         const userContext = this.session.getUserContext();
@@ -414,9 +421,14 @@ export class SparkConnectExecutor implements SparkPlanInterpreter<Promise<Execut
         };
     }
 
-    private async prepareSession(): Promise<void> {
+    /**
+     * Applies the session's pending configuration, then checks the plan about
+     * to be sent against the server (see `preparePlanForServer`).
+     */
+    private async prepareSession<P>(plan: P): Promise<{ plan: P; metricNames: PlanInspection["metricNames"] }> {
         await this.session.ensureRemoteConfigApplied();
         this.session.markRemoteTouched();
+        return preparePlanForServer(this.session, plan);
     }
 
     private async remote<T>(operation: () => Promise<T>): Promise<T> {

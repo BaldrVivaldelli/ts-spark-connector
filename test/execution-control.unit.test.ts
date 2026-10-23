@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SparkSession } from "../src/client/session";
 import { col } from "../src/engine/column";
 import { sparkGrpcClient } from "../src/client/sparkClient";
@@ -54,6 +54,10 @@ describe("per-execution options", () => {
 });
 
 describe("DataFrame actions carry execution options to ExecutePlan", () => {
+    // mergeInto() is checked against the server version (Spark 4.0+).
+    beforeEach(() => {
+        vi.spyOn(SparkSession.prototype, "version").mockResolvedValue("4.0.4");
+    });
     afterEach(() => vi.restoreAllMocks());
 
     it("sends session and per-call tags, the caller's operation id and a combined signal", async () => {

@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { supportedOrRefused } from "./fixtures/server-version";
 import { SparkSession, UnsupportedServerVersionError, col, schema } from "../src";
 import type {
     QueryIdleEvent,
@@ -184,6 +185,10 @@ describe("streaming query control (E2E)", () => {
             onQueryIdle: (event: QueryIdleEvent) => { idled.push(event); },
             onQueryTerminated: (event: QueryTerminatedEvent) => { terminated.push(event); },
         };
+        if (!await supportedOrRefused(session, "4.0.0", "streaming query listeners", () => session.streams.addListener(listener))) {
+            expect(session.streams.getListeners()).toEqual([]);
+            return;
+        }
         await session.streams.addListener(listener);
         expect(session.streams.getListeners()).toEqual([listener]);
 

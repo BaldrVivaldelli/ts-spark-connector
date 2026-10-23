@@ -75,10 +75,14 @@ session API; skip the steps that do not apply.
    `chainAs` with a schema transform when it changes. Validate arguments
    eagerly with the helpers in `src/read/dataframeValidation.ts`, so mistakes
    fail at the call site rather than as a remote Spark error.
-5. **Gate newer protocol features.** If the message or field only exists on
-   Spark 4.1 or newer, call `session.requireServerVersion("4.1.0", "feature()")`
-   before sending it. Older servers then fail with
-   `UnsupportedServerVersionError` without any RPC.
+5. **Gate newer protocol features.** The oldest server in the matrix is
+   3.5.6. If the message or field is newer than that, older servers must fail
+   with `UnsupportedServerVersionError` without any RPC: an async action calls
+   `session.requireServerVersion("4.1.0", "feature()")` before sending it, and
+   a field a lazy DataFrame operation puts into the plan goes into
+   `VERSIONED_FIELDS` in `src/client/serverCompatibility.ts`, which checks
+   every plan before the executor sends it. A new field of a message the old
+   server already knows matters most: protobuf drops it there silently.
 6. **Test it.**
    - Unit tests that assert the emitted proto (see
      `test/compilerRead.unit.test.ts`).

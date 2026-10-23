@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Observation, SparkSession, col, lit, schema, functions as F } from "../src";
+import { supportedOrRefused } from "./fixtures/server-version";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
 const caPath = process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt";
@@ -61,8 +62,9 @@ describe("grouping variants (E2E)", () => {
         expect(cubed.find(row => row.k === null && row.name === null)).toEqual({ k: null, name: null, total: 6n });
         expect(cubed.find(row => row.k === null && row.name === "x")).toEqual({ k: null, name: "x", total: 4n });
 
-        const sets = await sales().groupingSets([["k"], []], "k").agg({ total: "sum(v)" }).collect();
-        expect(sorted(sets, "k")).toEqual([
+        const sets = () => sales().groupingSets([["k"], []], "k").agg({ total: "sum(v)" }).collect();
+        if (!await supportedOrRefused(session, "4.0.0", "groupingSets()", sets)) return;
+        expect(sorted(await sets(), "k")).toEqual([
             { k: null, total: 6n },
             { k: "a", total: 3n },
             { k: "b", total: 3n },
@@ -163,6 +165,7 @@ describe("lateral and as-of joins (E2E)", () => {
     const right = () => session.createDataFrame([{ v: 1 }, { v: 2 }, { v: 3 }], Right);
 
     it("lateral-joins with and without a condition", async () => {
+        if (!await supportedOrRefused(session, "4.0.0", "lateralJoin()", () => left().lateralJoin(right()).collect())) return;
         const inner = await left().lateralJoin(right(), col("v").gt(col("k"))).collect();
         expect(sorted(inner, "k", "v")).toEqual([{ k: 1, v: 2 }, { k: 1, v: 3 }, { k: 2, v: 3 }]);
         expect(await left().lateralJoin(right()).count()).toBe(6n);
@@ -171,6 +174,7 @@ describe("lateral and as-of joins (E2E)", () => {
     });
 
     it("matches each trade with the closest quote in the requested direction", async () => {
+        if (!await supportedOrRefused(session, "4.0.0", "asOfJoin()", () => trades().asOfJoin(quotes(), "t", "rt").collect())) return;
         const backward = await trades().asOfJoin(quotes(), "t", "rt").collect();
         expect(sorted(backward, "t")).toEqual([
             { t: 10, side: "L10", rt: 6, q: "q6" },
@@ -204,6 +208,7 @@ describe("observe (E2E)", () => {
 
 describe("checkpoints and storage levels (E2E)", () => {
     it("checkpoints locally and reliably, keeping the rows and the schema", async () => {
+        if (!await supportedOrRefused(session, "4.0.0", "checkpoint() and localCheckpoint()", () => sales().localCheckpoint())) return;
         const local = await sales().localCheckpoint();
         expect(sorted(await local.collect(), "k", "name")).toEqual(sorted(await sales().collect(), "k", "name"));
         expect(await local.filter(col("v").gt(1)).count()).toBe(2n);
