@@ -5,6 +5,8 @@
 ```ts
 
 import type * as grpc from '@grpc/grpc-js';
+import { inspect } from 'util';
+import type { InspectOptions } from 'util';
 
 // @public
 export function abs<T extends NumericValue | null, E>(col: TypedColumn<T, E>): NumericColumn<T, E>;
@@ -2727,6 +2729,7 @@ export class SparkRuntimeConfig {
 
 // @public (undocumented)
 export class SparkSession implements SessionAlgebra {
+    [inspect.custom](_depth: number, options: InspectOptions): string;
     constructor(sessionId?: string, opts?: {
         userContext?: Partial<SparkUserContext>;
         connectionConfig?: SparkConnectionConfig;
@@ -2744,7 +2747,6 @@ export class SparkSession implements SessionAlgebra {
     close(): Promise<void>;
     get conf(): SparkRuntimeConfig;
     createDataFrame<D extends SchemaDef, R = unknown, E = unknown, G = unknown>(rows: ReadonlyArray<InferSchema<D>>, declared: DeclaredSchema<D>): ReadChainedDataFrame<InferSchema<D>, R, E, G>;
-    // (undocumented)
     getConnectionConfig(): SparkConnectionConfig;
     // (undocumented)
     getSessionConfig(): SessionConfigMap;
@@ -2785,6 +2787,7 @@ export class SparkSession implements SessionAlgebra {
 
 // @public (undocumented)
 export class SparkSessionBuilder {
+    [inspect.custom](_depth: number, options: InspectOptions): string;
     allowInsecureAuth(allow?: boolean): this;
     // (undocumented)
     config(key: string, value: SessionConfigValue): this;
