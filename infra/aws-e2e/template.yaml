@@ -8,7 +8,7 @@ Description: >-
 #   Gives test/aws-services.aws.test.ts something to run against: one service
 #   target per helper of ts-spark-connector/aws (emrServerlessSession,
 #   glueSession, athenaSession). The Outputs feed the TS_SPARK_AWS_* variables
-#   and the AWS_E2E_* repository variables of .github/workflows/aws-e2e.yml.
+#   and the AWS_E2E_* repository secrets of .github/workflows/aws-e2e.yml.
 #
 # Cost
 #   Nothing here bills while idle. The EMR Serverless application starts on
@@ -244,5 +244,5 @@ Outputs:
     Value: !Ref SparkWorkGroup
   GitHubActionsRoleArn:
     Condition: CreateGitHubRole
-    Description: Role the GitHub workflow assumes. Feeds the AWS_E2E_ROLE_ARN repository variable.
+    Description: Role the GitHub workflow assumes. Feeds the AWS_E2E_ROLE_ARN repository secret.
     Value: !GetAtt GitHubActionsRole.Arn

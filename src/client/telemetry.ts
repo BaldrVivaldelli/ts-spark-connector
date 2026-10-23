@@ -1,3 +1,5 @@
+import { inspect } from "node:util";
+import type { InspectOptions } from "node:util";
 import type {
     SparkConnectionConfig,
     SparkMetric,
@@ -7,7 +9,9 @@ import type {
 const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY = /(?:auth(?:orization)?|token|password|secret|credential|private.?key|api.?key|access.?key)/i;
 const AUTHORIZATION_VALUE = /\b(Bearer|Basic)\s+[^\s,;]+/gi;
-const SECRET_QUERY_VALUE = /([?&](?:token|password|secret|api[_-]?key)=)[^&#\s]*/gi;
+// `;` covers Spark Connect connection strings (`sc://host/;token=…`), the
+// form AWS documents for PySpark with `x-aws-proxy-auth`.
+const SECRET_QUERY_VALUE = /([?&;](?:token|password|secret|api[_-]?key|x-aws-proxy-auth)=)[^&;#\s]*/gi;
 
 function redactString(value: string): string {
     return value
@@ -50,6 +54,31 @@ function observeSafely<T>(
 /** @internal Recursively removes credentials before an object reaches a logger. */
 export function redactForTelemetry(value: unknown): unknown {
     return redactValue(value, new WeakSet<object>());
+}
+
+/**
+ * @internal A Spark Connect address cut before its `;` parameters, which can
+ * carry tokens, for messages and printed objects.
+ */
+export function printableAddress(address: string | undefined): string | undefined {
+    return address?.split(";", 1)[0];
+}
+
+/**
+ * @internal Makes `config` print and serialize without credentials
+ * (`console.log`, `util.inspect`, `JSON.stringify`) while its fields stay
+ * readable. The added members are not enumerable, so copies and equality
+ * checks do not see them.
+ */
+export function redactWhenPrinted<T extends object>(config: T): T {
+    const redacted = () => redactForTelemetry({ ...config });
+    Object.defineProperties(config, {
+        toJSON: { value: redacted },
+        [inspect.custom]: {
+            value: (_depth: number, options: InspectOptions) => inspect(redacted(), options),
+        },
+    });
+    return config;
 }
 
 /** @internal Emits best-effort telemetry; an observer can never fail the RPC. */

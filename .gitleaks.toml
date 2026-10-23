@@ -1,0 +1,22 @@
+# Secret scanning rules for scripts/gitleaks.mjs (pre-commit hook and CI).
+# gitleaks' default rules apply; the allowlists below exempt only documented
+# public fixtures. Exempt a value or an exact path, never a whole test file,
+# so a real secret added next to a fixture is still caught.
+
+title = "ts-spark-connector"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "AWS documentation example credentials used as test fixtures"
+regexes = [
+    '''wJalrXUtnFEMI/K7MDENG''',
+    '''AKIAIOSFODNN7EXAMPLE''',
+]
+
+[[allowlists]]
+description = "Development TLS keystore, a public fixture (see AGENTS.MD, Development TLS fixtures)"
+paths = [
+    '''^spark-server/certs/keystore\.p12$''',
+]

@@ -175,7 +175,31 @@ export const SPARK_CLIENT_CACHE_IDENTITY: unique symbol = Symbol("sparkClientCac
 export const DEFAULT_GRPC_MAX_MESSAGE_BYTES = 128 * 1024 * 1024;
 const MAX_GRPC_MESSAGE_BYTES = 2_147_483_647;
 
+/**
+ * @internal Rejects Spark Connect connection-string parameters
+ * (`sc://host:port/;use_ssl=true;token=…`). The connector takes TLS from the
+ * `scs://` scheme and credentials from `withAuth()`; passed on, the URL would
+ * reach gRPC's target and, with any token in it, every connection error and
+ * log line. The message never repeats the URL.
+ */
+export function assertNoConnectionParameters(address: string): void {
+    if (!address.includes(";")) return;
+    throw new TypeError(
+        "Spark Connect URL parameters (after ';') are not supported, and the URL is not shown because " +
+        "they can carry tokens. Use the scs:// scheme for TLS and withAuth() for credentials: " +
+        '{ type: "token", token } for a bearer token, or { type: "provider", provider: async () => ' +
+        '({ headers: { "x-aws-proxy-auth": token } }) } for other headers. For AWS endpoints, ' +
+        "ts-spark-connector/aws connects for you."
+    );
+}
+
 function getConfiguredAddress(config?: SparkConnectionConfig): string {
+    const address = findConfiguredAddress(config);
+    assertNoConnectionParameters(address);
+    return address;
+}
+
+function findConfiguredAddress(config?: SparkConnectionConfig): string {
     if (config?.address?.trim()) {
         return config.address.trim();
     }

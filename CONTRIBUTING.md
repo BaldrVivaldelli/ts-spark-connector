@@ -12,6 +12,41 @@ Thanks for considering a contribution to **ts-spark-connector**!
    npm ci
    ```
 
+   `npm ci` also enables the repository's git hooks (`core.hooksPath`
+   `.githooks`), whose pre-commit hook scans every commit for secrets; see
+   below.
+
+## Keeping secrets out of the repository
+
+The repository, its pull requests and its CI logs are public, and a secret
+that reaches a commit stays in the history even after a later commit deletes
+it. Several layers stop one before it gets there:
+
+- **Pre-commit hook.** `.githooks/pre-commit` runs
+  [gitleaks](https://github.com/gitleaks/gitleaks) on the staged changes and
+  blocks the commit when it finds a token, key or password. It uses a
+  `gitleaks` binary when one is installed (the hook pins version 8.30.1, see
+  `scripts/gitleaks.mjs`) and the official Docker image otherwise; with
+  neither it blocks the commit rather than skip the scan. Install gitleaks
+  with `brew install gitleaks`, `mise use -g gitleaks@8.30.1` or a
+  [release binary](https://github.com/gitleaks/gitleaks/releases).
+- **Full scan.** `npm run secrets:scan` checks the whole history, for
+  example before making a fork or a branch public.
+- **CI.** The `Secret scan` job checks the history and the contents of the
+  npm tarball on every pull request and push to `main`; a release cannot
+  publish until it passes.
+- **GitHub push protection** rejects pushes that contain known token formats.
+
+A finding is never bypassed with `git commit --no-verify`. Remove the secret
+and, if it was real, revoke it first: it was exposed the moment it was
+written to disk next to the repository. A test fixture that must look like a
+credential uses a documented public placeholder (AWS's `111122223333`,
+`AKIAIOSFODNN7EXAMPLE`) and, only if gitleaks flags it, gets its exact value
+exempted in `.gitleaks.toml`, never a whole file. AWS account ids, ARNs,
+resource ids and work email addresses are not secrets to gitleaks, but they
+are sensitive here too: [AGENTS.MD](AGENTS.MD#secrets-and-sensitive-data)
+lists what to keep out of commits, pull requests and logs.
+
 ## Where to start
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how a DataFrame call

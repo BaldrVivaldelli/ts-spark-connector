@@ -235,6 +235,16 @@ const session = SparkSession.builder()
   .getOrCreate();
 ```
 
+Credentials stay out of what you can print or log: `console.log(session)` and
+`util.inspect` show only the session id and address, and the object returned
+by `getConnectionConfig()` keeps its fields but prints and serializes
+(`JSON.stringify`) with credentials and secret settings (S3 keys, for one) as
+`[REDACTED]`. Connection-string parameters such as
+`sc://host:443/;use_ssl=true;token=…` are rejected rather than sent on, since
+gRPC would repeat the URL, token included, in every connection error; use the
+`scs://` scheme for TLS and `withAuth()` for credentials (custom headers go
+through a `provider`).
+
 ### Rotating credentials
 
 A static token breaks as soon as it expires. For short-lived credentials
@@ -712,6 +722,10 @@ try {
 - `configure(builder)` adds builder settings (timeouts, logger, user, Spark
   configs) before connecting; `startTimeoutMs`, `pollIntervalMs` and `signal`
   bound the wait for a new session.
+- Leave the session token out of the URL, unlike AWS's PySpark examples
+  (`sc://host:443/;x-aws-proxy-auth=…`): the connector rejects URL parameters
+  so tokens never reach error messages or logs, and the helpers send the
+  token as a header for you.
 - The helpers return once the session's Spark Connect endpoint answers, not
   just when the service reports it ready: Glue, for one, reports a session
   READY about 25 seconds before its endpoint accepts clients.

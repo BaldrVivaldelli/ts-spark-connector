@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { inspect } from "util";
+import type { InspectOptions } from "util";
 import { DataFrameReaderTF } from "../read/dataFrameReaderTF";
 import { SparkCatalog } from "./catalog";
 import { SessionAlgebra } from "./sessionAlgebra";
@@ -13,7 +15,8 @@ import { WStream } from "../algebra/write";
 import { StreamWriterAlg } from "../algebra/write/dataframe";
 import { UnknownSchema } from "../schema/schema-model";
 import { validateRetryConfig } from "./retry";
-import { SPARK_CLIENT_CACHE_IDENTITY, sparkGrpcClient } from "./sparkClient";
+import { SPARK_CLIENT_CACHE_IDENTITY, assertNoConnectionParameters, sparkGrpcClient } from "./sparkClient";
+import { printableAddress, redactWhenPrinted } from "./telemetry";
 import { cleanupConnectionConfig } from "./rpcLifecycle";
 import {
     CACHE_ARTIFACT_PREFIX,
@@ -757,14 +760,19 @@ export class SparkSession implements SessionAlgebra {
         };
     }
 
+    /**
+     * A copy of the connection settings. Its fields hold the credentials as
+     * configured, but printing or serializing it (`console.log`,
+     * `util.inspect`, `JSON.stringify`) shows them redacted.
+     */
     getConnectionConfig(): SparkConnectionConfig {
-        return this.attachClientCacheIdentity({
-            ...this.connectionConfig,
-            auth: cloneAuth(this.connectionConfig.auth),
-            tls: cloneTls(this.connectionConfig.tls),
-            retry: this.connectionConfig.retry ? { ...this.connectionConfig.retry } : undefined,
-            sessionConfig: cloneSessionConfig(this.connectionConfig.sessionConfig),
-        });
+        return redactWhenPrinted(this.getConnectionConfigUnchecked());
+    }
+
+    /** Prints the session id and address, never credentials or configuration values. */
+    [inspect.custom](_depth: number, options: InspectOptions): string {
+        const summary = { sessionId: this.sessionId, address: printableAddress(this.connectionConfig.address) };
+        return `SparkSession ${inspect(summary, options)}`;
     }
 
     setConnectionConfig(config: SparkConnectionConfig) {
@@ -1369,10 +1377,12 @@ export class SparkSessionBuilder {
      */
     getOrCreate(): SparkSession {
         this.assertS3CredentialTransport();
+        const address = this.readConfiguredAddress();
+        if (address !== undefined) assertNoConnectionParameters(address);
         const session = new SparkSession(undefined, {
             userContext: this.userContext,
             connectionConfig: {
-                address: this.readConfiguredAddress(),
+                address,
                 auth: this.auth,
                 allowInsecureAuth: this.insecureAuthAllowed,
                 rpcTimeoutMs: this.rpcTimeoutMs,
@@ -1480,6 +1490,11 @@ export class SparkSessionBuilder {
         this.authDraft.username = auth.type === "basic" ? auth.username : undefined;
         this.authDraft.password = auth.type === "basic" ? auth.password : undefined;
         this.authDraft.token = auth.type === "token" ? auth.token : undefined;
+    }
+
+    /** Prints the configured address, never credentials or configuration values. */
+    [inspect.custom](_depth: number, options: InspectOptions): string {
+        return `SparkSessionBuilder ${inspect({ address: printableAddress(this.readConfiguredAddress()) }, options)}`;
     }
 
     private readConfiguredAddress(): string | undefined {

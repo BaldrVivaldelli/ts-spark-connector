@@ -1,0 +1,5 @@
+#!/bin/sh
+# Blocks a commit that would record a secret (token, key, password, private
+# key). npm install / npm ci enable this directory as the repository's hooks
+# (scripts/install-git-hooks.mjs); see CONTRIBUTING.md.
+exec node scripts/gitleaks.mjs staged

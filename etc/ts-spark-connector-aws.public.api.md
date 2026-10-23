@@ -4,6 +4,9 @@
 
 ```ts
 
+import { inspect } from 'util';
+import type { InspectOptions } from 'util';
+
 // @public
 export function athenaSession(options: AthenaSessionOptions): Promise<AwsSparkConnection>;
 

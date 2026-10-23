@@ -17,10 +17,14 @@ out/
 coverage/
 .cache/
 
-# Environment variables
+# Environment variables and credentials (see "Secrets and sensitive data" in AGENTS.MD)
 .env
-.env.*.local
-.env.local
+.env.*
+!.env.example
+.npmrc
+.aws/
+*.pem
+*.key
 
 # Spark-related temp files
 *.arrow

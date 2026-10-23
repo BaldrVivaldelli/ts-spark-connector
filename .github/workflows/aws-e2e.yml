@@ -5,8 +5,9 @@
 #
 # The role it assumes (AWS_E2E_ROLE_ARN) comes from infra/aws-e2e: deploy the
 # stack with GitHubOidcProviderArn set and copy its GitHubActionsRoleArn
-# output. The other repository variables are the stack's other outputs; see
-# infra/aws-e2e/README.md and TESTING.md.
+# output. The other repository secrets are the stack's other outputs; see
+# infra/aws-e2e/README.md and TESTING.md. They are secrets, not variables,
+# because ARNs carry the account id and this repository's logs are public.
 name: AWS E2E
 
 on:
@@ -60,15 +61,15 @@ jobs:
       - name: Check the selected services are configured
         env:
           SERVICES: ${{ inputs.services }}
-          ROLE_ARN: ${{ vars.AWS_E2E_ROLE_ARN }}
+          ROLE_ARN: ${{ secrets.AWS_E2E_ROLE_ARN }}
           REGION: ${{ vars.AWS_E2E_REGION }}
-          EMR_APPLICATION_ID: ${{ vars.AWS_E2E_EMR_APPLICATION_ID }}
-          EMR_EXECUTION_ROLE_ARN: ${{ vars.AWS_E2E_EMR_EXECUTION_ROLE_ARN }}
-          GLUE_ROLE_ARN: ${{ vars.AWS_E2E_GLUE_ROLE_ARN }}
-          ATHENA_WORKGROUP: ${{ vars.AWS_E2E_ATHENA_WORKGROUP }}
+          EMR_APPLICATION_ID: ${{ secrets.AWS_E2E_EMR_APPLICATION_ID }}
+          EMR_EXECUTION_ROLE_ARN: ${{ secrets.AWS_E2E_EMR_EXECUTION_ROLE_ARN }}
+          GLUE_ROLE_ARN: ${{ secrets.AWS_E2E_GLUE_ROLE_ARN }}
+          ATHENA_WORKGROUP: ${{ secrets.AWS_E2E_ATHENA_WORKGROUP }}
         run: |
           if [ -z "$ROLE_ARN" ] || [ -z "$REGION" ]; then
-            echo "::error title=AWS access not configured::Set the AWS_E2E_ROLE_ARN and AWS_E2E_REGION repository variables (see infra/aws-e2e/README.md)."
+            echo "::error title=AWS access not configured::Set the AWS_E2E_ROLE_ARN repository secret and the AWS_E2E_REGION repository variable (see infra/aws-e2e/README.md)."
             exit 1
           fi
           configured=0
@@ -88,22 +89,25 @@ jobs:
             fi
           fi
           if [ "$configured" = 0 ]; then
-            echo "::error title=No AWS service configured::The selected services ($SERVICES) have no repository variables set, so every test would skip. Set AWS_E2E_EMR_APPLICATION_ID and AWS_E2E_EMR_EXECUTION_ROLE_ARN, AWS_E2E_GLUE_ROLE_ARN or AWS_E2E_ATHENA_WORKGROUP (see infra/aws-e2e/README.md)."
+            echo "::error title=No AWS service configured::The selected services ($SERVICES) have no repository secrets set, so every test would skip. Set AWS_E2E_EMR_APPLICATION_ID and AWS_E2E_EMR_EXECUTION_ROLE_ARN, AWS_E2E_GLUE_ROLE_ARN or AWS_E2E_ATHENA_WORKGROUP (see infra/aws-e2e/README.md)."
             exit 1
           fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_E2E_ROLE_ARN }}
           aws-region: ${{ vars.AWS_E2E_REGION }}
           role-session-name: ts-spark-connector-aws-e2e
+          # This repository's logs are public: hide the account id wherever
+          # it shows up (ARNs in AWS error messages, for one).
+          mask-aws-account-id: true
 
       - name: Run real AWS tests
         run: npm run test:aws
         env:
           AWS_REGION: ${{ vars.AWS_E2E_REGION }}
-          TS_SPARK_AWS_EMR_APPLICATION_ID: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && vars.AWS_E2E_EMR_APPLICATION_ID || '' }}
-          TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && vars.AWS_E2E_EMR_EXECUTION_ROLE_ARN || '' }}
-          TS_SPARK_AWS_GLUE_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'glue') && vars.AWS_E2E_GLUE_ROLE_ARN || '' }}
-          TS_SPARK_AWS_ATHENA_WORKGROUP: ${{ (inputs.services == 'all' || inputs.services == 'athena') && vars.AWS_E2E_ATHENA_WORKGROUP || '' }}
+          TS_SPARK_AWS_EMR_APPLICATION_ID: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && secrets.AWS_E2E_EMR_APPLICATION_ID || '' }}
+          TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && secrets.AWS_E2E_EMR_EXECUTION_ROLE_ARN || '' }}
+          TS_SPARK_AWS_GLUE_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'glue') && secrets.AWS_E2E_GLUE_ROLE_ARN || '' }}
+          TS_SPARK_AWS_ATHENA_WORKGROUP: ${{ (inputs.services == 'all' || inputs.services == 'athena') && secrets.AWS_E2E_ATHENA_WORKGROUP || '' }}

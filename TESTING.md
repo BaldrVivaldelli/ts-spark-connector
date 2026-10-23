@@ -248,20 +248,27 @@ when you no longer need it.
 `.github/workflows/aws-e2e.yml` ("AWS E2E") runs the suite from the Actions
 tab with `workflow_dispatch` only, never on push or pull request, with a
 `services` input (`all`, `emr-serverless`, `glue` or `athena`). It assumes an
-IAM role through GitHub OIDC and reads these repository variables:
+IAM role through GitHub OIDC and reads these repository secrets and one
+variable:
 
-| Repository variable | Feeds |
-| --- | --- |
-| `AWS_E2E_ROLE_ARN` | Role to assume (stack output `GitHubActionsRoleArn`) |
-| `AWS_E2E_REGION` | `AWS_REGION` |
-| `AWS_E2E_EMR_APPLICATION_ID` | `TS_SPARK_AWS_EMR_APPLICATION_ID` |
-| `AWS_E2E_EMR_EXECUTION_ROLE_ARN` | `TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN` |
-| `AWS_E2E_GLUE_ROLE_ARN` | `TS_SPARK_AWS_GLUE_ROLE_ARN` |
-| `AWS_E2E_ATHENA_WORKGROUP` | `TS_SPARK_AWS_ATHENA_WORKGROUP` |
+| Name | Kind | Feeds |
+| --- | --- | --- |
+| `AWS_E2E_ROLE_ARN` | secret | Role to assume (stack output `GitHubActionsRoleArn`) |
+| `AWS_E2E_REGION` | variable | `AWS_REGION` |
+| `AWS_E2E_EMR_APPLICATION_ID` | secret | `TS_SPARK_AWS_EMR_APPLICATION_ID` |
+| `AWS_E2E_EMR_EXECUTION_ROLE_ARN` | secret | `TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN` |
+| `AWS_E2E_GLUE_ROLE_ARN` | secret | `TS_SPARK_AWS_GLUE_ROLE_ARN` |
+| `AWS_E2E_ATHENA_WORKGROUP` | secret | `TS_SPARK_AWS_ATHENA_WORKGROUP` |
 
-Variables of services that are not selected are passed as empty strings. The
+The repository is public and so are its workflow logs. ARNs and ids carry the
+AWS account id, so they are secrets, which GitHub masks in logs, and the
+workflow also masks the account id wherever AWS prints it. Never store them
+as variables, never echo them in a step, and never paste them into issues or
+pull requests.
+
+Values of services that are not selected are passed as empty strings. The
 workflow fails, instead of skipping everything, when the selected services
-have no variables set.
+have no secrets set.
 
 ### What it does not cover
 
