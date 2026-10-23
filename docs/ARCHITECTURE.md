@@ -47,6 +47,7 @@ describe the same query.
 | Interpreters | `src/engine/compilerRead.ts` (proto), `src/read/readDataFrameInterpreter.ts` (logical plan), `src/trace/trace.ts` (trace), `src/write/compilerWrite.ts` (writes) | One implementation of each algebra per output format. |
 | Client | `src/client/*` | `SparkSession` and its builder, request building (`sparkConnectExecutor.ts`), gRPC channel cache and RPCs (`sparkClient.ts`), reattachable execution, retries, errors, telemetry, credentials, catalog, per-execution options and server-version gating. |
 | Arrow | `src/typed/arrow-rows.ts`, `src/typed/arrow-encode.ts` | Decode result batches into rows; encode `createDataFrame` rows. |
+| AWS | `src/aws/*` | The `ts-spark-connector/aws` entry: one shared lifecycle (`managedSession.ts`: start or attach, wait, token provider, close hook) and a small driver per service over its AWS SDK client, which is loaded lazily. |
 | Protocol | `proto/spark/connect/*.proto` | Vendored Spark 4.2.0 descriptors, loaded at runtime with `@grpc/proto-loader` and `keepCase: true`, so request objects use the proto's snake_case field names. |
 
 ## Adding an operation, end to end

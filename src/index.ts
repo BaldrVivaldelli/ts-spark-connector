@@ -1,4 +1,10 @@
-// Main entry point - export public API
+/**
+ * TypeScript client for Apache Spark Connect: sessions, DataFrames, columns and
+ * the function library.
+ *
+ * @packageDocumentation
+ * @module ts-spark-connector
+ */
 export {
     SparkRuntimeConfig,
     SparkSession,

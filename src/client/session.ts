@@ -289,6 +289,7 @@ export class SparkSession implements SessionAlgebra {
     private serverVersion?: Promise<string>;
     private readonly cachedRelationIds = new Set<string>();
     private streamingQueryManager?: StreamingQueryManager;
+    private readonly closeHooks: Array<() => Promise<void>> = [];
     /** Connection config as given to the builder, before runtime `conf.set()` mirrors into it. */
     private builderConnectionConfig: SparkConnectionConfig;
 
@@ -852,6 +853,18 @@ export class SparkSession implements SessionAlgebra {
     }
 
     /**
+     * @internal Runs `hook` once when this session closes, after its own
+     * remote state was released and its channel closed, to stop what the
+     * session ran on (the AWS helpers terminate their managed Spark session
+     * here). A hook that fails rejects `close()`, which has closed the session
+     * by then. Clones and new sessions do not inherit hooks.
+     */
+    addCloseHook(hook: () => Promise<void>): void {
+        this.assertOpen();
+        this.closeHooks.push(hook);
+    }
+
+    /**
      * Releases remote session state and closes the cached gRPC channel.
      * Idempotent. Local state is released even when the server cannot be
      * reached: the session is closed afterwards and the ReleaseSession failure
@@ -897,7 +910,16 @@ export class SparkSession implements SessionAlgebra {
                 this.clientRetained = false;
                 this.clientCacheIdentity = undefined;
             }
+            let hookFailure: { error: unknown } | undefined;
+            for (const hook of this.closeHooks.splice(0)) {
+                try {
+                    await hook();
+                } catch (error) {
+                    hookFailure ??= { error };
+                }
+            }
             if (releaseFailure) throw releaseFailure.error;
+            if (hookFailure) throw hookFailure.error;
         })().finally(() => {
             this.closePromise = undefined;
         });

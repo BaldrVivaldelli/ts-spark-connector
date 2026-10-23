@@ -666,6 +666,73 @@ long-running execution that the client keeps alive (the session's
 listener that throws is reported through the session logger and never stops
 the stream. See [`docs/examples/streamingQueries.ts`](docs/examples/streamingQueries.ts).
 
+## Spark on AWS
+
+Amazon EMR Serverless, AWS Glue interactive sessions and Amazon Athena for
+Apache Spark expose Spark Connect endpoints. The `ts-spark-connector/aws`
+entry starts a session there (or attaches to a running one), waits until it
+accepts clients, connects with the session's token, renews the token before
+it expires, and stops the session when `spark.close()` runs. A session keeps
+billing until it is stopped or reaches its idle timeout.
+
+Each helper needs only its own AWS SDK v3 client, an optional peer
+dependency loaded when the helper is called:
+
+| Helper | Install | Starting a session needs |
+| --- | --- | --- |
+| `emrServerlessSession()` | `@aws-sdk/client-emr-serverless` | `applicationId` of an application with sessions enabled (emr-7.13.0+), `executionRoleArn` |
+| `glueSession()` | `@aws-sdk/client-glue` | `role`; creates a Glue 5.1 `SPARK_CONNECT` session |
+| `athenaSession()` | `@aws-sdk/client-athena` | `workGroup` with the Apache Spark 3.5 engine |
+
+```ts
+import { functions as F } from "ts-spark-connector";
+import { emrServerlessSession } from "ts-spark-connector/aws";
+
+const { spark, sessionId } = await emrServerlessSession({
+  applicationId: "00fabc123",
+  executionRoleArn: "arn:aws:iam::111122223333:role/EMRServerlessExecutionRole",
+  region: "us-east-1",
+  idleTimeoutMinutes: 15,
+});
+try {
+  await spark.read.table("sales.orders")
+    .groupBy("country")
+    .agg({ orders: F.count("*") })
+    .show();
+} finally {
+  await spark.close(); // also terminates the EMR Serverless session
+}
+```
+
+- Credentials and region come from the AWS SDK's default chain; pass a
+  configured `client` (`new EMRServerlessClient(...)`) to choose them.
+- `sessionId` attaches to a running session instead of starting one, for
+  example to reuse a warm session across Lambda invocations. `close()` leaves
+  such a session running unless `terminateOnClose: true` is set.
+- `configure(builder)` adds builder settings (timeouts, logger, user, Spark
+  configs) before connecting; `startTimeoutMs`, `pollIntervalMs` and `signal`
+  bound the wait for a new session.
+- The helpers return once the session's Spark Connect endpoint answers, not
+  just when the service reports it ready: Glue, for one, reports a session
+  READY about 25 seconds before its endpoint accepts clients.
+- Transient failures are retried 3 times by default, because the services'
+  proxies drop a request now and then; a query resumes through
+  `ReattachExecute` rather than running again. Call `withRetry()` in
+  `configure` to change that.
+- A session that fails to start, ends while being waited for, or is not ready
+  in time raises `AwsSparkSessionError`; a session the helper started is
+  stopped first.
+- These services run Spark 3.5.6; see [Spark 3.5 servers](#spark-35-servers)
+  for what differs from Spark 4.
+- The helpers are tested with mocked SDK clients, against a local Spark
+  server for the connection lifecycle, and against the real services with an
+  opt-in suite that passed on EMR Serverless, Glue and Athena in October
+  2026: see [TESTING.md](TESTING.md#real-aws-services-opt-in),
+  `npm run test:aws` and `infra/aws-e2e/` for the CloudFormation stack that
+  creates its resources.
+- `docs/examples/aws/` has one example per service and `reuseSession.ts`, the
+  warm-session pattern for short-lived processes such as AWS Lambda.
+
 ## Compatibility
 
 The currently verified compatibility targets are:
@@ -766,18 +833,21 @@ Not exposed as stable public API yet:
 ## Package contract
 
 The library is compiled once, to CommonJS, and published behind two entry
-points. `require("ts-spark-connector")` loads that build directly, and `import`
-loads `dist/index.mjs`, an ES module that re-exports the very same objects: an
+points per import path. `require("ts-spark-connector")` loads that build
+directly, and `import` loads `dist/index.mjs`, an ES module that re-exports the
+very same objects (likewise `ts-spark-connector/aws` and `dist/aws/`): an
 application that mixes both formats still has one set of classes, so
 `instanceof` checks on the error types keep working, and gRPC and Arrow stay
 lazily loaded either way. Both entries and their declarations (`.d.ts` and
 `.d.mts`) are smoke-tested from the packed tarball together with all
 `docs/examples`, and every Spark E2E job runs the examples against the server
-in both formats. Only the root import (`ts-spark-connector`) is a supported
-export; deep imports are intentionally blocked by `package.json#exports`.
+in both formats. The root import (`ts-spark-connector`) and
+`ts-spark-connector/aws` are the supported exports; other deep imports are
+intentionally blocked by `package.json#exports`.
 
 `npm run api:check` compares the `@public` declarations with the committed API
-Extractor [report](etc/ts-spark-connector.public.api.md); declarations
+Extractor reports ([root](etc/ts-spark-connector.public.api.md),
+[aws](etc/ts-spark-connector-aws.public.api.md)); declarations
 documented `@internal` are exported for typing convenience only and are not
 part of that contract. `npm run package:lint` validates the
 packed tarball with Publint and Are The Types Wrong, and

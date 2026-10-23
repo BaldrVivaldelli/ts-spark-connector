@@ -62,6 +62,9 @@ try {
     assert.ok(existsSync(join(extractedPackage, "dist", "index.d.ts")), "tarball is missing dist/index.d.ts");
     assert.ok(existsSync(join(extractedPackage, "dist", "index.mjs")), "tarball is missing the ES module entry dist/index.mjs");
     assert.ok(existsSync(join(extractedPackage, "dist", "index.d.mts")), "tarball is missing dist/index.d.mts");
+    for (const file of ["index.js", "index.d.ts", "index.mjs", "index.d.mts"]) {
+        assert.ok(existsSync(join(extractedPackage, "dist", "aws", file)), `tarball is missing dist/aws/${file}`);
+    }
     assert.ok(existsSync(join(extractedPackage, "proto", "spark", "connect", "base.proto")), "tarball is missing Spark proto files");
     assert.ok(existsSync(join(extractedPackage, "MIGRATION.md")), "tarball is missing the migration guide");
     assert.ok(existsSync(join(extractedPackage, "docs", "examples", "join.ts")), "tarball is missing executable examples");
@@ -109,6 +112,31 @@ assert.equal(loaded.some(path => path.includes("@grpc/grpc-js")), false, "gRPC l
 assert.equal(loaded.some(path => path.includes("@grpc/proto-loader")), false, "proto-loader loaded during plan-only import");
 `);
 
+    // The AWS SDK clients are optional peers: the subpath loads without them
+    // and a helper names the package it needs when it is called.
+    writeFileSync(join(consumerDir, "consumer-aws.cjs"), `
+const assert = require("node:assert/strict");
+const aws = require("ts-spark-connector/aws");
+for (const helper of ["emrServerlessSession", "glueSession", "athenaSession"]) assert.equal(typeof aws[helper], "function");
+assert.equal(typeof aws.AwsSparkSessionError, "function");
+assert.equal(Object.keys(require.cache).some(path => path.includes("@aws-sdk")), false, "AWS SDK loaded by the subpath import");
+aws.emrServerlessSession({ applicationId: "app", executionRoleArn: "role" }).then(
+    () => assert.fail("emrServerlessSession() ran without its SDK"),
+    error => assert.match(error.message, /needs @aws-sdk\\/client-emr-serverless/),
+);
+`);
+
+    writeFileSync(join(consumerDir, "consumer-aws.mjs"), `
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import aws, { AwsSparkSessionError, glueSession } from "ts-spark-connector/aws";
+assert.match(import.meta.resolve("ts-spark-connector/aws"), /\\/dist\\/aws\\/index\\.mjs$/);
+const commonJs = createRequire(import.meta.url)("ts-spark-connector/aws");
+assert.equal(aws, commonJs, "default export is not the CommonJS module");
+assert.equal(AwsSparkSessionError, commonJs.AwsSparkSessionError, "ESM and CJS consumers get different classes");
+await assert.rejects(glueSession({ role: "role" }), /needs @aws-sdk\\/client-glue/);
+`);
+
     // The ES module entry must be a real ES module that hands out the CommonJS
     // build's own objects: same classes for instanceof, same lazy loading.
     writeFileSync(join(consumerDir, "consumer.mjs"), `
@@ -136,8 +164,12 @@ for (const name of Object.keys(commonJs).filter(key => key !== "__esModule")) {
 
     writeFileSync(join(consumerDir, "consumer.mts"), `
 import connector, { SparkSession, col, typeof as typeOf } from "ts-spark-connector";
+import { emrServerlessSession, type AwsSparkConnection } from "ts-spark-connector/aws";
 const sessionId: string = SparkSession.builder().getOrCreate().getSessionId();
 const viaDefault: typeof SparkSession = connector.SparkSession;
+const connecting: Promise<AwsSparkConnection> = emrServerlessSession({ applicationId: "app", sessionId: "s" });
+const spark: Promise<SparkSession> = connecting.then(connection => connection.spark);
+void spark;
 void sessionId;
 void viaDefault;
 void col("id");
@@ -146,7 +178,10 @@ void typeOf("id");
 
     writeFileSync(join(consumerDir, "consumer.cts"), `
 import connector = require("ts-spark-connector");
+import aws = require("ts-spark-connector/aws");
 const sessionId: string = connector.SparkSession.builder().getOrCreate().getSessionId();
+const athena: typeof aws.athenaSession = aws.athenaSession;
+void athena;
 void sessionId;
 void connector.col("id");
 `);
@@ -165,13 +200,15 @@ void connector.col("id");
 
     run(process.execPath, [join(consumerDir, "consumer.cjs")], { cwd: consumerDir });
     run(process.execPath, [join(consumerDir, "consumer.mjs")], { cwd: consumerDir });
+    run(process.execPath, [join(consumerDir, "consumer-aws.cjs")], { cwd: consumerDir });
+    run(process.execPath, [join(consumerDir, "consumer-aws.mjs")], { cwd: consumerDir });
     run(process.execPath, [
         join(root, "node_modules", "@typescript", "native", "bin", "tsc"),
         "--project",
         join(consumerDir, "tsconfig.json"),
     ], { cwd: consumerDir });
 
-    process.stdout.write("Package smoke passed for CJS, ESM, and TypeScript declarations (ESM and CJS).\n");
+    process.stdout.write("Package smoke passed for CJS, ESM, the aws subpath, and TypeScript declarations (ESM and CJS).\n");
 } finally {
     rmSync(staleMarker, { force: true });
     rmSync(workspace, { recursive: true, force: true });

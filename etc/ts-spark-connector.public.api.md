@@ -3462,6 +3462,4 @@ export function zeroifnull(col: ColumnOrName): EBuilder;
 // @public
 export function zip_with(left: ColumnOrName, right: ColumnOrName, fn: (x: EBuilder, y: EBuilder) => EBuilder): EBuilder;
 
-// (No @packageDocumentation comment for this package)
-
 ```

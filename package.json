@@ -16,6 +16,24 @@
         "default": "./dist/index.js"
       },
       "default": "./dist/index.js"
+    },
+    "./aws": {
+      "import": {
+        "types": "./dist/aws/index.d.mts",
+        "default": "./dist/aws/index.mjs"
+      },
+      "require": {
+        "types": "./dist/aws/index.d.ts",
+        "default": "./dist/aws/index.js"
+      },
+      "default": "./dist/aws/index.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "aws": [
+        "./dist/aws/index.d.ts"
+      ]
     }
   },
   "sideEffects": false,
@@ -49,8 +67,8 @@
     "check:functions": "node scripts/generate-functions.mjs --check",
     "functions:generate": "node scripts/generate-functions.mjs",
     "examples:run": "npm run build && node scripts/run-examples.mjs",
-    "api:report": "npm run build && api-extractor run --local",
-    "api:check": "npm run build && api-extractor run",
+    "api:report": "npm run build && api-extractor run --local && api-extractor run --local -c api-extractor.aws.json",
+    "api:check": "npm run build && api-extractor run && api-extractor run -c api-extractor.aws.json",
     "package:lint": "node scripts/lint-package.mjs",
     "sbom": "npm sbom --omit=dev --sbom-format cyclonedx",
     "docs:api": "typedoc",
@@ -95,6 +113,9 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
+    "@aws-sdk/client-athena": "^3.1156.0",
+    "@aws-sdk/client-emr-serverless": "^3.1156.0",
+    "@aws-sdk/client-glue": "^3.1156.0",
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
@@ -125,6 +146,22 @@
     "@grpc/grpc-js": "^1.13.4",
     "@grpc/proto-loader": "^0.8.0",
     "apache-arrow": "^21.0.0"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-athena": "^3.938.0",
+    "@aws-sdk/client-emr-serverless": "^3.1035.0",
+    "@aws-sdk/client-glue": "^3.1062.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-athena": {
+      "optional": true
+    },
+    "@aws-sdk/client-emr-serverless": {
+      "optional": true
+    },
+    "@aws-sdk/client-glue": {
+      "optional": true
+    }
   },
   "release": {
     "branches": [
