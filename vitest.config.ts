@@ -5,7 +5,7 @@ export default defineConfig({
         globals: true,
         environment: "node",
         include: ["test/**/*.{test,spec}.ts", "tests/**/*.{test,spec}.ts"],
-        exclude: ["node_modules/**", "test/**/*.e2e.test.ts", "tests/**/*.e2e.test.ts"],
+        exclude: ["node_modules/**", "test/**/*.e2e.test.ts", "tests/**/*.e2e.test.ts", "test/**/*.aws.test.ts"],
         passWithNoTests: false,
         coverage: {
             provider: "v8",

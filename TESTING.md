@@ -185,6 +185,90 @@ The plaintext override (`docker-compose.plain.yml`) is available for manual,
 isolated debugging, but it is intentionally not used by the compatibility
 gate. See `spark-server/README.md`.
 
+## Real AWS services (opt-in)
+
+The Docker suites above never touch AWS. A separate suite,
+`test/aws-services.aws.test.ts`, runs the `ts-spark-connector/aws` helpers
+against real EMR Serverless, AWS Glue and Amazon Athena for Apache Spark. It
+is not part of `npm test`, the unit run or the CI that runs on pushes and
+pull requests. It last passed against all three services in us-east-1 on
+2026-10-23 (EMR Serverless emr-7.13.0, Glue 5.1 and Athena's Apache Spark 3.5
+engine).
+
+For each service it covers:
+
+- the helper starts a session, runs queries (a SQL `SELECT`, `range().count()`
+  and a small `createDataFrame` aggregation) and stops the session on
+  `close()`
+- a second connection attaches by `sessionId`, runs a query, and its
+  `close()` leaves the session running
+- an unknown `sessionId` is rejected (this starts nothing and costs nothing)
+
+### Creating the resources
+
+`infra/aws-e2e/template.yaml` is a CloudFormation stack with an EMR Serverless
+application, the Glue and Athena roles, an Athena Spark workgroup and,
+optionally, a role for GitHub Actions. See `infra/aws-e2e/README.md` for the
+deploy command and a snippet that exports the variables below from the stack
+outputs.
+
+### Environment variables
+
+| Variable | Service | Value |
+| --- | --- | --- |
+| `AWS_REGION` | all | Region of the resources |
+| `TS_SPARK_AWS_EMR_APPLICATION_ID` | EMR Serverless | Application id (stack output `EmrApplicationId`) |
+| `TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN` | EMR Serverless | Job runtime role (`EmrExecutionRoleArn`) |
+| `TS_SPARK_AWS_GLUE_ROLE_ARN` | Glue | Session role (`GlueRoleArn`) |
+| `TS_SPARK_AWS_ATHENA_WORKGROUP` | Athena | Spark workgroup name (`AthenaWorkGroup`) |
+
+Credentials come from the AWS SDK's default chain.
+
+```bash
+npm run test:aws
+```
+
+A service whose variables are not set skips its tests, so the run passes with
+only the services you configured (and passes having tested nothing if none is
+configured).
+
+### Cost and cleanup
+
+Sessions bill while they run. Every test stops the sessions it starts, in an
+`afterEach` hook that calls the service's stop command even when an assertion
+fails,
+and each session has a 15-minute idle timeout as a safety net. After a run
+that was killed, check for leftovers with `aws emr-serverless list-sessions`,
+`aws glue list-sessions` and `aws athena list-sessions`. The stack itself
+bills nothing while idle; delete it with `aws cloudformation delete-stack`
+when you no longer need it.
+
+### Manual workflow
+
+`.github/workflows/aws-e2e.yml` ("AWS E2E") runs the suite from the Actions
+tab with `workflow_dispatch` only, never on push or pull request, with a
+`services` input (`all`, `emr-serverless`, `glue` or `athena`). It assumes an
+IAM role through GitHub OIDC and reads these repository variables:
+
+| Repository variable | Feeds |
+| --- | --- |
+| `AWS_E2E_ROLE_ARN` | Role to assume (stack output `GitHubActionsRoleArn`) |
+| `AWS_E2E_REGION` | `AWS_REGION` |
+| `AWS_E2E_EMR_APPLICATION_ID` | `TS_SPARK_AWS_EMR_APPLICATION_ID` |
+| `AWS_E2E_EMR_EXECUTION_ROLE_ARN` | `TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN` |
+| `AWS_E2E_GLUE_ROLE_ARN` | `TS_SPARK_AWS_GLUE_ROLE_ARN` |
+| `AWS_E2E_ATHENA_WORKGROUP` | `TS_SPARK_AWS_ATHENA_WORKGROUP` |
+
+Variables of services that are not selected are passed as empty strings. The
+workflow fails, instead of skipping everything, when the selected services
+have no variables set.
+
+### What it does not cover
+
+Token renewal after AWS's one-hour token lifetime is not exercised: a real
+run would have to stay open for over an hour. `test/aws-lifecycle.e2e.test.ts`
+covers renewal and the connection lifecycle against the local Spark server.
+
 ## Troubleshooting
 
 ### Tests failing to connect to Spark

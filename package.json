@@ -60,6 +60,7 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:aws": "vitest run --config vitest.aws.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
     "test:package": "node scripts/smoke-package.mjs",
     "test:proto": "node scripts/verify-proto-manifest.mjs",

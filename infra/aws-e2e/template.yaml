@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Smallest AWS environment for the ts-spark-connector real-AWS suite
+  (npm run test:aws): an EMR Serverless application, a Glue role, an Athena
+  Spark workgroup and, optionally, a role for GitHub Actions.
+
+# What this stack is for
+#   Gives test/aws-services.aws.test.ts something to run against: one service
+#   target per helper of ts-spark-connector/aws (emrServerlessSession,
+#   glueSession, athenaSession). The Outputs feed the TS_SPARK_AWS_* variables
+#   and the AWS_E2E_* repository variables of .github/workflows/aws-e2e.yml.
+#
+# Cost
+#   Nothing here bills while idle. The EMR Serverless application starts on
+#   demand and stops after 15 idle minutes, the roles and the workgroup are
+#   free, and Spark sessions bill only while they run. MaximumCapacity bounds
+#   what a runaway session could use.
+#
+# Deploy
+#   aws cloudformation deploy \
+#     --template-file infra/aws-e2e/template.yaml \
+#     --stack-name ts-spark-connector-e2e \
+#     --capabilities CAPABILITY_IAM
+#   Add --parameter-overrides GitHubOidcProviderArn=<arn> to create the role
+#   that the GitHub workflow assumes.
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: ts-spark-connector-e2e
+    Description: Prefix of the EMR Serverless application and Athena workgroup names.
+  GitHubRepository:
+    Type: String
+    Default: BaldrVivaldelli/ts-spark-connector
+    Description: Repository (owner/name) allowed to assume the GitHub Actions role.
+  GitHubOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the account's GitHub OIDC identity provider. Leave empty to skip
+      the GitHub Actions role.
+
+Conditions:
+  CreateGitHubRole: !Not [!Equals [!Ref GitHubOidcProviderArn, ""]]
+
+Resources:
+  # emr-7.13.0 is the first release with Spark Connect sessions (Spark 3.5.6).
+  EmrApplication:
+    Type: AWS::EMRServerless::Application
+    Properties:
+      Name: !Sub ${NamePrefix}
+      Type: SPARK
+      ReleaseLabel: emr-7.13.0
+      InteractiveConfiguration:
+        SessionEnabled: true
+      AutoStartConfiguration:
+        Enabled: true
+      AutoStopConfiguration:
+        Enabled: true
+        IdleTimeoutMinutes: 15
+      MaximumCapacity:
+        Cpu: 16 vCPU
+        Memory: 64 GB
+        Disk: 200 GB
+
+  EmrExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: emr-serverless.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: glue-catalog-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read-only, so spark.catalog calls work.
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/*
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/*/*
+
+  GlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole
+
+  # This policy follows AWS's Athena Spark examples; it is enough for the
+  # suite's queries, which read no tables.
+  AthenaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: athena.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: athena-spark
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/*
+                  - !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/*/*
+              # The workgroup ARN is built from the name, not !GetAtt, because
+              # the workgroup refers to this role.
+              - Effect: Allow
+                Action:
+                  - athena:GetWorkGroup
+                  - athena:GetSession
+                  - athena:GetSessionStatus
+                  - athena:TerminateSession
+                Resource: !Sub arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${NamePrefix}-spark
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-athena*
+
+  # Spark 3.5 workgroups take no ResultConfiguration.
+  SparkWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub ${NamePrefix}-spark
+      RecursiveDeleteOption: true
+      WorkGroupConfiguration:
+        EngineVersion:
+          SelectedEngineVersion: Apache Spark version 3.5
+        ExecutionRole: !GetAtt AthenaExecutionRole.Arn
+
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Condition: CreateGitHubRole
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:*
+      Policies:
+        # Exactly the calls the three helpers make.
+        - PolicyName: aws-e2e
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - emr-serverless:StartSession
+                  - emr-serverless:ListSessions
+                Resource: !Sub arn:${AWS::Partition}:emr-serverless:${AWS::Region}:${AWS::AccountId}:/applications/${EmrApplication}
+              - Effect: Allow
+                Action:
+                  - emr-serverless:GetSession
+                  - emr-serverless:GetSessionEndpoint
+                  - emr-serverless:TerminateSession
+                Resource: !Sub arn:${AWS::Partition}:emr-serverless:${AWS::Region}:${AWS::AccountId}:/applications/${EmrApplication}/sessions/*
+              - Effect: Allow
+                Action:
+                  - glue:CreateSession
+                  - glue:GetSession
+                  - glue:GetSessionEndpoint
+                  - glue:StopSession
+                  - glue:DeleteSession
+                Resource: !Sub arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:session/*
+              - Effect: Allow
+                Action:
+                  - athena:StartSession
+                  - athena:GetSession
+                  - athena:GetSessionStatus
+                  - athena:GetSessionEndpoint
+                  - athena:TerminateSession
+                  - athena:GetWorkGroup
+                Resource: !Sub arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${SparkWorkGroup}
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt EmrExecutionRole.Arn
+                  - !GetAtt GlueRole.Arn
+                  - !GetAtt AthenaExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService:
+                      - emr-serverless.amazonaws.com
+                      - glue.amazonaws.com
+                      - athena.amazonaws.com
+
+Outputs:
+  EmrApplicationId:
+    Description: EMR Serverless application id. Feeds TS_SPARK_AWS_EMR_APPLICATION_ID / AWS_E2E_EMR_APPLICATION_ID.
+    Value: !Ref EmrApplication
+  EmrExecutionRoleArn:
+    Description: EMR Serverless execution role. Feeds TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN / AWS_E2E_EMR_EXECUTION_ROLE_ARN.
+    Value: !GetAtt EmrExecutionRole.Arn
+  GlueRoleArn:
+    Description: Glue session role. Feeds TS_SPARK_AWS_GLUE_ROLE_ARN / AWS_E2E_GLUE_ROLE_ARN.
+    Value: !GetAtt GlueRole.Arn
+  AthenaWorkGroup:
+    Description: Athena Spark workgroup name. Feeds TS_SPARK_AWS_ATHENA_WORKGROUP / AWS_E2E_ATHENA_WORKGROUP.
+    Value: !Ref SparkWorkGroup
+  GitHubActionsRoleArn:
+    Condition: CreateGitHubRole
+    Description: Role the GitHub workflow assumes. Feeds the AWS_E2E_ROLE_ARN repository variable.
+    Value: !GetAtt GitHubActionsRole.Arn
