@@ -203,10 +203,10 @@ console.log(explain);
 
 ## Spark Connect server
 
-The repo includes a version-parameterized Spark 4.x Docker setup under
+The repo includes a version-parameterized Spark Docker setup under
 `spark-server/`. It defaults to 4.0.4, builds every version covered by the E2E
-matrix (4.0.0, 4.0.4, 4.1.3 and 4.2.0) through `SPARK_VERSION` and
-`SPARK_AVRO_SHA256`, starts a TLS-enabled endpoint, and uses the development CA
+matrix (3.5.6, 4.0.0, 4.0.4, 4.1.3 and 4.2.0) through `SPARK_VERSION` and
+`SPARK_AVRO_SHA256` (plus `SPARK_IMAGE_TAG=3.5.6-java17` for 3.5.6), starts a TLS-enabled endpoint, and uses the development CA
 shown in the quick start.
 
 ```bash

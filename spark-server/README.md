@@ -2,9 +2,11 @@
 
 The repository ships a Dockerized Spark Connect server for development and
 end-to-end tests. It defaults to **Apache Spark 4.0.4**; the CI E2E matrix also
-exercises **4.0.0**, **4.1.3** and **4.2.0**, always with the matching Scala
-2.13 Avro artifact (the version/checksum table lives in
-[`TESTING.md`](../TESTING.md)). TLS is enabled by default on port `15002`.
+exercises **3.5.6**, **4.0.0**, **4.1.3** and **4.2.0**, always with the
+matching Avro artifact (Scala 2.13, or 2.12 on 3.5; the version/checksum table
+lives in [`TESTING.md`](../TESTING.md)). Spark 3.5 does not bundle the Connect
+server, so its image adds the pinned `spark-connect_2.12` jar and builds from
+the `3.5.6-java17` tag. TLS is enabled by default on port `15002`.
 
 Spark Connect 4.0.x exposes a plaintext gRPC listener. The container therefore
 binds Spark only to `127.0.0.1:15003` and uses HAProxy to terminate TLS/ALPN

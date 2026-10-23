@@ -1,7 +1,8 @@
 # Testing with Docker
 
 This project includes Docker configuration for the behavioral E2E gate. The CI
-E2E matrix covers Apache Spark Connect 4.0.0, 4.0.4, 4.1.3 and 4.2.0 over TLS.
+E2E matrix covers Apache Spark Connect 3.5.6, 4.0.0, 4.0.4, 4.1.3 and 4.2.0
+over TLS.
 The vendored protocol descriptor is the exact Apache Spark 4.2.0 set, the
 newest line in the matrix; the older servers verify that version-gated
 features stay off and everything else keeps working. `SPARK_VERSION` reaches
@@ -73,8 +74,8 @@ docker compose -f docker-compose.test.yml down -v
 
 The Docker test setup includes:
 
-1. **Spark server container**: runs the selected Spark version (4.0.0, 4.0.4,
-   4.1.3 or 4.2.0 in the E2E matrix) on a loopback-only plaintext backend.
+1. **Spark server container**: runs the selected Spark version (3.5.6, 4.0.0,
+   4.0.4, 4.1.3 or 4.2.0 in the E2E matrix) on a loopback-only plaintext backend.
    HAProxy terminates TLS with ALPN `h2` on port 15002.
 2. **Test runner container**: trusts only the public development CA and runs
    the E2E suite against Spark.
@@ -91,8 +92,8 @@ Each CI matrix job also runs the executable `join` example and publishes:
 - a Markdown report in the GitHub job summary;
 - Spark logs when the suite or example fails.
 
-The downloadable `e2e-spark-4.0.0`, `e2e-spark-4.0.4`, `e2e-spark-4.1.3` and
-`e2e-spark-4.2.0` artifacts are retained for 30 days.
+The downloadable `e2e-spark-3.5.6`, `e2e-spark-4.0.0`, `e2e-spark-4.0.4`,
+`e2e-spark-4.1.3` and `e2e-spark-4.2.0` artifacts are retained for 30 days.
 
 ## Environment Variables
 
@@ -102,13 +103,17 @@ The downloadable `e2e-spark-4.0.0`, `e2e-spark-4.0.4`, `e2e-spark-4.1.3` and
   in the certificate SANs.
 - `SPARK_TEST_DEST`: server-visible output root for write/read round trips.
 - `SPARK_VERSION`: server/image version; defaults to `4.0.4`. The E2E matrix
-  covers `4.0.0`, `4.0.4`, `4.1.3` and `4.2.0`.
-- `SPARK_AVRO_SHA256`: SHA-256 of the matching Scala 2.13 Avro artifact
-  (`spark-avro_2.13-<version>.jar` on Maven Central). Always set it together
-  with `SPARK_VERSION`:
+  covers `3.5.6`, `4.0.0`, `4.0.4`, `4.1.3` and `4.2.0`.
+- `SPARK_AVRO_SHA256`: SHA-256 of the matching Avro artifact
+  (`spark-avro_2.13-<version>.jar` on Maven Central, `spark-avro_2.12` for
+  3.5). Always set it together with `SPARK_VERSION`.
+- `SPARK_IMAGE_TAG`: `apache/spark` image tag; defaults to `SPARK_VERSION`.
+  Spark 3.5 needs `3.5.6-java17`, since its default image runs Java 11 and
+  the Iceberg runtime requires Java 17.
 
 | `SPARK_VERSION` | `SPARK_AVRO_SHA256` |
 | --- | --- |
+| `3.5.6` | `933ab859ec96aca9b4628b26e1b9ac4e67156f38f6936fb495d7df1486f6ee24` |
 | `4.0.0` | `083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709` |
 | `4.0.4` | `f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55` |
 | `4.1.3` | `83f848dae53cfe511d61d81026c1b08321390b778684552f3ddaa44c02a77b9c` |
@@ -119,6 +124,15 @@ To run the default CI matrix target locally:
 ```bash
 SPARK_VERSION=4.0.4 \
 SPARK_AVRO_SHA256=f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55 \
+npm run test:docker
+```
+
+To run the Spark 3.5 entry, which also selects the Java 17 image:
+
+```bash
+SPARK_VERSION=3.5.6 \
+SPARK_IMAGE_TAG=3.5.6-java17 \
+SPARK_AVRO_SHA256=933ab859ec96aca9b4628b26e1b9ac4e67156f38f6936fb495d7df1486f6ee24 \
 npm run test:docker
 ```
 

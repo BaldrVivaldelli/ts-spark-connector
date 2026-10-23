@@ -1,5 +1,9 @@
 ARG SPARK_VERSION=4.0.4
-FROM apache/spark:${SPARK_VERSION}
+# The image tag defaults to the Spark version. Spark 3.5 images default to
+# Java 11, which the Iceberg runtime no longer supports, so the 3.5 line is
+# built from its `-java17` tag.
+ARG SPARK_IMAGE_TAG=${SPARK_VERSION}
+FROM apache/spark:${SPARK_IMAGE_TAG}
 
 ARG SPARK_VERSION
 
@@ -16,23 +20,49 @@ RUN id -u spark >/dev/null 2>&1 || (groupadd -g 1001 spark && useradd -u 1001 -g
     mkdir -p "$SPARK_HOME/conf" "$SPARK_HOME/jars" "$SPARK_HOME/tmp" "$SPARK_HOME/logs" /opt/spark/conf-plain /data/dest /opt/certs && \
     chown -R spark:spark "$SPARK_HOME" /opt/spark/conf-plain /data /opt/certs
 
-# Pin the version-matched Scala 2.13 Avro artifact and avoid runtime downloads.
+# Pin the version-matched Avro artifact (Scala 2.13 from Spark 4, 2.12 on
+# Spark 3.5) and avoid runtime downloads.
 ARG SPARK_AVRO_SHA256=f2862c13564bf6cd78cfdfe7b902ef07e68d1d6a5edd9fde336c0cf0fcdb8c55
-RUN curl --fail --show-error --location \
-      "https://repo1.maven.org/maven2/org/apache/spark/spark-avro_2.13/${SPARK_VERSION}/spark-avro_2.13-${SPARK_VERSION}.jar" \
-      --output "/opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" \
- && echo "$SPARK_AVRO_SHA256  /opt/spark/jars/spark-avro_2.13-${SPARK_VERSION}.jar" | sha256sum --check --strict
+RUN set -eu; \
+    case "$SPARK_VERSION" in 3.*) scala="2.12" ;; *) scala="2.13" ;; esac; \
+    curl --fail --show-error --location \
+      "https://repo1.maven.org/maven2/org/apache/spark/spark-avro_${scala}/${SPARK_VERSION}/spark-avro_${scala}-${SPARK_VERSION}.jar" \
+      --output "/opt/spark/jars/spark-avro_${scala}-${SPARK_VERSION}.jar"; \
+    echo "$SPARK_AVRO_SHA256  /opt/spark/jars/spark-avro_${scala}-${SPARK_VERSION}.jar" | sha256sum --check --strict
+
+# Spark 4 distributions bundle the Connect server; Spark 3.5 ships it as a
+# separate artifact, pinned here per patch release.
+RUN set -eu; \
+    case "$SPARK_VERSION" in \
+      3.5.6) connect_sha="d40a2d1cd2f6201d37750282435cb340a06ec6cbbdcffca5950e2e0edce1163d" ;; \
+      3.*) echo "No pinned Spark Connect server jar for Spark ${SPARK_VERSION}." >&2; exit 1 ;; \
+      *) connect_sha="" ;; \
+    esac; \
+    if [ -n "$connect_sha" ]; then \
+      curl --fail --show-error --location \
+        "https://repo1.maven.org/maven2/org/apache/spark/spark-connect_2.12/${SPARK_VERSION}/spark-connect_2.12-${SPARK_VERSION}.jar" \
+        --output "/opt/spark/jars/spark-connect_2.12-${SPARK_VERSION}.jar"; \
+      echo "${connect_sha}  /opt/spark/jars/spark-connect_2.12-${SPARK_VERSION}.jar" | sha256sum --check --strict; \
+    fi
 
 # Lakehouse formats, pinned per Spark minor and verified by checksum.
-# Delta 4.4.1 publishes one build per supported Spark minor; Iceberg 1.12.0
-# ships Spark 4.0 and 4.1 runtimes and none for 4.2 yet, so a 4.2 image
-# carries Delta only and the E2E suite gates its Iceberg cases on the
-# server version.
+# Delta 4.4.1 publishes one build per supported Spark minor and needs Spark 4,
+# so Spark 3.5 carries the Delta 3.3 line. Iceberg 1.12.0 ships Spark 3.5, 4.0
+# and 4.1 runtimes and none for 4.2 yet, so a 4.2 image carries Delta only and
+# the E2E suite gates its Iceberg cases on the server version.
 ARG DELTA_VERSION=4.4.1
 ARG ICEBERG_VERSION=1.12.0
 RUN set -eu; \
     minor="${SPARK_VERSION%.*}"; \
+    delta_version="$DELTA_VERSION"; \
+    delta_storage_sha="f585818d646cb3625b305270ec24f3e6f0b6ea63ed9bac1ae8f340f8faaeae8f"; \
     case "$minor" in \
+      3.5) delta_version="3.3.3"; \
+           delta_artifact="delta-spark_2.12"; \
+           delta_sha="4912bf902a1c453aba3bd838ff212dedd357155212f9bb37a6b47d97f2827ebc"; \
+           delta_storage_sha="45ad193053fd30cebe6d9ab1889873cde39b223a0f210e00ebee8b6642476901"; \
+           iceberg_artifact="iceberg-spark-runtime-3.5_2.12"; \
+           iceberg_sha="8dd8c90e54ed1a20f2461309d047a255ee56382eb7c0a46162b27a4936fd86dc" ;; \
       4.0) delta_artifact="delta-spark_4.0_2.13"; \
            delta_sha="d0766b4b0ace348dca7a5851418767e1eea170c7303c4771cda2934f49627ce8"; \
            iceberg_artifact="iceberg-spark-runtime-4.0_2.13"; \
@@ -48,13 +78,13 @@ RUN set -eu; \
       *) echo "No pinned lakehouse artifacts for Spark ${SPARK_VERSION}." >&2; exit 1 ;; \
     esac; \
     curl --fail --show-error --location \
-      "https://repo1.maven.org/maven2/io/delta/${delta_artifact}/${DELTA_VERSION}/${delta_artifact}-${DELTA_VERSION}.jar" \
-      --output "/opt/spark/jars/${delta_artifact}-${DELTA_VERSION}.jar"; \
-    echo "${delta_sha}  /opt/spark/jars/${delta_artifact}-${DELTA_VERSION}.jar" | sha256sum --check --strict; \
+      "https://repo1.maven.org/maven2/io/delta/${delta_artifact}/${delta_version}/${delta_artifact}-${delta_version}.jar" \
+      --output "/opt/spark/jars/${delta_artifact}-${delta_version}.jar"; \
+    echo "${delta_sha}  /opt/spark/jars/${delta_artifact}-${delta_version}.jar" | sha256sum --check --strict; \
     curl --fail --show-error --location \
-      "https://repo1.maven.org/maven2/io/delta/delta-storage/${DELTA_VERSION}/delta-storage-${DELTA_VERSION}.jar" \
-      --output "/opt/spark/jars/delta-storage-${DELTA_VERSION}.jar"; \
-    echo "f585818d646cb3625b305270ec24f3e6f0b6ea63ed9bac1ae8f340f8faaeae8f  /opt/spark/jars/delta-storage-${DELTA_VERSION}.jar" | sha256sum --check --strict; \
+      "https://repo1.maven.org/maven2/io/delta/delta-storage/${delta_version}/delta-storage-${delta_version}.jar" \
+      --output "/opt/spark/jars/delta-storage-${delta_version}.jar"; \
+    echo "${delta_storage_sha}  /opt/spark/jars/delta-storage-${delta_version}.jar" | sha256sum --check --strict; \
     if [ -n "$iceberg_artifact" ]; then \
       curl --fail --show-error --location \
         "https://repo1.maven.org/maven2/org/apache/iceberg/${iceberg_artifact}/${ICEBERG_VERSION}/${iceberg_artifact}-${ICEBERG_VERSION}.jar" \

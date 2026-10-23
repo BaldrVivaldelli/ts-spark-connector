@@ -124,11 +124,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # avro-sha256 is the SHA-256 of spark-avro_2.13-<spark>.jar on Maven Central.
-        # The vendored protocol descriptors are the newest line (4.2.0); features
-        # newer than a server are gated on its reported version, and this matrix
-        # verifies that every listed server still works with them.
+        # avro-sha256 is the SHA-256 of spark-avro_<scala>-<spark>.jar on Maven
+        # Central (Scala 2.13 from Spark 4, 2.12 on 3.5). The vendored protocol
+        # descriptors are the newest line (4.2.0); features newer than a server
+        # are gated on its reported version, and this matrix verifies that every
+        # listed server still works with them. 3.5.6 is the Spark behind AWS's
+        # managed Spark Connect endpoints; its image-tag carries Java 17.
         include:
+          - spark: 3.5.6
+            avro-sha256: 933ab859ec96aca9b4628b26e1b9ac4e67156f38f6936fb495d7df1486f6ee24
+            image-tag: 3.5.6-java17
           - spark: 4.0.0
             avro-sha256: 083fb13d7a1091025b135eff216e2009b42c9724bb8bc597d2f28b1207ef4709
           - spark: 4.0.4
@@ -140,6 +145,7 @@ jobs:
     env:
       SPARK_VERSION: ${{ matrix.spark }}
       SPARK_AVRO_SHA256: ${{ matrix.avro-sha256 }}
+      SPARK_IMAGE_TAG: ${{ matrix.image-tag || matrix.spark }}
     steps:
       - uses: actions/checkout@v7
 
