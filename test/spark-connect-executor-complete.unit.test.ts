@@ -45,6 +45,8 @@ function fakeSession(serverId?: string) {
         getServerSideSessionId: vi.fn(() => serverId),
         resolveExecution: vi.fn((options?: ExecutionOptions) => resolveExecution([], options)),
         notifyStreamingQueryStarted: vi.fn(),
+        requireServerVersion: vi.fn(async () => "4.0.4"),
+        version: vi.fn(async () => "4.0.4"),
     };
     return {
         methods,

@@ -69,8 +69,8 @@ docker compose down
 
 📖 **For detailed testing instructions, see [TESTING.md](./TESTING.md)**
 
-The E2E matrix currently covers Spark Connect 4.0.0, 4.0.4, 4.1.3 and 4.2.0
-over TLS. Other versions are not claimed as supported until their full behavior
+The E2E matrix currently covers Spark Connect 3.5.6, 4.0.0, 4.0.4, 4.1.3 and
+4.2.0 over TLS. Other versions are not claimed as supported until their full behavior
 suite is green.
 
 ## Pull Requests

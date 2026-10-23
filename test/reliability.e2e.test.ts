@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { status } from "@grpc/grpc-js";
 import { SparkConnectError, SparkSession, schema } from "../src";
 import type { SparkTelemetryEvent } from "../src";
+import { serverAtLeast } from "./fixtures/server-version";
 
 const connectUrl = process.env.SPARK_CONNECT_URL ?? "scs://localhost:15002";
 const caPath = process.env.SPARK_TLS_CA ?? "./spark-server/certs/ca.crt";
@@ -152,6 +153,17 @@ describe("production reliability (E2E)", () => {
         });
         expect(error.message).toMatch(/^ExecutePlan failed: \[UNRESOLVED_COLUMN\.WITH_SUGGESTION\]/);
         expect(error.message).toContain("definitely_missing_column");
+        if (!await serverAtLeast(session, "4.0.0")) {
+            // Spark 3.5 sends no error id, class or SQL state in ErrorInfo and
+            // has no FetchErrorDetails; the class above comes from the message.
+            expect(error.errorId).toBeUndefined();
+            expect(error.remoteDetails).toBeUndefined();
+            expect(error.errorInfo).toMatchObject({
+                reason: "org.apache.spark.sql.catalyst.ExtendedAnalysisException",
+                domain: "org.apache.spark",
+            });
+            return;
+        }
         // google.rpc.ErrorInfo decoded from grpc-status-details-bin.
         expect(error.errorId).toMatch(/^[0-9a-f-]{36}$/);
         // FetchErrorDetails enrichment: the response carries no session_id, and an

@@ -455,7 +455,7 @@ export const SECTIONS = [
             ["median(col)", "Median of the group."],
             ["min(col)", "Minimum of the group."],
             ["min_by(col, ord)", "The value of `col` at the minimum of `ord`."],
-            ["mode(col, deterministic:bool=false)", "The most frequent value of the group."],
+            ["mode(col, deterministic:bool?)", "The most frequent value of the group; `deterministic` (Spark 4.0+) breaks ties by the lowest value."],
             ["percentile(col, percentage:any, frequency:int=1)", "Exact percentile(s) of a numeric column."],
             ["percentile_approx(col, percentage:any, accuracy:int=10000)", "Approximate percentile(s) of a numeric column."],
             ["product(col)", "Product of the group."],

@@ -132,6 +132,20 @@ describe("SparkSession remote configuration", () => {
         expect(closeChannel).toHaveBeenCalledOnce();
     });
 
+    it("closes without error against servers that predate ReleaseSession", async () => {
+        const release = vi.spyOn(sparkGrpcClient, "releaseSession").mockRejectedValueOnce(
+            new SparkConnectError("ReleaseSession failed: Method not found", { operation: "ReleaseSession", code: 12 }),
+        );
+        const closeChannel = vi.spyOn(sparkGrpcClient, "close").mockImplementation(() => undefined);
+        const session = SparkSession.builder().getOrCreate();
+        session.markRemoteTouched();
+
+        await expect(session.close()).resolves.toBeUndefined();
+        expect(release).toHaveBeenCalledOnce();
+        expect(closeChannel).toHaveBeenCalledOnce();
+        expect(() => session.read).toThrow(/closed/i);
+    });
+
     it("requires canonical UUID session ids at the public constructor boundary", () => {
         expect(() => createSparkSession("example-session")).toThrow(/sessionId.*UUID/i);
         expect(createSparkSession("00112233-4455-4677-8899-aabbccddeeff").getSessionId())

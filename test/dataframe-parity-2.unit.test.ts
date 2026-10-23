@@ -1,5 +1,5 @@
 import * as arrow from "apache-arrow";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Observation, SparkSession, col, lit, schema } from "../src";
 import { sparkGrpcClient } from "../src/client/sparkClient";
 import { GroupType, JoinType } from "../src/engine/sparkConnectEnums";
@@ -56,6 +56,10 @@ const people = () => session.read.readWith(People, "parquet", "/data/people.parq
 const lax = () => session.read.parquet("/data/lax.parquet");
 const attribute = (name: string) => ({ unresolved_attribute: { unparsed_identifier: name } });
 
+// Checkpoints and MERGE are Spark 4.0 commands, checked against the server version.
+beforeEach(() => {
+    vi.spyOn(SparkSession.prototype, "version").mockResolvedValue("4.0.4");
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("grouping variants", () => {

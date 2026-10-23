@@ -1,0 +1,25 @@
+/**
+ * API report of the `ts-spark-connector/aws` subpath. It extends the main
+ * entry's configuration; SparkSession and the other core types this entry
+ * refers to are exported by, and reported for, the main entry.
+ */
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  "extends": "./api-extractor.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/aws/index.d.ts",
+  "apiReport": {
+    "enabled": true,
+    "reportFileName": "ts-spark-connector-aws",
+    "reportVariants": ["public"],
+    "reportFolder": "<projectFolder>/etc",
+    "reportTempFolder": "<projectFolder>/node_modules/.cache/api-extractor"
+  },
+  "messages": {
+    "extractorMessageReporting": {
+      "ae-forgotten-export": {
+        "logLevel": "none",
+        "addToApiReportFile": false
+      }
+    }
+  }
+}

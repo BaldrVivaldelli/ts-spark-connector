@@ -1,7 +1,7 @@
 {
     "$schema": "https://typedoc.org/schema.json",
     "name": "ts-spark-connector",
-    "entryPoints": ["src/index.ts"],
+    "entryPoints": ["src/index.ts", "src/aws/index.ts"],
     "tsconfig": "tsconfig.json",
     "out": "docs-site",
     "readme": "README.md",

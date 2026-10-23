@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     DataFrameWriterV2,
     MergeIntoWriter,
@@ -119,6 +119,11 @@ describe("DataFrameWriterV2", () => {
 });
 
 describe("MergeIntoWriter", () => {
+    // MERGE is a Spark 4.0 command, checked against the server version.
+    beforeEach(() => {
+        vi.spyOn(SparkSession.prototype, "version").mockResolvedValue("4.0.4");
+    });
+
     const condition = col("t.id").eq(col("s.id"));
 
     it("builds every clause kind in order", () => {

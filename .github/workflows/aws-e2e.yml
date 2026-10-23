@@ -1,0 +1,109 @@
+# Runs test/aws-services.aws.test.ts (`npm run test:aws`) against real AWS:
+# EMR Serverless, AWS Glue and Amazon Athena for Apache Spark. Every selected
+# service starts real Spark sessions, and they bill while they run, so this
+# workflow is manual only and never runs on push or pull_request.
+#
+# The role it assumes (AWS_E2E_ROLE_ARN) comes from infra/aws-e2e: deploy the
+# stack with GitHubOidcProviderArn set and copy its GitHubActionsRoleArn
+# output. The other repository variables are the stack's other outputs; see
+# infra/aws-e2e/README.md and TESTING.md.
+name: AWS E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: Services to test
+        type: choice
+        options:
+          - all
+          - emr-serverless
+          - glue
+          - athena
+        default: all
+
+permissions:
+  contents: read
+  id-token: write
+
+# Two runs at once would start twice the sessions on the same resources.
+concurrency:
+  group: aws-e2e
+  cancel-in-progress: false
+
+jobs:
+  aws:
+    name: Real AWS services
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # Node 22 ships npm 10 and Node 24 ships npm 11, and the two disagree on how
+      # optional peer dependencies are recorded, so no single lockfile satisfies
+      # both: a lockfile written by npm 11 makes npm 10 fail `npm ci` with
+      # "Missing: conventional-commits-filter". Pin every job to one major.
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The suite skips a service whose variables are unset, so a run with
+      # nothing configured would pass without testing anything. Checked before
+      # assuming the role, so a missing variable fails with a clear message.
+      - name: Check the selected services are configured
+        env:
+          SERVICES: ${{ inputs.services }}
+          ROLE_ARN: ${{ vars.AWS_E2E_ROLE_ARN }}
+          REGION: ${{ vars.AWS_E2E_REGION }}
+          EMR_APPLICATION_ID: ${{ vars.AWS_E2E_EMR_APPLICATION_ID }}
+          EMR_EXECUTION_ROLE_ARN: ${{ vars.AWS_E2E_EMR_EXECUTION_ROLE_ARN }}
+          GLUE_ROLE_ARN: ${{ vars.AWS_E2E_GLUE_ROLE_ARN }}
+          ATHENA_WORKGROUP: ${{ vars.AWS_E2E_ATHENA_WORKGROUP }}
+        run: |
+          if [ -z "$ROLE_ARN" ] || [ -z "$REGION" ]; then
+            echo "::error title=AWS access not configured::Set the AWS_E2E_ROLE_ARN and AWS_E2E_REGION repository variables (see infra/aws-e2e/README.md)."
+            exit 1
+          fi
+          configured=0
+          if [ "$SERVICES" = all ] || [ "$SERVICES" = emr-serverless ]; then
+            if [ -n "$EMR_APPLICATION_ID" ] && [ -n "$EMR_EXECUTION_ROLE_ARN" ]; then
+              configured=1
+            fi
+          fi
+          if [ "$SERVICES" = all ] || [ "$SERVICES" = glue ]; then
+            if [ -n "$GLUE_ROLE_ARN" ]; then
+              configured=1
+            fi
+          fi
+          if [ "$SERVICES" = all ] || [ "$SERVICES" = athena ]; then
+            if [ -n "$ATHENA_WORKGROUP" ]; then
+              configured=1
+            fi
+          fi
+          if [ "$configured" = 0 ]; then
+            echo "::error title=No AWS service configured::The selected services ($SERVICES) have no repository variables set, so every test would skip. Set AWS_E2E_EMR_APPLICATION_ID and AWS_E2E_EMR_EXECUTION_ROLE_ARN, AWS_E2E_GLUE_ROLE_ARN or AWS_E2E_ATHENA_WORKGROUP (see infra/aws-e2e/README.md)."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_E2E_REGION }}
+          role-session-name: ts-spark-connector-aws-e2e
+
+      - name: Run real AWS tests
+        run: npm run test:aws
+        env:
+          AWS_REGION: ${{ vars.AWS_E2E_REGION }}
+          TS_SPARK_AWS_EMR_APPLICATION_ID: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && vars.AWS_E2E_EMR_APPLICATION_ID || '' }}
+          TS_SPARK_AWS_EMR_EXECUTION_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'emr-serverless') && vars.AWS_E2E_EMR_EXECUTION_ROLE_ARN || '' }}
+          TS_SPARK_AWS_GLUE_ROLE_ARN: ${{ (inputs.services == 'all' || inputs.services == 'glue') && vars.AWS_E2E_GLUE_ROLE_ARN || '' }}
+          TS_SPARK_AWS_ATHENA_WORKGROUP: ${{ (inputs.services == 'all' || inputs.services == 'athena') && vars.AWS_E2E_ATHENA_WORKGROUP || '' }}

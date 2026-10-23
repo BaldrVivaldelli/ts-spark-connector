@@ -385,7 +385,7 @@ export const FUNCTION_CATALOG: CatalogFunction[] = [
     {"name":"median","sql":"median","params":[{"name":"col","kind":"column","variadic":false,"optional":false}]},
     {"name":"min","sql":"min","params":[{"name":"col","kind":"column","variadic":false,"optional":false}]},
     {"name":"min_by","sql":"min_by","params":[{"name":"col","kind":"column","variadic":false,"optional":false},{"name":"ord","kind":"column","variadic":false,"optional":false}]},
-    {"name":"mode","sql":"mode","params":[{"name":"col","kind":"column","variadic":false,"optional":false},{"name":"deterministic","kind":"bool","variadic":false,"optional":false,"default":"false"}]},
+    {"name":"mode","sql":"mode","params":[{"name":"col","kind":"column","variadic":false,"optional":false},{"name":"deterministic","kind":"bool","variadic":false,"optional":true}]},
     {"name":"percentile","sql":"percentile","params":[{"name":"col","kind":"column","variadic":false,"optional":false},{"name":"percentage","kind":"any","variadic":false,"optional":false},{"name":"frequency","kind":"int","variadic":false,"optional":false,"default":"1"}]},
     {"name":"percentile_approx","sql":"percentile_approx","params":[{"name":"col","kind":"column","variadic":false,"optional":false},{"name":"percentage","kind":"any","variadic":false,"optional":false},{"name":"accuracy","kind":"int","variadic":false,"optional":false,"default":"10000"}]},
     {"name":"product","sql":"product","params":[{"name":"col","kind":"column","variadic":false,"optional":false}]},

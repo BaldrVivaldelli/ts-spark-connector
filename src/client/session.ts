@@ -267,6 +267,8 @@ function rangeBound(label: string, value: number | bigint): bigint {
 }
 /** gRPC status UNAVAILABLE: the server cannot be reached, so further cleanup RPCs are pointless. */
 const GRPC_UNAVAILABLE = 14;
+/** gRPC status UNIMPLEMENTED: the server predates the RPC (ReleaseSession arrived in Spark 4.0). */
+const GRPC_UNIMPLEMENTED = 12;
 
 /** @public */
 export class SparkSession implements SessionAlgebra {
@@ -287,6 +289,7 @@ export class SparkSession implements SessionAlgebra {
     private serverVersion?: Promise<string>;
     private readonly cachedRelationIds = new Set<string>();
     private streamingQueryManager?: StreamingQueryManager;
+    private readonly closeHooks: Array<() => Promise<void>> = [];
     /** Connection config as given to the builder, before runtime `conf.set()` mirrors into it. */
     private builderConnectionConfig: SparkConnectionConfig;
 
@@ -850,11 +853,24 @@ export class SparkSession implements SessionAlgebra {
     }
 
     /**
+     * @internal Runs `hook` once when this session closes, after its own
+     * remote state was released and its channel closed, to stop what the
+     * session ran on (the AWS helpers terminate their managed Spark session
+     * here). A hook that fails rejects `close()`, which has closed the session
+     * by then. Clones and new sessions do not inherit hooks.
+     */
+    addCloseHook(hook: () => Promise<void>): void {
+        this.assertOpen();
+        this.closeHooks.push(hook);
+    }
+
+    /**
      * Releases remote session state and closes the cached gRPC channel.
      * Idempotent. Local state is released even when the server cannot be
      * reached: the session is closed afterwards and the ReleaseSession failure
      * is rethrown so the caller knows remote state may linger until Spark's
-     * session timeout.
+     * session timeout. Spark 3.5 servers have no ReleaseSession and free the
+     * session on that timeout, so closing against them succeeds locally.
      */
     async close(): Promise<void> {
         if (this.closed) return;
@@ -880,9 +896,12 @@ export class SparkSession implements SessionAlgebra {
                     this.observeServerSideSessionId(response);
                 } catch (error) {
                     this.observeRemoteError(error);
-                    // A stale identity has no remote session left to release;
-                    // any other failure is reported after local cleanup.
-                    if (!this.invalidatedError) releaseFailure = { error };
+                    // A stale identity has no remote session left to release,
+                    // and a server without ReleaseSession has nothing to
+                    // release on request; any other failure is reported after
+                    // local cleanup.
+                    const unimplemented = (error as { code?: unknown } | null)?.code === GRPC_UNIMPLEMENTED;
+                    if (!this.invalidatedError && !unimplemented) releaseFailure = { error };
                 }
             }
             this.closed = true;
@@ -891,7 +910,16 @@ export class SparkSession implements SessionAlgebra {
                 this.clientRetained = false;
                 this.clientCacheIdentity = undefined;
             }
+            let hookFailure: { error: unknown } | undefined;
+            for (const hook of this.closeHooks.splice(0)) {
+                try {
+                    await hook();
+                } catch (error) {
+                    hookFailure ??= { error };
+                }
+            }
             if (releaseFailure) throw releaseFailure.error;
+            if (hookFailure) throw hookFailure.error;
         })().finally(() => {
             this.closePromise = undefined;
         });

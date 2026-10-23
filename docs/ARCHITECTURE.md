@@ -47,6 +47,7 @@ describe the same query.
 | Interpreters | `src/engine/compilerRead.ts` (proto), `src/read/readDataFrameInterpreter.ts` (logical plan), `src/trace/trace.ts` (trace), `src/write/compilerWrite.ts` (writes) | One implementation of each algebra per output format. |
 | Client | `src/client/*` | `SparkSession` and its builder, request building (`sparkConnectExecutor.ts`), gRPC channel cache and RPCs (`sparkClient.ts`), reattachable execution, retries, errors, telemetry, credentials, catalog, per-execution options and server-version gating. |
 | Arrow | `src/typed/arrow-rows.ts`, `src/typed/arrow-encode.ts` | Decode result batches into rows; encode `createDataFrame` rows. |
+| AWS | `src/aws/*` | The `ts-spark-connector/aws` entry: one shared lifecycle (`managedSession.ts`: start or attach, wait, token provider, close hook) and a small driver per service over its AWS SDK client, which is loaded lazily. |
 | Protocol | `proto/spark/connect/*.proto` | Vendored Spark 4.2.0 descriptors, loaded at runtime with `@grpc/proto-loader` and `keepCase: true`, so request objects use the proto's snake_case field names. |
 
 ## Adding an operation, end to end
@@ -75,10 +76,14 @@ session API; skip the steps that do not apply.
    `chainAs` with a schema transform when it changes. Validate arguments
    eagerly with the helpers in `src/read/dataframeValidation.ts`, so mistakes
    fail at the call site rather than as a remote Spark error.
-5. **Gate newer protocol features.** If the message or field only exists on
-   Spark 4.1 or newer, call `session.requireServerVersion("4.1.0", "feature()")`
-   before sending it. Older servers then fail with
-   `UnsupportedServerVersionError` without any RPC.
+5. **Gate newer protocol features.** The oldest server in the matrix is
+   3.5.6. If the message or field is newer than that, older servers must fail
+   with `UnsupportedServerVersionError` without any RPC: an async action calls
+   `session.requireServerVersion("4.1.0", "feature()")` before sending it, and
+   a field a lazy DataFrame operation puts into the plan goes into
+   `VERSIONED_FIELDS` in `src/client/serverCompatibility.ts`, which checks
+   every plan before the executor sends it. A new field of a message the old
+   server already knows matters most: protobuf drops it there silently.
 6. **Test it.**
    - Unit tests that assert the emitted proto (see
      `test/compilerRead.unit.test.ts`).

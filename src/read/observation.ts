@@ -171,15 +171,23 @@ export function literalValue(input: unknown): unknown {
     }
 }
 
-/** @internal Extracts and decodes the observed metrics carried by an ExecutePlan response. */
-export function observedMetricsOf(response: unknown): ObservedMetrics[] {
+/**
+ * @internal Extracts and decodes the observed metrics carried by an
+ * ExecutePlan response. Servers before 4.0 send the values without `keys`;
+ * `metricNames` then supplies the aliases the plan gave them, by observation
+ * name, and an unaliased value is named by its position (`_1`, `_2`, ...).
+ */
+export function observedMetricsOf(
+    response: unknown,
+    metricNames?: ReadonlyMap<string, ReadonlyArray<string | undefined>>,
+): ObservedMetrics[] {
     const carrier = response as { observed_metrics?: unknown; observedMetrics?: unknown } | null;
     const metrics = carrier?.observed_metrics ?? carrier?.observedMetrics;
     if (!Array.isArray(metrics)) return [];
     return metrics.flatMap(metric => {
         const { name, keys, values } = (metric ?? {}) as { name?: unknown; keys?: unknown; values?: unknown };
         if (typeof name !== "string" || !name) return [];
-        const keyList = Array.isArray(keys) ? keys.map(String) : [];
+        const keyList = Array.isArray(keys) && keys.length > 0 ? keys.map(String) : metricNames?.get(name) ?? [];
         const valueList = Array.isArray(values) ? values : [];
         return [{
             name,
