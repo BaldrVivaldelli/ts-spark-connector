@@ -3762,13 +3762,13 @@ export function min_by(col: ColumnOrName, ord: ColumnOrName): EBuilder {
 }
 
 /**
- * The most frequent value of the group.
+ * The most frequent value of the group; `deterministic` (Spark 4.0+) breaks ties by the lowest value.
  *
  * Spark SQL: `mode`.
  * @public
  */
-export function mode(col: ColumnOrName, deterministic: boolean | EBuilder = false): EBuilder {
-    return invoke("mode", [c(col), l(deterministic)]);
+export function mode(col: ColumnOrName, deterministic?: boolean | EBuilder): EBuilder {
+    return invoke("mode", [c(col)], [maybe(deterministic, l)]);
 }
 
 /**
