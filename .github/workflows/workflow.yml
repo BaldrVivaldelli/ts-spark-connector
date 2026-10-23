@@ -117,6 +117,52 @@ jobs:
         env:
           SPARK_PLAN_BENCH_ITERATIONS: 5000
 
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history: a secret removed in a later commit is still public.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Pin npm
+        run: npm install -g npm@^11.5.1
+
+      # The same version scripts/gitleaks.mjs pins for the pre-commit hook,
+      # checked against the release's published SHA-256.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$archive"
+          echo "$GITLEAKS_SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+
+      - name: Scan the git history
+        run: node scripts/gitleaks.mjs history
+
+      - name: Install dependencies
+        run: npm ci
+
+      # What npm users download, built from this commit.
+      - name: Scan the publishable tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack" "$RUNNER_TEMP/package"
+          npm pack --pack-destination "$RUNNER_TEMP/pack"
+          tar -xzf "$RUNNER_TEMP"/pack/*.tgz -C "$RUNNER_TEMP/package"
+          node scripts/gitleaks.mjs dir "$RUNNER_TEMP/package"
+
   e2e:
     name: E2E / Spark ${{ matrix.spark }}
     needs: unit
@@ -326,7 +372,7 @@ jobs:
 
   release:
     name: Release
-    needs: [unit, package, e2e, bun]
+    needs: [unit, package, secrets, e2e, bun]
     # Runs here, on the real push, rather than in a separate workflow_run. npm
     # builds its provenance predicate from the same environment variables the
     # registry then verifies against the OIDC token, so the spoofed GITHUB_REF and

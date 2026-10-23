@@ -71,6 +71,7 @@
     "api:report": "npm run build && api-extractor run --local && api-extractor run --local -c api-extractor.aws.json",
     "api:check": "npm run build && api-extractor run && api-extractor run -c api-extractor.aws.json",
     "package:lint": "node scripts/lint-package.mjs",
+    "secrets:scan": "node scripts/gitleaks.mjs history",
     "sbom": "npm sbom --omit=dev --sbom-format cyclonedx",
     "docs:api": "typedoc",
     "check": "npm run check:typescript && npm run check:functions && npm run typecheck && npm run build && npm run typecheck:test && npm run typecheck:examples && npm run lint && npm run test:coverage && npm run test:proto && npm run check:changelog && npm run api:check && npm run package:lint",
@@ -79,7 +80,7 @@
     "test:docker:cleanup": "docker compose -f docker-compose.test.yml down -v",
     "test:docker:logs": "docker compose -f docker-compose.test.yml logs -f",
     "prepack": "npm run clean && npm run build",
-    "prepare": "npm run build",
+    "prepare": "node scripts/install-git-hooks.mjs && npm run build",
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run",
     "release:observe": "node scripts/observe-release.mjs"
