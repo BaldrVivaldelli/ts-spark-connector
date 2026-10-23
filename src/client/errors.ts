@@ -179,6 +179,14 @@ function metadataErrorInfo(metadata?: grpc.Metadata): SparkGrpcErrorInfo | undef
     return undefined;
 }
 
+/**
+ * Spark prefixes the message of a classified error with its class
+ * (`[UNRESOLVED_COLUMN.WITH_SUGGESTION] ...`). Servers before 4.0 put the
+ * class neither in ErrorInfo nor behind FetchErrorDetails, so the message is
+ * the only place it can be read from.
+ */
+const MESSAGE_ERROR_CLASS = /^\[([A-Z][A-Z0-9_]*(?:\.[A-Z][A-Z0-9_]*)*)\]/;
+
 /** @internal Converts raw grpc-js failures without hiding aborts or existing wrappers. */
 export function asSparkConnectError(error: unknown, operation: string): Error {
     if (error instanceof SparkConnectError) return error;
@@ -198,7 +206,10 @@ export function asSparkConnectError(error: unknown, operation: string): Error {
         errorId: source?.errorId ?? source?.error_id
             ?? errorInfo?.metadata.errorId
             ?? metadataErrorId(source?.metadata),
-        errorClass: source?.errorClass ?? errorInfo?.metadata.errorClass ?? errorInfo?.reason,
+        errorClass: source?.errorClass
+            ?? errorInfo?.metadata.errorClass
+            ?? MESSAGE_ERROR_CLASS.exec(details ?? "")?.[1]
+            ?? errorInfo?.reason,
         errorInfo,
         cause: error,
     });
